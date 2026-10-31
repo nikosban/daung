@@ -37,21 +37,34 @@ and the project has none installed.
 
 ## Movement
 
-Status: Task 1b implemented — orders, direct route, locomotion, states
-`Idle`/`Moving`/`Arrived` and events, with a single direct translation
-writer. Collision and `Blocked` (1c), static navigation and `order_failed`
-(1d) and avoidance (1e) are still planned; engine mechanisms named for them
-are candidate choices, not verified behavior.
+Status: Tasks 1b–1c implemented — orders, direct route, locomotion, planar
+collision through one `move_and_collide()` commit, all four states and
+`order_completed`. Static navigation and `order_failed` (1d) and avoidance
+(1e) are still planned; engine mechanisms named for them are candidate
+choices, not verified behavior.
 
 ### Files
 
 | File | Role |
 |---|---|
-| `Movement/movement_controller.gd` | `MovementController`: the controller, route seam, route follower and locomotion |
+| `Movement/movement_controller.gd` | `MovementController`: the controller, route seam, route follower, locomotion and collision commit |
 | `Movement/movement_profile.gd` | `MovementProfile` `Resource` class |
-| `Movement/ship.tscn` | Reusable ship: `CharacterBody3D` root with the controller; replaceable `Visual` child holding the model |
-| `Movement/Profiles/*.tres` | One `MovementProfile` per ship type |
-| `Movement/Check/movement_check.tscn` | Permanent MovementCheck scene (right-click `move_to`, `C` `stop`) |
+| `Movement/ship.tscn` | Reusable ship: `CharacterBody3D` root with the controller, `Footprint` collision shape and replaceable `Visual` child holding the model |
+| `Movement/Profiles/*_movement.tres` | One `MovementProfile` per ship type |
+| `Movement/Profiles/*_footprint.tres` | One `CylinderShape3D` footprint per ship type |
+| `Movement/Check/movement_check.gd` | Shared check script: number keys select a ship, right-click `move_to`, `C` `stop` |
+| `Movement/Check/movement_check.tscn` | Permanent MovementCheck scene: one ship in open space |
+| `Movement/Check/collision_check.tscn` | Permanent collision check: Lane A (ship 1 → obstacle), Lane B (ship 2 → ship 3) |
+| `Movement/Check/obstacle.tscn` | Check-scene obstacle fixture (`StaticBody3D` box); not a game obstacle system |
+
+### Physics layers
+
+Numbered layers, set in scenes; `project.godot` names none.
+
+| Layer | Used by | Mask |
+|---|---|---|
+| 1 | Ships | 1 + 2 (ships and obstacles) |
+| 2 | Static obstacles | none |
 
 ### Shape
 
@@ -177,8 +190,21 @@ Blocked (1c):
   tick; no extra scheduler.
 - Blocked only when an active movement request is obstructed by collision
   and lacks physical progress — not while turning, slowly accelerating, or
-  already at the destination. The detection tolerance is a 1c technical
-  parameter.
+  already at the destination.
+- Rule (1c), evaluated after the commit and before arrival:
+  - **Enter** `Blocked`: `move_and_collide()` reported a collision and
+    actual speed < `blocked_speed_tolerance`.
+  - **Stay** `Blocked` while actual speed < `blocked_speed_tolerance`, with
+    or without a reported collision. Engine contact recovery pushes a
+    pressed ship back by about the safe margin, so it creeps a few ticks
+    without a reported contact.
+  - **Leave** `Blocked` → `Moving` once actual speed reaches the tolerance.
+  - On a `Blocked` tick, arrival is not evaluated.
+  - Within `arrival_tolerance`, a `test_move()` query (moves nothing) toward
+    the goal also gives `Blocked` instead of `Arrived` if a contact lies
+    short of the goal.
+- A blocked ship's reconciled velocity is near zero (observed below
+  0.04 units/s from contact recovery), never its intended velocity.
 
 ### Routes and maps
 
@@ -197,11 +223,15 @@ Blocked (1c):
 
 - Collision uses a reusable, yaw-independent circular planar envelope
   (circle/cylinder shape), so rotating hulls cannot create overlap.
-- Its radius relates to the `AvoidanceProfile` radius and the
-  `NavigationClearance` class; the exact relationship is set with the
-  owning tickets (1c–1e). The envelope may overestimate hull clearance.
+- The per-type `CylinderShape3D` (`Movement/Profiles/*_footprint.tres`) is
+  the **authoritative physical footprint**. 1d navigation clearance and 1e
+  avoidance radius must derive from it or be reconciled with it explicitly;
+  no independent conflicting radii. The envelope overestimates hull
+  clearance (frigate: radius 10.5 around a 5.9-wide hull).
 - Fixed obstacles and other ships both block; a ship stops rather than
-  overlaps.
+  overlaps. No sliding: `move_and_collide()` discards motion past the
+  contact, so a grazing contact also blocks. The body has
+  `axis_lock_linear_y`, keeping contact recovery on the XZ plane.
 
 ### Edge cases
 
@@ -226,12 +256,16 @@ large formations.
 - Circular footprint overestimates hull clearance.
 - Native RVO predicts imperfectly for slow-turning ships.
 - Multiple static route maps, one per clearance class.
-- No global traffic scheduler, by design.
+- No global traffic scheduler, by design. Two ships blocking each other head
+  on wait indefinitely (observed in 1c).
 
 ### Open
 
-- UNKNOWN: native multi-body kinematic blocking (verify in 1c); 2D RVO
-  callback behavior in 4.7 (verify in 1e).
+- Observed in 1c (Jolt, Godot 4.7.2), not a guarantee:
+  - two ships moving head on both stop, with up to 0.006 units of
+    interpenetration (within the engine margin);
+  - contact recovery stays on the XZ plane.
+- UNKNOWN: 2D RVO callback behavior in 4.7 (verify in 1e).
 - UNDECIDED (owner): target fleet scale; unit confirmation. `MovementProfile`
   starting values are owner-confirmed for play; turning feel is judged by
   the owner in play, not by tests.
@@ -246,8 +280,10 @@ fields, units and editor ranges only.
 
 | Asset | Module | Values |
 |---|---|---|
-| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), acceleration (units/s²), braking (units/s²), yaw rate (°/s), arrival tolerance (units) |
+| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), acceleration (units/s²), braking (units/s²), yaw rate (°/s), arrival tolerance (units), blocked speed tolerance (units/s) |
+| Footprint (`CylinderShape3D`) | Movement | Radius (units), height (units) |
 | `AvoidanceProfile` | Movement | Radius, neighbor range, time horizon, neighbor limit |
 | `NavigationClearance` | Movement | Clearance class, route map |
 
-The collision footprint is a reusable body shape, not a profile field.
+The collision footprint is a reusable body shape resource, not a profile
+field. Instances share the per-type resource and never edit it.

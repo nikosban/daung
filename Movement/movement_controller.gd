@@ -52,7 +52,7 @@ func get_desired_direction() -> Vector3:
 
 
 func _physics_process(delta: float) -> void:
-	var has_order := _state == State.MOVING
+	var has_order := _state == State.MOVING or _state == State.BLOCKED
 	if not has_order and velocity.is_zero_approx():
 		velocity = Vector3.ZERO
 		return
@@ -66,11 +66,28 @@ func _physics_process(delta: float) -> void:
 	var rate := profile.acceleration if requested.length() > velocity.length() else profile.braking
 	velocity = velocity.move_toward(requested, rate * delta)
 
-	# Single translation commit. Task 1c replaces this with move_and_collide().
-	global_position += velocity * delta
+	# Single translation commit: the engine moves the body as far as collision
+	# allows. Nothing writes the position afterwards.
+	var start := global_position
+	var collision := move_and_collide(velocity * delta)
 
-	if has_order:
-		_check_arrival()
+	# Reconcile from actual travel, never from the intended motion.
+	var travel := global_position - start
+	travel.y = 0.0
+	velocity = travel / delta
+
+	if not has_order:
+		return
+	# Collision takes precedence over arrival: a blocked tick never completes
+	# the order. The next tick retries with the same order. A contact enters
+	# Blocked; only real progress leaves it, because engine contact recovery
+	# lets a pressed ship creep a margin without reporting a collision.
+	var slow := velocity.length() < profile.blocked_speed_tolerance
+	if slow and (collision != null or _state == State.BLOCKED):
+		_state = State.BLOCKED
+		return
+	_state = State.MOVING
+	_check_arrival()
 
 
 ## Route provider seam. Direct route until Task 1d adds static navigation.
@@ -109,13 +126,19 @@ func _turn_toward(direction: Vector3, delta: float) -> void:
 	rotation.y = rotate_toward(rotation.y, target_yaw, deg_to_rad(profile.yaw_rate) * delta)
 
 
-## Arrives only when the ship is within tolerance and its predicted rest
-## point under braking is also within tolerance.
+## Arrives only when the ship is within tolerance, nothing obstructs the rest
+## of the way to the goal, and its predicted rest point under braking is also
+## within tolerance.
 func _check_arrival() -> void:
 	var offset := _destination - global_position
 	offset.y = 0.0
 	var tolerance := profile.arrival_tolerance
 	if offset.length() > tolerance:
+		return
+	# Query only (moves nothing): a contact short of the goal is Blocked, not
+	# arrived, even on a tick where the commit reported no collision.
+	if test_move(global_transform, offset):
+		_state = State.BLOCKED
 		return
 	var stopping_travel := velocity * (velocity.length() / (2.0 * profile.braking))
 	if (offset - stopping_travel).length() > tolerance:

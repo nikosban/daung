@@ -3,10 +3,16 @@
 [ext_resource type="Script" path="res://Movement/movement_controller.gd" id="1_controller"]
 [ext_resource type="Resource" path="res://Movement/Profiles/arrata_frigate_movement.tres" id="2_profile"]
 [ext_resource type="PackedScene" path="res://Assets/Ships/Whitebox/Arrata_Frigate_001.glb" id="3_model"]
+[ext_resource type="Shape3D" path="res://Movement/Profiles/arrata_frigate_footprint.tres" id="4_footprint"]
 
 [node name="Ship" type="CharacterBody3D"]
+collision_mask = 3
+axis_lock_linear_y = true
 script = ExtResource("1_controller")
 profile = ExtResource("2_profile")
+
+[node name="Footprint" type="CollisionShape3D" parent="."]
+shape = ExtResource("4_footprint")
 
 [node name="Visual" type="Node3D" parent="."]
 
