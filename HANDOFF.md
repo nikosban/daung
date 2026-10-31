@@ -4,9 +4,13 @@ Current state only. Replace outdated content; do not append history.
 
 ## Current state
 
-Empty Godot 4.7 project (Forward Plus, Jolt Physics). No gameplay code or
-scenes. Ship movement is documented in `ARCHITECTURE.md` (Movement) but
-**not implemented**.
+Godot 4.7 project (Forward Plus, Jolt Physics). Task 1b movement works in
+open space: one reusable ship (`Movement/ship.tscn`, owner placeholder
+model `Arrata_Frigate_001`) takes `move_to()` / `stop()` orders, accelerates
+and brakes per its `MovementProfile`, slides sideways while yaw turns
+gradually, and emits `order_completed` once on arrival. Try it in
+`Movement/Check/movement_check.tscn` (F6; right-click to move, `C` to stop).
+No collision, obstacle routing or ship avoidance yet.
 
 ## Accepted decisions
 
@@ -30,18 +34,32 @@ scenes. Ship movement is documented in `ARCHITECTURE.md` (Movement) but
 - Fixed obstacles and other ships both block — owner answer.
 - Speeds conservative; tuning numbers set by the owner in play — owner
   answer.
+- Starting `MovementProfile` for `Arrata_Frigate_001`: forward 5 units/s,
+  lateral 1.5 units/s, acceleration 1.0 units/s², braking 1.5 units/s², yaw
+  20°/s, arrival tolerance 1.0 units — owner: "I agree" (Task 1b).
+- No commanded reverse; a target behind is reached by turning and sliding
+  sideways — owner: "I agree" (Task 1b).
+- Limits apply to the requested velocity; actual velocity changes only at
+  the acceleration/braking rate (Task 1b).
+- Arrival requires actual position and predicted rest point within
+  tolerance (Task 1b).
 
 ## Known limitations
 
+- Until 1c, ships pass through everything, the ship body has no collision
+  shape (Godot shows a "no shape" configuration warning on it), and
+  `Blocked` is never entered.
+- Until 1d, routes are a straight line to the destination and `order_failed`
+  never fires.
 - Circular collision footprint overestimates hull clearance.
 - Native RVO predicts imperfectly for slow-turning ships.
 - One static route map per clearance class.
 - No global traffic scheduler.
 - QA deferred: congestion deadlock resolution, hull-exact rotating contact,
   large formations.
-- UNDECIDED (owner): movement tuning numbers, fleet scale, unit
-  confirmation.
+- UNDECIDED (owner): final movement feel (tuned in play), fleet scale,
+  unit confirmation.
 
 ## Next task
 
-#3 — Task 1b: Implement reusable ship movement and orders.
+#4 — Task 1c: Add planar collisions and blocked-order retry.

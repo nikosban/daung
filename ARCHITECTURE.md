@@ -37,8 +37,21 @@ and the project has none installed.
 
 ## Movement
 
-Status: planned (Task 1a). Nothing below is implemented yet. Engine
-mechanisms named here are candidate choices, not verified behavior.
+Status: Task 1b implemented — orders, direct route, locomotion, states
+`Idle`/`Moving`/`Arrived` and events, with a single direct translation
+writer. Collision and `Blocked` (1c), static navigation and `order_failed`
+(1d) and avoidance (1e) are still planned; engine mechanisms named for them
+are candidate choices, not verified behavior.
+
+### Files
+
+| File | Role |
+|---|---|
+| `Movement/movement_controller.gd` | `MovementController`: the controller, route seam, route follower and locomotion |
+| `Movement/movement_profile.gd` | `MovementProfile` `Resource` class |
+| `Movement/ship.tscn` | Reusable ship: `CharacterBody3D` root with the controller; replaceable `Visual` child holding the model |
+| `Movement/Profiles/*.tres` | One `MovementProfile` per ship type |
+| `Movement/Check/movement_check.tscn` | Permanent MovementCheck scene (right-click `move_to`, `C` `stop`) |
 
 ### Shape
 
@@ -58,7 +71,7 @@ Other systems use Movement only through this boundary:
 |---|---|---|
 | `move_to(world_position)` | order | Replaces any active order with a new destination. |
 | `stop()` | order | Cancels the active order. |
-| movement state | read-only | `Idle`, `Moving`, `Blocked` or `Arrived` (see States). |
+| `get_state()`, `get_destination()`, `get_desired_direction()` | read-only | State is `Idle`, `Moving`, `Blocked` or `Arrived` (see States). |
 | `order_completed` | event | Emitted once when the active order arrives. |
 | `order_failed` | event | Emitted once when the active order's route is unreachable. |
 
@@ -93,6 +106,13 @@ Run in this order each tick. Each is introduced by the ticket shown.
 | 4 | Locomotion | Nothing persistent beyond the controller's state | Corrected request, actual velocity and yaw, `MovementProfile`, delta | Feasible translational velocity and controlled yaw | 1b |
 | 5 | Planar Collision | Nothing; engine moves the body | Proposed displacement, footprint, world geometry | Body moved once; collision/contact and actual travel | 1c |
 | 6 | Controller state/commit | Order, actual velocity, yaw, state, events | Actual travel and collision result | Reconciled velocity, state, events | 1b (extended in 1c–1e) |
+
+Locomotion (1b): the requested velocity is limited to the hull's current
+forward and lateral axes, with no commanded reverse (a target behind is
+reached by turning and sliding sideways). Actual velocity then moves toward
+that request at `acceleration` (speeding up) or `braking` (slowing down) and
+is never clamped afterwards, so a yaw change cannot snap speed. Yaw turns
+toward the desired direction at `yaw_rate`.
 
 Before 1d, the route is the straight line to the destination. Before 1e,
 avoidance passes preferred movement through unchanged.
@@ -140,7 +160,10 @@ Order lifecycle:
   pending results (routes, avoidance callbacks). No order queue.
 - `stop()` cancels the order → `Idle`. No completion or failure event.
 - Unreachable static route → `order_failed` once, order cleared, `Idle`.
-- Arrival (from actual position) → `order_completed` once, `Arrived`.
+- Arrival → `order_completed` once, `Arrived`. Arrival requires the actual
+  position and the predicted rest point under `braking` (position +
+  velocity × |velocity| / (2 × braking)) to both be within
+  `arrival_tolerance` of the goal.
 - These are order-state semantics. Neither `stop()` nor arrival instantly
   zeroes actual velocity; remaining velocity is removed by the
   no-active-order braking path (see Physics tick) using `MovementProfile`
@@ -209,8 +232,8 @@ large formations.
 
 - UNKNOWN: native multi-body kinematic blocking (verify in 1c); 2D RVO
   callback behavior in 4.7 (verify in 1e).
-- UNDECIDED (owner): numeric speed, acceleration, braking, yaw rate and
-  ranges; target fleet scale; unit confirmation. Turning feel is judged by
+- UNDECIDED (owner): target fleet scale; unit confirmation. `MovementProfile`
+  starting values are owner-confirmed for play; turning feel is judged by
   the owner in play, not by tests.
 
 ## Data assets
@@ -218,11 +241,12 @@ large formations.
 All Movement assets are Godot `Resource`s. They hold configuration only;
 runtime per-ship state is never stored in a shared profile. Defaults, units
 and ranges are set in the implementation tickets and are UNDECIDED (owner)
-until confirmed.
+until confirmed. Values live in the `.tres` assets; the script declares
+fields, units and editor ranges only.
 
 | Asset | Module | Values |
 |---|---|---|
-| `MovementProfile` | Movement | Max forward speed, max lateral speed, acceleration, braking, yaw rate, arrival tolerance |
+| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), acceleration (units/s²), braking (units/s²), yaw rate (°/s), arrival tolerance (units) |
 | `AvoidanceProfile` | Movement | Radius, neighbor range, time horizon, neighbor limit |
 | `NavigationClearance` | Movement | Clearance class, route map |
 
