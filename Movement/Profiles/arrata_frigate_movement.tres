@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="MovementProfile" format=3]
+
+[ext_resource type="Script" path="res://Movement/movement_profile.gd" id="1_profile"]
+
+[resource]
+script = ExtResource("1_profile")
+max_forward_speed = 5.0
+max_lateral_speed = 1.5
+acceleration = 1.0
+braking = 1.5
+yaw_rate = 20.0
+arrival_tolerance = 1.0
