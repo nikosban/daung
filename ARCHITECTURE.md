@@ -108,6 +108,15 @@ avoidance passes preferred movement through unchanged.
 7. Measure actual displacement; reconcile velocity; update state and
    events.
 
+No-active-order braking: after `stop()` or arrival there is no active
+order, but the tick keeps running while actual velocity is non-zero. Steps
+2–4 are skipped; locomotion receives zero desired translation and reduces
+velocity at the `MovementProfile` braking limit until stationary. Steps 6–7
+run as usual, through the same single commit (direct in 1b;
+`move_and_collide()` from 1c, so braking motion cannot bypass collision).
+State stays `Idle` or `Arrived` and no event is emitted. No order queue,
+new state, separate deceleration algorithm or new values.
+
 Scheduling:
 
 - **Avoidance disabled:** steps 5–7 run in `_physics_process`.
@@ -133,7 +142,9 @@ Order lifecycle:
 - Unreachable static route → `order_failed` once, order cleared, `Idle`.
 - Arrival (from actual position) → `order_completed` once, `Arrived`.
 - These are order-state semantics. Neither `stop()` nor arrival instantly
-  zeroes actual velocity; braking is governed by `MovementProfile` (1b).
+  zeroes actual velocity; remaining velocity is removed by the
+  no-active-order braking path (see Physics tick) using `MovementProfile`
+  braking (1b).
 
 Blocked (1c):
 

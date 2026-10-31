@@ -21,6 +21,9 @@ scenes. Ship movement is documented in `ARCHITECTURE.md` (Movement) but
 - Order lifecycle: `move_to()` supersedes silently; `stop()` → `Idle` with
   no event; unreachable → `order_failed` once, `Idle`; arrival →
   `order_completed` once, `Arrived` (Task 1a).
+- After `stop()` or arrival, the ship brakes at its `MovementProfile`
+  braking limit through the same single movement commit until stationary;
+  no snap to rest, no drift, no hidden order (Task 1a).
 - Blocked retains the order and retries local movement every physics tick;
   no rerouting, cancelling or teleporting — owner: "Wait and retry".
 - Lateral translation with gradual, controlled yaw — owner answer.
