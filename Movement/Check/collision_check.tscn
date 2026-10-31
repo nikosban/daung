@@ -1,0 +1,53 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://Movement/Check/movement_check.gd" id="1_check"]
+[ext_resource type="PackedScene" path="res://Movement/ship.tscn" id="2_ship"]
+[ext_resource type="PackedScene" path="res://Movement/Check/obstacle.tscn" id="3_obstacle"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+size = Vector2(400, 400)
+
+[node name="CollisionCheck" type="Node3D"]
+script = ExtResource("1_check")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 150, 15)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866025, 0, -0.866025, 0.5, 0, 50, 0)
+
+[node name="Ground" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -5, 0)
+mesh = SubResource("PlaneMesh_ground")
+
+[node name="LaneALabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, -40, 1, 72)
+pixel_size = 0.12
+font_size = 64
+text = "Lane A
+ship 1 -> obstacle"
+
+[node name="LaneBLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 40, 1, 72)
+pixel_size = 0.12
+font_size = 64
+text = "Lane B
+ship 2 -> ship 3"
+
+[node name="Ship1" parent="." instance=ExtResource("2_ship")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0, 50)
+
+[node name="Ship2" parent="." instance=ExtResource("2_ship")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0, 50)
+
+[node name="Ship3" parent="." instance=ExtResource("2_ship")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0, -10)
+
+[node name="Obstacle" parent="." instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0, -10)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Label" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 16.0

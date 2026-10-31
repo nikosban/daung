@@ -16,3 +16,6 @@ extends Resource
 @export_range(1.0, 180.0, 1.0, "suffix:°/s") var yaw_rate: float
 ## Distance from the destination at which an order counts as arrived.
 @export_range(0.05, 10.0, 0.05, "suffix:units") var arrival_tolerance: float
+## Actual speed below which a ship in contact counts as Blocked. Must stay
+## above zero, or no speed is ever below it and Blocked is never entered.
+@export_range(0.01, 1.0, 0.01, "suffix:units/s") var blocked_speed_tolerance: float
