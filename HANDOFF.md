@@ -5,7 +5,7 @@ Current state only. Replace outdated content; do not append history.
 ## Current state
 
 Godot 4.7 project (Forward Plus, Jolt Physics). Ship movement works on the
-XZ plane with planar collision (Tasks 1b–1c):
+XZ plane with planar collision and static routing (Tasks 1b–1d):
 
 - One reusable ship (`Movement/ship.tscn`, owner placeholder model
   `Arrata_Frigate_001`) takes `move_to()` / `stop()` orders, accelerates and
@@ -14,16 +14,22 @@ XZ plane with planar collision (Tasks 1b–1c):
 - It moves through one `move_and_collide()` per tick. Ships and obstacles
   block it without sliding; a blocked ship keeps its order, waits and
   resumes on its own when the way clears.
+- In scenes with a `StaticNavigation` node, ships route around fixed
+  obstacles on a pre-baked navmesh for their clearance class (footprint +
+  margin). An order whose exact goal is unreachable fires `order_failed`
+  once and doesn't move.
 - `order_completed` fires once on arrival.
 
 Check scenes (F6 with the tab active, or Run Specific Scene; number keys
-select a ship, right-click to move, `C` to stop):
+select a ship, right-click to move, `C` to stop; the route is drawn in blue):
 
-- `Movement/Check/movement_check.tscn`: one ship in open space;
+- `Movement/Check/movement_check.tscn`: one ship in open space (direct route);
 - `Movement/Check/collision_check.tscn`: Lane A ship vs obstacle, Lane B
-  ship vs ship.
+  ship vs ship (direct route);
+- `Movement/Check/routing_check.tscn`: Reachable marker behind a wall,
+  Unreachable marker inside an enclosure.
 
-No obstacle routing or ship avoidance yet.
+No ship avoidance yet.
 
 ## Accepted decisions
 
@@ -59,11 +65,54 @@ No obstacle routing or ship avoidance yet.
   for 1d/1e.
 - No sliding; a grazing contact also blocks until the path clears — owner:
   "I accept" (Task 1c).
+- Clearance margin 2 units beyond the footprint (frigate bake radius 12.5);
+  waypoint tolerance 2.0 units — owner: "Approved" (Task 1d).
+- Corner berth: keep the default bake and accept reduced berth at obstacle
+  corners — owner: option A (Task 1d).
+- Static navigation (Task 1d review):
+  - scene-owned navigation maps per clearance class and pre-baked
+    navmeshes;
+  - direct route only by explicit `direct_route`;
+  - route validation requires the exact goal on the clearance navmesh and
+    the path ending at the goal itself;
+  - readiness probes each region's interior;
+  - planar (XZ) segment progress that never advances before a corner is
+    passed or goes back.
+- Route steering: pure pursuit 2.0 units ahead along the route, and a new
+  `MovementProfile.corner_drift_limit` of 0.5 units (range 0.1–2.0); the
+  observed minimum clearance falls below the former 11.42 (no contact) —
+  owner approval on PR #10 (Task 1d).
+- Route speed and facing (owner decisions after the PR #10 trace):
+  - one speed plan per route; a physical turn made of several route points
+    holds its speed throughout;
+  - between nearby corners, a steady speed instead of a brief speed-up and
+    brake; longer straights accelerate normally;
+  - the hull faces the route's direction while translation corrects drift,
+    so the ship slides instead of rotating for small corrections;
+  - translation and gradual rotation start together.
 
 ## Known limitations
 
-- Until 1d, routes are a straight line to the destination, so a ship ordered
-  through an obstacle stays `Blocked`, and `order_failed` never fires.
+- A destination closer to an obstacle than footprint + margin is
+  unreachable (`order_failed`), even if it looks open.
+- Reduced berth at obstacle corners, accepted by the owner (option A; to
+  reassess in real levels):
+  - the 2-unit berth holds beside straight obstacle sides (baked edge exactly
+    12.5);
+  - around obstacle corners, Godot's erosion puts the route as close as
+    11.29; the ship tracks the route closely and passes at ≥ 11.27 on
+    forward routes and 11.21 on one reverse pass after an order replacement
+    (0.71 beyond the footprint), with no contact. Accepted as tested, not a
+    guaranteed floor.
+- Steady speed through closely spaced corners makes those routes slower
+  (Reachable: about 6 s longer than with speed-ups between corners).
+- After an order replacement that leaves the ship far off its new route,
+  it slides back with a small overshoot (about 1 unit) and one brief speed
+  trim of about 0.3 units/s; it doesn't rotate the hull for it.
+- Navmeshes are pre-baked: after moving an obstacle, re-bake the scene's
+  region in the editor. No dynamic map changes.
+- Only the frigate clearance class exists; other classes need owner-confirmed
+  ship sizes.
 - Until 1e, ships do not avoid each other; two ships blocking each other
   head on wait indefinitely.
 - The circular footprint overestimates hull clearance: the frigate blocks a
@@ -80,4 +129,7 @@ No obstacle routing or ship avoidance yet.
 
 ## Next task
 
-#5 — Task 1d: Add static navigation and route following.
+After #5 merges: a separate ticket for limited reverse translation while
+rotating (agreed direction on PR #10; frigate `max_reverse_speed` 1.5
+units/s, delegated to the tech lead). Then #6 — Task 1e: Add predictive ship
+avoidance.

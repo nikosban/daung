@@ -1,0 +1,126 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://Movement/Check/movement_check.gd" id="1_check"]
+[ext_resource type="PackedScene" path="res://Movement/ship.tscn" id="2_ship"]
+[ext_resource type="PackedScene" path="res://Movement/Check/obstacle.tscn" id="3_obstacle"]
+[ext_resource type="Script" path="res://Movement/static_navigation.gd" id="4_navigation"]
+[ext_resource type="Script" path="res://Movement/clearance_region.gd" id="5_region"]
+[ext_resource type="NavigationMesh" path="res://Movement/Check/routing_check_frigate_navmesh.tres" id="6_navmesh"]
+[ext_resource type="Resource" path="res://Movement/Profiles/arrata_frigate_clearance.tres" id="7_clearance"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+size = Vector2(400, 400)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_reachable"]
+albedo_color = Color(0.2, 0.6, 0.25, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_reachable"]
+material = SubResource("StandardMaterial3D_reachable")
+top_radius = 3.0
+bottom_radius = 3.0
+height = 0.2
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_unreachable"]
+albedo_color = Color(0.8, 0.5, 0.1, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_unreachable"]
+material = SubResource("StandardMaterial3D_unreachable")
+top_radius = 3.0
+bottom_radius = 3.0
+height = 0.2
+
+[node name="RoutingCheck" type="Node3D"]
+script = ExtResource("1_check")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 150, 10)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866025, 0, -0.866025, 0.5, 0, 50, 0)
+
+[node name="StaticNavigation" type="Node" parent="."]
+script = ExtResource("4_navigation")
+
+[node name="FrigateRegion" type="NavigationRegion3D" parent="StaticNavigation"]
+navigation_mesh = ExtResource("6_navmesh")
+script = ExtResource("5_region")
+clearance = ExtResource("7_clearance")
+
+[node name="Ground" type="MeshInstance3D" parent="." groups=["navigation_source"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -2, 0)
+mesh = SubResource("PlaneMesh_ground")
+
+[node name="Wall1" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -80, 0, 0)
+
+[node name="Wall2" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, 0, 0)
+
+[node name="Wall3" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0, 0)
+
+[node name="Enclosure1" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, 0, -40)
+
+[node name="Enclosure2" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 70, 0, -40)
+
+[node name="Enclosure3" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 90, 0, -40)
+
+[node name="Enclosure4" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 110, 0, -40)
+
+[node name="Enclosure5" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, 0, 20)
+
+[node name="Enclosure6" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 70, 0, 20)
+
+[node name="Enclosure7" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 90, 0, 20)
+
+[node name="Enclosure8" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 110, 0, 20)
+
+[node name="Enclosure9" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, 0, -20)
+
+[node name="Enclosure10" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, 0, 0)
+
+[node name="Enclosure11" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 110, 0, -20)
+
+[node name="Enclosure12" parent="." groups=["navigation_source"] instance=ExtResource("3_obstacle")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 110, 0, 0)
+
+[node name="ReachableMarker" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, -1.8, -50)
+mesh = SubResource("CylinderMesh_reachable")
+
+[node name="ReachableLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, -60, 1, -59)
+pixel_size = 0.12
+font_size = 64
+text = "Reachable"
+
+[node name="UnreachableMarker" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 80, -1.8, -10)
+mesh = SubResource("CylinderMesh_unreachable")
+
+[node name="UnreachableLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 80, 1, -60)
+pixel_size = 0.12
+font_size = 64
+text = "Unreachable (enclosed)"
+
+[node name="Ship" parent="." node_paths=PackedStringArray("navigation") instance=ExtResource("2_ship")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, 0, 60)
+navigation = NodePath("../StaticNavigation")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Label" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 16.0

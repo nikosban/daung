@@ -36,12 +36,15 @@ ship 2 -> ship 3"
 
 [node name="Ship1" parent="." instance=ExtResource("2_ship")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0, 50)
+direct_route = true
 
 [node name="Ship2" parent="." instance=ExtResource("2_ship")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0, 50)
+direct_route = true
 
 [node name="Ship3" parent="." instance=ExtResource("2_ship")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0, -10)
+direct_route = true
 
 [node name="Obstacle" parent="." instance=ExtResource("3_obstacle")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0, -10)
