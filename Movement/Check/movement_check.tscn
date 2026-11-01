@@ -8,6 +8,7 @@ size = Vector2(400, 400)
 
 [node name="MovementCheck" type="Node3D"]
 script = ExtResource("1_check")
+onset_check_enabled = true
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 150, 0)
@@ -27,3 +28,12 @@ direct_route = true
 [node name="Label" type="Label" parent="HUD"]
 offset_left = 16.0
 offset_top = 16.0
+
+[node name="OnsetLabel" type="Label" parent="HUD"]
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -150.0
+offset_right = -16.0
+offset_bottom = -16.0

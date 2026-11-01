@@ -10,145 +10,7 @@ const STEP := 1.0 / 60.0
 const OUTPUT := "res://builds/issue-14"
 
 
-class ObservedShip extends MovementController:
-	var generation := 0
-	var order_tick := 0
-	var completed: Array[int] = []
-	var completion_ticks: Array[int] = []
-	var failed: Array[int] = []
-	var requested := Vector3.ZERO
-	var trace: FileAccess
-	var first_yaw_tick := 0
-	var distance_before_yaw := 0.0
-	var max_yaw_step := 0.0
-	var max_velocity_step := 0.0
-	var max_free_velocity_error := 0.0
-	var max_reverse_request := 0.0
-	var max_lateral_request := 0.0
-	var max_forward_request := 0.0
-	var max_vertical_travel := 0.0
-	var contact_ticks := 0
-	var blocked_ticks := 0
-	var waypoint_changes := 0
-	var lead_restarts := 0
-	var yaw_positive := 0.0
-	var yaw_negative := 0.0
-	var yaw_direction_changes := 0
-	var _last_turn_sign := 0
-	var _contact := false
-	var _expected_velocity := Vector3.ZERO
-	var _tick_delta := STEP
-
-	func _ready() -> void:
-		super()
-		order_completed.connect(func() -> void:
-			completed.append(generation)
-			completion_ticks.append(order_tick)
-		)
-		order_failed.connect(func() -> void: failed.append(generation))
-
-	func move_to(goal: Vector3) -> void:
-		generation += 1
-		order_tick = 0
-		first_yaw_tick = 0
-		distance_before_yaw = 0.0
-		yaw_direction_changes = 0
-		_last_turn_sign = 0
-		super(goal)
-
-	func _limit_to_hull(preferred: Vector3) -> Vector3:
-		requested = super(preferred)
-		max_reverse_request = maxf(max_reverse_request, requested.dot(global_basis.z))
-		max_forward_request = maxf(max_forward_request, requested.dot(-global_basis.z))
-		max_lateral_request = maxf(max_lateral_request, absf(requested.dot(global_basis.x)))
-		var rate := profile.acceleration if requested.length() > velocity.length() else profile.braking
-		_expected_velocity = velocity.move_toward(requested, rate * _tick_delta)
-		# Query only: the same proposed motion and safe margin as the commit.
-		# The reusable footprint is yaw-independent. No extra position writer.
-		_contact = test_move(global_transform, _expected_velocity * _tick_delta)
-		return requested
-
-	func _physics_process(delta: float) -> void:
-		_tick_delta = delta
-		var before := global_position
-		var before_velocity := velocity
-		var before_yaw := rotation.y
-		var before_lead := _rotation_lead_remaining
-		var before_waypoint := _waypoint
-		var before_generation := generation
-		var rate := profile.braking
-		_expected_velocity = velocity.move_toward(Vector3.ZERO, rate * delta)
-		requested = Vector3.ZERO
-		_contact = false
-		order_tick += 1
-		super(delta)
-		var travel := global_position - before
-		var yaw_step := rad_to_deg(angle_difference(before_yaw, rotation.y))
-		max_yaw_step = maxf(max_yaw_step, absf(yaw_step))
-		max_velocity_step = maxf(max_velocity_step, velocity.distance_to(before_velocity))
-		max_vertical_travel = maxf(max_vertical_travel, absf(travel.y))
-		if not _contact:
-			max_free_velocity_error = maxf(max_free_velocity_error, velocity.distance_to(_expected_velocity))
-		if before_generation == generation:
-			if first_yaw_tick == 0:
-				if absf(yaw_step) > 0.00001:
-					first_yaw_tick = order_tick
-				else:
-					distance_before_yaw += Vector2(travel.x, travel.z).length()
-			if _waypoint != before_waypoint and not _route.is_empty():
-				waypoint_changes += 1
-			if _rotation_lead_remaining > before_lead + 0.000001:
-				lead_restarts += 1
-		if _contact:
-			contact_ticks += 1
-		if get_state() == State.BLOCKED:
-			blocked_ticks += 1
-		yaw_positive += maxf(0.0, yaw_step)
-		yaw_negative += minf(0.0, yaw_step)
-		if absf(yaw_step) > 0.001:
-			var turn_sign := 1 if yaw_step > 0.0 else -1
-			if _last_turn_sign != 0 and _last_turn_sign != turn_sign:
-				yaw_direction_changes += 1
-			_last_turn_sign = turn_sign
-		if trace:
-			trace.store_csv_line(PackedStringArray([
-				str(order_tick), "%.6f" % (order_tick * delta), str(generation),
-				"%.6f" % global_position.x, "%.6f" % global_position.z,
-				"%.6f" % travel.x, "%.6f" % travel.z,
-				"%.6f" % requested.x, "%.6f" % requested.z,
-				"%.6f" % velocity.x, "%.6f" % velocity.z,
-				"%.6f" % rad_to_deg(rotation.y), "%.6f" % yaw_step,
-				"%.9f" % _rotation_lead_remaining, State.keys()[get_state()],
-				str(completed.size()), str(failed.size()), str(_waypoint), str(_contact),
-			]))
-
-	func open_trace(filename: String) -> void:
-		trace = FileAccess.open(OUTPUT.path_join(filename), FileAccess.WRITE)
-		assert(trace != null, "Cannot create trace in project builds/issue-14.")
-		trace.store_csv_line(PackedStringArray([
-			"order_tick", "order_time_s", "generation", "x", "z", "dx", "dz",
-			"requested_vx", "requested_vz", "actual_vx", "actual_vz",
-			"yaw_deg", "delta_yaw_deg", "lead_remaining_s", "state",
-			"completed", "failed", "waypoint", "contact_query",
-		]))
-
-	func metrics() -> Dictionary:
-		return {
-			"generation": generation, "first_yaw_tick": first_yaw_tick,
-			"distance_before_yaw": distance_before_yaw, "ticks": order_tick,
-			"max_yaw_deg_per_tick": max_yaw_step, "max_velocity_step": max_velocity_step,
-			"max_free_velocity_error": max_free_velocity_error,
-			"max_reverse_request": max_reverse_request, "max_lateral_request": max_lateral_request,
-			"max_forward_request": max_forward_request, "max_vertical_travel": max_vertical_travel,
-			"contact_query_ticks": contact_ticks, "blocked_ticks": blocked_ticks,
-			"completed_generations": completed.duplicate(), "failed_generations": failed.duplicate(),
-			"completion_ticks": completion_ticks.duplicate(),
-			"state": State.keys()[get_state()], "position": [global_position.x, global_position.z],
-			"yaw_deg": rad_to_deg(rotation.y), "yaw_positive_deg": yaw_positive,
-			"yaw_negative_deg": yaw_negative, "waypoint_changes": waypoint_changes,
-			"yaw_direction_changes": yaw_direction_changes,
-			"lead_restarts": lead_restarts,
-		}
+const ObservedShip = preload("res://Movement/Check/movement_check.gd").ObservedShip
 
 
 class HeldNavigation extends StaticNavigation:
@@ -200,6 +62,7 @@ func _load_fixture(scene_name: String, hold_navigation := false) -> ObservedShip
 			_ships.append(child)
 	root.add_child(_fixture)
 	_fixture.set_process(false)
+	_fixture.set_physics_process(false)
 	_fixture.set_process_unhandled_input(false)
 	for ship in _ships:
 		ship.set_physics_process(false)
@@ -244,7 +107,8 @@ func _finish(ship: ObservedShip, label: String, limit := 9000, check_free_veloci
 	_expect(ship.completed == [ship.generation], label + ": no repeated completion")
 	_expect(is_equal_approx(ship.rotation.y, final_yaw), label + ": no final alignment")
 	_expect(ship.velocity.is_zero_approx(), label + ": brakes to rest")
-	_expect(ship._rotation_lead_remaining == 0.0, label + ": arrival cleared lead")
+	_expect(ship._rotation_lead_distance_remaining == 0.0, label + ": arrival cleared lead")
+	_expect(ship._rotation_lead_timeout_remaining == 0.0 and ship._rotation_lead_stall_remaining == 0.0, label + ": arrival cleared fallback clocks")
 	_check_limits(ship, label, check_free_velocity)
 
 
@@ -285,7 +149,14 @@ func _direct(label: String, goal: Vector3, no_reverse := false) -> void:
 		_expect(not ship.requested.is_zero_approx(), label + ": immediate translation request")
 		_expect(ship.global_position.length() > 0.0, label + ": immediate actual travel")
 	await _finish(ship, label)
-	_expect(ship.first_yaw_tick >= 22 and ship.first_yaw_tick <= 23, label + ": rest yaw onset within one tick")
+	if no_reverse and goal.x == 0.0:
+		_expect(ship.first_yaw_tick == 2 and ship.first_motion_tick == 3, label + ": prompt no-reverse recovery")
+		_expect(ship.release_reason == "zero request", label + ": zero feasible request release")
+	else:
+		_expect(ship.directional_before_yaw >= ship.profile.rotation_lead_distance_from_rest, label + ": actual directional distance before yaw")
+		_expect(ship.release_reason == "distance", label + ": distance release, not fallback")
+	if label == "rest_40_behind":
+		_expect(ship.first_yaw_tick == 86, label + ": onset at 1-unit crossing")
 	_record(label, ship)
 
 
@@ -303,13 +174,18 @@ func _moving(speed: float) -> void:
 	if speed == 5.0:
 		ship.open_trace("moving_5_retarget.csv")
 	ship.move_to(Vector3(40, 0, 0))
-	_expect(is_equal_approx(ship._rotation_lead_remaining, 0.1), label + ": shorter lead selected")
+	_expect(is_equal_approx(ship._rotation_lead_distance_remaining, 0.5), label + ": shorter lead selected")
 	await _step()
 	_expect(ship.rotation.y == receipt_yaw, label + ": initial yaw preserved")
 	_expect(ship.requested.x > 0.0 and ship.requested.z > 0.0, label + ": request redirects immediately")
 	_expect(ship.velocity.distance_to(receipt_velocity) <= ship.profile.braking * STEP + 0.0001, label + ": inertia preserved")
+	if speed == 5.0:
+		await _step(5)
+		_expect(ship.total_travel > 0.45 and ship.directional_travel == 0.0, label + ": old-course drift earns zero directional credit")
+		_expect(ship.rotation.y == receipt_yaw, label + ": old drift cannot release yaw")
 	await _finish(ship, label)
-	_expect(ship.first_yaw_tick >= 7 and ship.first_yaw_tick <= 8, label + ": moving yaw onset within one tick")
+	_expect(ship.directional_before_yaw >= ship.profile.rotation_lead_distance_while_moving, label + ": credited new-direction travel before yaw")
+	_expect(ship.release_reason == "distance", label + ": no premature stall/timeout release")
 	_record(label, ship, {"receipt_speed": receipt_velocity.length(), "receipt_position": [receipt_position.x, receipt_position.z], "goal": [40, 0]})
 
 
@@ -321,8 +197,8 @@ func _lifecycle() -> void:
 		# Exercise equality against the actual measured value on a private copy.
 		ship.profile.blocked_speed_tolerance = ship.velocity.length() if speed == 0.05 else 0.05
 		ship.move_to(Vector3(0, 0, 40))
-		var selected := 0.35 if speed <= 0.05 else 0.1
-		_expect(is_equal_approx(ship._rotation_lead_remaining, selected), "speed threshold %.4f" % speed)
+		var selected := 1.0 if speed <= 0.05 else 0.5
+		_expect(is_equal_approx(ship._rotation_lead_distance_remaining, selected), "speed threshold %.4f" % speed)
 	ship.profile.blocked_speed_tolerance = 0.05
 	ship.stop()
 	ship.velocity = Vector3.ZERO
@@ -330,11 +206,11 @@ func _lifecycle() -> void:
 	await _step(8)
 	var old_yaw := ship.rotation.y
 	ship.stop()
-	_expect(ship._rotation_lead_remaining == 0.0, "stop clears lead")
+	_expect(ship._rotation_lead_distance_remaining == 0.0, "stop clears lead")
 	await _step()
 	_expect(ship.get_state() == MovementController.State.IDLE and ship.velocity.length() > 0.05, "Idle coasting remains physical")
 	ship.move_to(Vector3(40, 0, 0))
-	_expect(is_equal_approx(ship._rotation_lead_remaining, 0.1), "Idle coasting selects moving lead")
+	_expect(is_equal_approx(ship._rotation_lead_distance_remaining, 0.5), "Idle coasting selects moving lead")
 	await _step(2)
 	ship.stop()
 	await _step(60)
@@ -347,20 +223,20 @@ func _lifecycle() -> void:
 	ship.move_to(Vector3(0, 0, 0.5))
 	await _step()
 	_expect(ship.get_state() == MovementController.State.ARRIVED and ship.rotation.y == 0.0, "short order arrives during lead without yaw")
-	_expect(ship._rotation_lead_remaining == 0.0, "short arrival clears lead")
+	_expect(ship._rotation_lead_distance_remaining == 0.0, "short arrival clears lead")
 	_expect(ship.velocity.length() > 0.0, "arrival retains braking velocity")
 	ship.move_to(Vector3(40, 0, 0))
-	_expect(is_equal_approx(ship._rotation_lead_remaining, 0.35), "Arrived coasting below threshold selects rest lead")
+	_expect(is_equal_approx(ship._rotation_lead_distance_remaining, 1.0), "Arrived coasting below threshold selects rest lead")
 	ship.stop()
 	ship.velocity = Vector3(0.2, 0, 0)
 	ship._state = MovementController.State.ARRIVED
 	ship.move_to(Vector3(40, 0, 0))
-	_expect(is_equal_approx(ship._rotation_lead_remaining, 0.1), "Arrived coasting above threshold selects moving lead")
+	_expect(is_equal_approx(ship._rotation_lead_distance_remaining, 0.5), "Arrived coasting above threshold selects moving lead")
 	_record("arrival_during_lead", ship)
 
 	ship = await _load_fixture("movement_check")
-	ship.profile.rotation_lead_from_rest = 0.0
-	ship.profile.rotation_lead_while_moving = 0.0
+	ship.profile.rotation_lead_distance_from_rest = 0.0
+	ship.profile.rotation_lead_distance_while_moving = 0.0
 	ship.move_to(Vector3(0, 0, 40))
 	await _step()
 	_expect(ship.first_yaw_tick == 1, "zero lead restores immediate yaw")
@@ -380,7 +256,7 @@ func _lifecycle() -> void:
 	)
 	ship.move_to(Vector3(0, 0, 0.5))
 	await _step()
-	_expect(ship.generation == 2 and ship._rotation_lead_remaining > 0.0, "completion callback preserves replacement lead")
+	_expect(ship.generation == 2 and ship._rotation_lead_distance_remaining > 0.0, "completion callback preserves replacement lead")
 	_expect(ship.completed == [1], "completion callback is once-only for old generation")
 	_record("completion_reentrancy", ship)
 
@@ -391,12 +267,39 @@ func _lifecycle() -> void:
 	_record("two_unit_overshoot", ship)
 
 
+func _fallbacks_and_reversal() -> void:
+	var ship := await _load_fixture("movement_check")
+	ship.move_to(Vector3(0, 0, -100))
+	for tick in 600:
+		if ship.velocity.length() >= 4.999:
+			break
+		await _step()
+	ship.move_to(ship.global_position + Vector3(0, 0, 40))
+	ship.open_trace("moving_opposite.csv")
+	await _finish(ship, "moving_opposite")
+	_expect(ship.directional_before_yaw >= 0.5 and ship.release_reason == "distance", "opposing momentum reverses before distance release, without stall fallback")
+	_expect(ship.first_positive_progress_tick > 200 and ship.first_yaw_tick < 361, "opposing momentum preserves inertia within hard bound")
+	_record("moving_opposite", ship)
+
+	ship = await _load_fixture("movement_check")
+	# A private slow-lateral profile reaches neither distance nor stall criteria.
+	# Exercise the real six-second bound rather than shortening it for the test.
+	ship.profile.max_lateral_speed = 0.1
+	ship.profile.rotation_lead_distance_from_rest = 5.0
+	ship.move_to(Vector3(40, 0, 0))
+	await _step(363)
+	_expect(ship.release_reason == "timeout" and ship.release_tick >= 360 and ship.release_tick <= 361, "six-second bound releases insufficient directional progress")
+	_expect(ship.first_yaw_tick == ship.release_tick + 1 and ship.directional_before_yaw < 5.0, "timeout release is distinct from successful distance release")
+	_record("overall_timeout", ship)
+
+
 func _navigation_lifecycle() -> void:
 	var ship := await _load_fixture("routing_check", true)
 	var nav: HeldNavigation = ship.navigation
 	ship.move_to(Vector3(-60, 0, -50))
 	await _step(30)
-	_expect(ship._route_pending and is_equal_approx(ship._rotation_lead_remaining, 0.35), "pending navigation does not consume lead")
+	_expect(ship._route_pending and is_equal_approx(ship._rotation_lead_distance_remaining, 1.0), "pending navigation does not consume lead")
+	_expect(ship._rotation_lead_stall_remaining == 0.25 and ship._rotation_lead_timeout_remaining == 6.0, "pending navigation consumes neither fallback clock")
 	_expect(ship.global_position == Vector3(-60, 0, 60) and ship.rotation.y == 0.0, "pending rest has no travel or yaw")
 	ship.stop()
 	nav.hold = false
@@ -409,6 +312,7 @@ func _navigation_lifecycle() -> void:
 	await _step()
 	_expect(not ship._route_pending and ship.failed.is_empty(), "replacement cancels stale unreachable request")
 	_expect(ship.rotation.y == 0.0 and ship.velocity.length() > 0.0, "first ready tick translates without yaw")
+	_expect(ship.preferred_direction.x < 0.0, "wall onset follows the local detour, not a direct line through the wall")
 	await _finish(ship, "wall_detour")
 	_expect(ship.waypoint_changes > 1, "wall detour crosses multiple waypoints")
 	_record("pending_and_wall_detour", ship)
@@ -417,7 +321,7 @@ func _navigation_lifecycle() -> void:
 	ship.move_to(Vector3(-60, 0, -50))
 	await _step(5)
 	ship.move_to(Vector3(80, 0, -10))
-	_expect(ship.failed == [2] and ship._rotation_lead_remaining == 0.0, "unreachable during lead fails once and clears lead")
+	_expect(ship.failed == [2] and ship._rotation_lead_distance_remaining == 0.0, "unreachable during lead fails once and clears lead")
 	var old_yaw := ship.rotation.y
 	await _step(60)
 	_expect(ship.rotation.y == old_yaw and ship.completed.is_empty() and ship.failed == [2], "failure has no late yaw or repeated event")
@@ -429,7 +333,7 @@ func _navigation_lifecycle() -> void:
 			ship.move_to(Vector3(-60, 0, -50))
 	)
 	ship.move_to(Vector3(80, 0, -10))
-	_expect(ship.generation == 2 and ship._rotation_lead_remaining > 0.0, "failure callback preserves replacement lead")
+	_expect(ship.generation == 2 and ship._rotation_lead_distance_remaining > 0.0, "failure callback preserves replacement lead")
 	_expect(ship.failed == [1] and ship.get_state() == MovementController.State.MOVING, "failure callback activates new order")
 	_record("failure_reentrancy", ship)
 
@@ -443,9 +347,10 @@ func _collisions() -> void:
 	ship.move_to(Vector3(-40, 0, 10.0))
 	await _step(5)
 	_expect(ship.get_state() == MovementController.State.BLOCKED and ship.completed.is_empty(), "contact takes precedence over nearby arrival during lead")
-	_expect(ship._rotation_lead_remaining < 0.35 and ship._rotation_lead_remaining > 0.0, "Blocked ticks consume lead")
+	_expect(ship._rotation_lead_stall_remaining < 0.25 and ship._rotation_lead_distance_remaining > 0.0, "Blocked ticks consume stall clock")
 	await _step(30)
-	_expect(ship._rotation_lead_remaining == 0.0, "contact cannot freeze lead")
+	_expect(ship._rotation_lead_distance_remaining == 0.0, "contact cannot freeze lead")
+	_expect(ship.release_reason == "stall" and ship.release_tick <= 17, "contact promptly releases by stall fallback")
 	var previous_blocked_ticks := ship.blocked_ticks
 	await _step(90)
 	_expect(ship.blocked_ticks > previous_blocked_ticks and ship.completed.is_empty() and ship.failed.is_empty(), "solid obstacle retains order and retries")
@@ -472,9 +377,9 @@ func _collisions() -> void:
 	# Investigate a fresh order at resting contact against zero-lead behavior.
 	# Report the existing engine/controller edge case; don't change its policy.
 	var resting_contact_results: Array[Dictionary] = []
-	for lead in [0.0, 0.35]:
+	for lead in [0.0, 1.0]:
 		ship = await _load_fixture("collision_check")
-		ship.profile.rotation_lead_from_rest = lead
+		ship.profile.rotation_lead_distance_from_rest = lead
 		ship.position = Vector3(-40, 0, 10.501)
 		await process_frame
 		await process_frame
@@ -531,6 +436,10 @@ func _sweep() -> void:
 
 func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUTPUT))
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--visual="):
+			await _visual_check(argument.get_slice("=", 1))
+			return
 	await _direct("rest_6_behind", Vector3(0, 0, 6))
 	await _direct("rest_40_behind", Vector3(0, 0, 40))
 	await _direct("rest_side", Vector3(40, 0, 0))
@@ -541,11 +450,12 @@ func _run() -> void:
 	await _moving(3.0)
 	await _moving(5.0)
 	await _lifecycle()
+	await _fallbacks_and_reversal()
 	await _navigation_lifecycle()
 	await _collisions()
 	await _sweep()
 	var shared: MovementProfile = load("res://Movement/Profiles/arrata_frigate_movement.tres")
-	_expect(shared.max_reverse_speed == 1.5 and shared.rotation_lead_from_rest == 0.35 and shared.rotation_lead_while_moving == 0.1, "test copies did not mutate shared profile")
+	_expect(shared.max_reverse_speed == 1.5 and shared.rotation_lead_distance_from_rest == 1.0 and shared.rotation_lead_distance_while_moving == 0.5 and shared.rotation_lead_stall_timeout == 0.25 and shared.rotation_lead_timeout == 6.0, "test copies did not mutate shared profile")
 	var report := {"checks": _checks, "failures": _failures, "cases": _results}
 	var output := FileAccess.open(OUTPUT.path_join("results.json"), FileAccess.WRITE)
 	output.store_string(JSON.stringify(report, "\t"))
@@ -557,3 +467,46 @@ func _run() -> void:
 				ship.trace.close()
 		_fixture.free()
 	quit(0 if _failures.is_empty() else 1)
+
+
+func _visual_check(command: String) -> void:
+	if DisplayServer.get_name() == "headless" or command not in ["B", "M"]:
+		push_error("Visual check needs a rendered window and --visual=B or --visual=M.")
+		quit(1)
+		return
+	var scene: Node3D = load("res://Movement/Check/movement_check.tscn").instantiate()
+	root.add_child(scene)
+	await process_frame
+	await process_frame
+	var ship: ObservedShip = scene.get_node("Ship")
+	var event := InputEventKey.new()
+	event.keycode = KEY_B if command == "B" else KEY_M
+	event.pressed = true
+	Input.parse_input_event(event)
+	var expected_generation := 1 if command == "B" else 2
+	var before_saved := false
+	for frame in 1800:
+		await process_frame
+		if ship.generation != expected_generation:
+			continue
+		if ship.release_reason == "distance" and ship.first_yaw_tick == 0 and not before_saved:
+			await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png(OUTPUT.path_join(command + "_before_yaw.png"))
+			before_saved = true
+		if ship.first_yaw_tick > 0 and ship.order_tick >= ship.first_yaw_tick + 60:
+			await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png(OUTPUT.path_join(command + "_after_yaw.png"))
+			_expect(before_saved, command + ": captured distance crossing before first yaw")
+			_expect(ship.release_reason == "distance" and ship.directional_before_yaw >= ship.selected_distance, command + ": rendered key command reached directional target")
+			var snapshot := ship.metrics()
+			snapshot["hud"] = scene.get_node("HUD/Label").text + "\n" + scene.get_node("HUD/OnsetLabel").text
+			var output := FileAccess.open(OUTPUT.path_join(command + "_preview.json"), FileAccess.WRITE)
+			output.store_string(JSON.stringify(snapshot, "\t"))
+			output.close()
+			print("VISUAL_CHECK_" + command + ": " + JSON.stringify(snapshot))
+			scene.free()
+			quit(0 if _failures.is_empty() else 1)
+			return
+	push_error(command + ": visual check timed out")
+	scene.free()
+	quit(1)

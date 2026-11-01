@@ -18,12 +18,15 @@ extends Resource
 @export_range(0.1, 20.0, 0.1, "suffix:units/s²") var braking: float
 ## Maximum hull turn rate.
 @export_range(1.0, 180.0, 1.0, "suffix:°/s") var yaw_rate: float
-## Following time before yaw starts on an order received at or below
-## blocked_speed_tolerance. Translation begins immediately. 0 = immediate yaw.
-@export_range(0.0, 1.0, 0.01, "suffix:s") var rotation_lead_from_rest: float
-## Following time before yaw starts on an order received above that speed,
-## including during no-order coasting. 0 = immediate yaw.
-@export_range(0.0, 1.0, 0.01, "suffix:s") var rotation_lead_while_moving: float
+## Actual positive travel along the live follower request before yaw starts;
+## selected at/below blocked_speed_tolerance. 0 = immediate yaw.
+@export_range(0.0, 5.0, 0.1, "suffix:units") var rotation_lead_distance_from_rest: float
+## Directional travel for an order received above that speed, including coast.
+@export_range(0.0, 5.0, 0.1, "suffix:units") var rotation_lead_distance_while_moving: float
+## Continuous time at/below blocked_speed_tolerance before yaw may release.
+@export_range(0.05, 1.0, 0.01, "suffix:s") var rotation_lead_stall_timeout: float
+## Hard following-time bound if directional progress remains insufficient.
+@export_range(0.1, 10.0, 0.1, "suffix:s") var rotation_lead_timeout: float
 ## Distance from the destination at which an order counts as arrived.
 @export_range(0.05, 10.0, 0.05, "suffix:units") var arrival_tolerance: float
 ## Look-ahead: how far ahead along the route (planar arc length) the route

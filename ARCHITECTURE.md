@@ -59,9 +59,9 @@ verified behavior.
 | `Movement/ship.tscn` | Reusable ship: `CharacterBody3D` root with the controller, `Footprint` collision shape and replaceable `Visual` child holding the model |
 | `Movement/Profiles/*_movement.tres` | One `MovementProfile` per ship type |
 | `Movement/Profiles/*_footprint.tres` | One `CylinderShape3D` footprint per ship type |
-| `Movement/Check/movement_check.gd` | Shared check script: number keys select a ship, right-click `move_to`, `C` `stop` |
+| `Movement/Check/movement_check.gd` | Shared check script and test-only `ObservedShip` recorder, also reused by the headless runner; open-space B/M onset HUD, start marker and actual trail |
 | `Movement/Check/rotation_lead_check.gd` | Headless 60-Hz order-onset/lifecycle/collision regressions and 21-timing wall-replacement sweep; writes traces/results to ignored `builds/issue-14/` |
-| `Movement/Check/movement_check.tscn` | Permanent MovementCheck scene: one ship in open space |
+| `Movement/Check/movement_check.tscn` | Permanent MovementCheck scene: one ship in open space; B rest order / M moving retarget and onset HUD enabled |
 | `Movement/Check/collision_check.tscn` | Permanent collision check: Lane A (ship 1 → obstacle), Lane B (ship 2 → ship 3) |
 | `Movement/Check/obstacle.tscn` | Check-scene obstacle fixture (`StaticBody3D` box); not a game obstacle system |
 
@@ -132,27 +132,45 @@ Run in this order each tick. Each is introduced by the ticket shown.
 Locomotion (1b, reverse 1d.1): the requested velocity is limited to the
 hull's current axes: forward component `−max_reverse_speed …
 +max_forward_speed`, lateral `±max_lateral_speed`. A target behind is
-reached by backing and sliding, then turning during travel; the mix changes continuously
-as yaw aligns (no modes or distance thresholds). The reverse limit bounds the
-backward component, not the combined diagonal speed. Actual velocity then
+reached by backing and sliding, then turning during travel; the mix changes
+continuously as yaw aligns. The reverse mix has no modes or distance
+thresholds. The reverse limit bounds the backward component, not the
+combined diagonal speed. Actual velocity then
 moves toward
 that request at `acceleration` (speeding up) or `braking` (slowing down) and
 is never clamped afterwards, so a yaw change cannot snap speed. Yaw turns
 toward the facing reference at `yaw_rate`: the desired direction for direct
 routes, the route's direction for routed ones (see Route Follower).
 
-Order-onset yaw lead (1d.3): each `move_to()` replaces one controller-owned
-remaining-time value. Actual XZ speed at receipt, at or below
-`blocked_speed_tolerance`, selects `rotation_lead_from_rest`; higher speed
-selects `rotation_lead_while_moving`, including Idle/Arrived coasting. The
-frigate's provisional values are 0.35 s and 0.10 s. Only following ticks
-consume the lead: translation requests and collision commits run immediately,
-while yaw stays fixed until the lead expires. Pending navigation and no-order
-coasting consume none. Blocked/no-progress ticks still consume it, so a ship
-without reverse can eventually turn toward a goal behind it. Waypoints and
-route corrections never restart it. Zero lead permits immediate yaw; expiry
-allows only the usual bounded turn, with no catch-up. `stop()`, unreachable
-failure and arrival clear the lead before events; no finishing alignment.
+Order-onset yaw lead (1d.3, directional trial): each `move_to()` replaces
+three controller-owned floats: remaining directional distance, overall time,
+and continuous stall time. Actual XZ speed at receipt, at/below
+`blocked_speed_tolerance`, selects `rotation_lead_distance_from_rest`;
+higher speed selects `rotation_lead_distance_while_moving`, including
+Idle/Arrived coasting. Provisional frigate distances: 1.0 / 0.5 units.
+
+- Translation runs immediately. Each following tick samples the follower's
+  preferred XZ direction before hull limiting. After the single collision
+  commit, distance credit is `max(0, actual_travel.dot(preferred.normalized()))`.
+  Opposite/perpendicular motion earns no credit. For a detour this is the
+  local follower direction, never a line to the final goal through a wall.
+- Yaw stays fixed until the credited distance is reached; the normal bounded
+  turn may start next tick, with no catch-up. A zero distance permits
+  immediate yaw. Waypoints never restart the onset.
+- Fallbacks: a nonzero preferred request that becomes zero under hull limits
+  and has negligible actual speed releases after that commit; continuous
+  actual speed at/below `blocked_speed_tolerance` releases after
+  `rotation_lead_stall_timeout` (0.25 s), reset by actual speed above it;
+  `rotation_lead_timeout` (6.0 s) bounds overall following time regardless
+  of progress/stall resets. Floating-point zero checks prevent an extra
+  countdown tick from numerical residue. Every release permits yaw next tick.
+- Opposing momentum at speed is not a stall and is not clamped. Reversals
+  can therefore take longer to begin yaw than rest starts (trial observation:
+  3.817 s for the M side/behind retarget, 4.817 s directly opposite).
+- Pending navigation and no-order coasting consume no onset distance/time.
+  Blocked following ticks still advance the applicable clocks. Stop,
+  unreachable failure and arrival clear all three floats before events;
+  short arrival needs no distance threshold or finishing alignment.
 
 Route Follower (1d), all planar (XZ) from the actual position; Y is never
 chased:
@@ -215,10 +233,10 @@ avoidance passes preferred movement through unchanged.
 2. Reuse the current route or request one (1d). No repathing every tick.
 3. Route Follower → preferred movement.
 4. Optional avoidance request (1e).
-5. Locomotion → feasible translation; consume the active order's lead or turn gradually.
+5. Locomotion → feasible translation; turn only once onset has released.
 6. One translation commit (direct in 1b; `move_and_collide()` from 1c).
-7. Measure actual displacement; reconcile velocity; update state and
-   events.
+7. Measure actual displacement; reconcile velocity; advance the directional
+   onset and fallback clocks; update state and events.
 
 No-active-order braking: after `stop()` or arrival there is no active
 order, but the tick keeps running while actual velocity is non-zero. Steps
@@ -398,7 +416,7 @@ large formations.
     11.85, and straight route legs between them at 11.29;
   - the earlier forward-route check measured cross-track ≤ 0.34 and
     clearance ≥ 11.27. The 1d.3 order-replacement sweep measured a minimum
-    11.207 over 21 timings with reverse 1.5, no contact or Blocked ticks
+    11.209 over 21 timings with reverse 1.5, no contact or Blocked ticks
     (1d.1 baseline: 11.198). These are observations, not clearance guarantees.
     Without reverse
     (`max_reverse_speed` 0, the pre-1d.1 behaviour) 6 of those timings touch
@@ -409,8 +427,8 @@ large formations.
     the former 11.42 observation); see `HANDOFF.md`.
 - UNKNOWN: 2D RVO callback behavior in 4.7 (verify in 1e).
 - Resting-contact order replacement can remain `Moving` despite negligible
-  travel at the safe margin: observed identically with zero and 0.35 s yaw
-  lead at centre (-40, 10.501) against the collision-check obstacle. An
+  travel at the safe margin: observed identically with immediate yaw and a
+  1.0-unit directional lead at centre (-40, 10.501) against the collision-check obstacle. An
   already-Blocked order stays Blocked and resumes when the obstacle is removed.
 - UNDECIDED (owner): target fleet scale; unit confirmation. `MovementProfile`
   starting values are owner-confirmed for play; turning feel is judged by
@@ -426,7 +444,7 @@ fields, units and editor ranges only.
 
 | Asset | Module | Values |
 |---|---|---|
-| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), max reverse speed (units/s, below forward; 0 = no reverse), acceleration (units/s²), braking (units/s²), yaw rate (°/s), rotation lead from rest / while moving (s, each 0–1, step 0.01; provisional frigate 0.35 / 0.10), arrival tolerance (units), waypoint tolerance / look-ahead (units), corner drift limit (units), blocked speed tolerance (units/s) |
+| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), max reverse speed (units/s, below forward; 0 = no reverse), acceleration (units/s²), braking (units/s²), yaw rate (°/s), rotation lead distance from rest / while moving (units, each 0–5, step 0.1; provisional frigate 1.0 / 0.5), stall timeout (s, 0.05–1, step 0.01; frigate 0.25), overall timeout (s, 0.1–10, step 0.1; frigate 6.0), arrival tolerance (units), waypoint tolerance / look-ahead (units), corner drift limit (units), blocked speed tolerance (units/s) |
 | Footprint (`CylinderShape3D`) | Movement | Radius (units), height (units) |
 | `AvoidanceProfile` | Movement | Radius, neighbor range, time horizon, neighbor limit |
 | `NavigationClearance` | Movement | Footprint (reference to the footprint shape), margin (units); the class is the resource itself, its map is owned by the scene's `StaticNavigation` |
