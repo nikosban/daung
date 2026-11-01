@@ -132,7 +132,8 @@ forward and lateral axes, with no commanded reverse (a target behind is
 reached by turning and sliding sideways). Actual velocity then moves toward
 that request at `acceleration` (speeding up) or `braking` (slowing down) and
 is never clamped afterwards, so a yaw change cannot snap speed. Yaw turns
-toward the desired direction at `yaw_rate`.
+toward the facing reference at `yaw_rate`: the desired direction for direct
+routes, the route's direction for routed ones (see Route Follower).
 
 Route Follower (1d), all planar (XZ) from the actual position; Y is never
 chased:
@@ -140,22 +141,44 @@ chased:
 - **Progress:** owns the current segment index (`_waypoint`, the segment's end
   point). It advances only once the ship's projection along the segment has
   passed its end, and never goes back, so a passed corner is never chased.
-- **Steering (pure pursuit):** aims `waypoint_tolerance` ahead **along the
-  route's arc length** from the ship's projection on the current segment. The
-  aim point slides continuously past corners, so the commanded direction
-  never jumps at a segment end and short legs blend into one turn.
-- **Speed:** the lowest of `max_forward_speed`,
-  `sqrt(2 × braking × distance to goal)` and, for each remaining corner,
-  `sqrt(v_corner² + 2 × braking × distance to corner)`.
-  - Corner speed: `v_corner = sqrt(2 × min(acceleration, braking) ×
-    corner_drift_limit) / |Δdirection|`, with `Δdirection` measured from the
-    current segment, so a chain of small bends counts as one turn. This keeps
-    the outward swing at each turn within `corner_drift_limit`.
-  - Turn-rate cap, only while a route bend is still ahead: the pure-pursuit
-    arc to the aim point has curvature `2 × sin(heading error) /
-    waypoint_tolerance`; speed is capped so it needs no more than `yaw_rate`
-    (never below `max_lateral_speed`). Single-segment orders and straight
-    final legs are not capped, so open-space movement is unchanged.
+- **Translation (pure pursuit):** moves toward the point `waypoint_tolerance`
+  ahead **along the route's arc length** from the ship's projection on the
+  current segment. The aim point slides continuously past corners, and this
+  direction also corrects cross-track drift.
+- **Facing:** the hull turns (at `yaw_rate`) toward the route's direction
+  across that same look-ahead window (the chord from the ship's projection to
+  the aim point), not toward the translation direction. It turns
+  continuously as the window slides over a corner, and correcting a small
+  drift slides the ship sideways instead of rotating it.
+- **Speed plan,** built once per route (and discarded with it):
+  - **Turns:** each route bend is a turn. Turns whose slow sections overlap
+    are one physical turn and merge, with their angles added, so passing an
+    intermediate route point never releases the speed.
+  - **Turn speed:** the lower of two limits:
+    - outward swing: `sqrt(2 × min(acceleration, braking) ×
+      corner_drift_limit) / (2 sin(angle / 2))`;
+    - hull: the facing turns through the angle over look-ahead + the turn's
+      span, the hull lags it at `yaw_rate`, and `v × sin(lag)` must stay
+      within `max_lateral_speed`.
+  - **Slow section:** starts one look-ahead before the first bend and lasts
+    until the hull has turned through the whole angle at that speed (at
+    least past the last bend).
+  - **Gaps:** between slow sections, and before the goal, a gap counts as
+    short when a speed-up there could not reach `max_forward_speed` while
+    also slowing back down at the gentler of `acceleration` and `braking`.
+    A short gap holds the higher of its two neighbouring speeds instead of
+    speeding up and braking again.
+  - **At run time:** the requested speed at the ship's arc progress is the
+    lowest of `max_forward_speed`, braking to rest at the goal, and, for each
+    slow section, braking into it, its held speed inside it, and
+    accelerating out of it (a forward–backward pass evaluated in place). It
+    is a ceiling, not a schedule: a ship slowed by contact simply accelerates
+    back up to it.
+- **Hull cap,** only on routes that bend: speed never exceeds what the hull,
+  as currently turned, can thrust along the translation direction
+  (`max_lateral_speed / sin(angle)`; sideways only if the direction is
+  behind the hull). Direct and single-segment orders aren't capped, so
+  open-space movement is unchanged.
 
 Before 1e,
 avoidance passes preferred movement through unchanged.
@@ -339,13 +362,14 @@ large formations.
     sides;
   - Godot's erosion approximates obstacle **corners** closer: vertices at
     11.85, and straight route legs between them at 11.29;
-  - with the pure-pursuit follower the ship stays at ≥ 11.48 on forward
-    routes and reaches 11.22 on one reverse pass after an order replacement,
-    with no contact.
+  - the ship tracks the route closely (cross-track ≤ 0.34 on forward
+    routes), so at corners it passes near that chord: ≥ 11.27 on forward
+    routes and 11.21 on one reverse pass after an order replacement, with no
+    contact.
   - The approved 2-unit berth is therefore held beside sides but not fully
     at corners. Reducing `edge_max_error` didn't help. The owner accepted
-    this (option A) and the 11.22 pass (smooth steering over the former
-    11.42 observation); see `HANDOFF.md`.
+    this (option A) and the reduced observed minimum (smooth steering over
+    the former 11.42 observation); see `HANDOFF.md`.
 - UNKNOWN: 2D RVO callback behavior in 4.7 (verify in 1e).
 - UNDECIDED (owner): target fleet scale; unit confirmation. `MovementProfile`
   starting values are owner-confirmed for play; turning feel is judged by

@@ -78,11 +78,18 @@ No ship avoidance yet.
   - readiness probes each region's interior;
   - planar (XZ) segment progress that never advances before a corner is
     passed or goes back.
-- Route steering: pure pursuit 2.0 units ahead along the route, turn-rate
-  speed cap only while a bend is ahead, and corner speed from a new
+- Route steering: pure pursuit 2.0 units ahead along the route, and a new
   `MovementProfile.corner_drift_limit` of 0.5 units (range 0.1–2.0); the
-  observed reverse-pass minimum of 11.22 units (0.72 beyond the footprint,
-  no contact) replaces 11.42 — owner approval on PR #10 (Task 1d).
+  observed minimum clearance falls below the former 11.42 (no contact) —
+  owner approval on PR #10 (Task 1d).
+- Route speed and facing (owner decisions after the PR #10 trace):
+  - one speed plan per route; a physical turn made of several route points
+    holds its speed throughout;
+  - between nearby corners, a steady speed instead of a brief speed-up and
+    brake; longer straights accelerate normally;
+  - the hull faces the route's direction while translation corrects drift,
+    so the ship slides instead of rotating for small corrections;
+  - translation and gradual rotation start together.
 
 ## Known limitations
 
@@ -93,9 +100,15 @@ No ship avoidance yet.
   - the 2-unit berth holds beside straight obstacle sides (baked edge exactly
     12.5);
   - around obstacle corners, Godot's erosion puts the route as close as
-    11.29; the ship stays at ≥ 11.48 on forward routes and reaches 11.22 on
-    one reverse pass after an order replacement (0.72 beyond the footprint),
-    with no contact. Accepted as tested, not a guaranteed floor.
+    11.29; the ship tracks the route closely and passes at ≥ 11.27 on
+    forward routes and 11.21 on one reverse pass after an order replacement
+    (0.71 beyond the footprint), with no contact. Accepted as tested, not a
+    guaranteed floor.
+- Steady speed through closely spaced corners makes those routes slower
+  (Reachable: about 6 s longer than with speed-ups between corners).
+- After an order replacement that leaves the ship far off its new route,
+  it slides back with a small overshoot (about 1 unit) and one brief speed
+  trim of about 0.3 units/s; it doesn't rotate the hull for it.
 - Navmeshes are pre-baked: after moving an obstacle, re-bake the scene's
   region in the editor. No dynamic map changes.
 - Only the frigate clearance class exists; other classes need owner-confirmed
@@ -116,4 +129,7 @@ No ship avoidance yet.
 
 ## Next task
 
-#6 — Task 1e: Add predictive ship avoidance.
+After #5 merges: a separate ticket for limited reverse translation while
+rotating (agreed direction on PR #10; frigate `max_reverse_speed` 1.5
+units/s, delegated to the tech lead). Then #6 — Task 1e: Add predictive ship
+avoidance.
