@@ -6,6 +6,10 @@ extends Node
 ## and activated when its first ClearanceRegion child registers, and freed
 ## when this node leaves the tree (after its child regions have detached).
 
+## Floating-point noise allowed when comparing planar positions on the mesh.
+## Not a tuning value.
+const PLANAR_EPSILON := 0.001
+
 var _maps := {}  # NavigationClearance -> RID
 var _regions := {}  # NavigationClearance -> Array[ClearanceRegion]
 
@@ -32,17 +36,24 @@ func register_region(region: ClearanceRegion) -> void:
 
 ## True once the map has synchronized with every region's polygons. Regions
 ## build asynchronously, so a synchronized map can still lack them; each
-## region is checked by asking the map who owns the point at one of its own
-## vertices. Only polled while a ship's route request is pending.
+## region is checked by asking the map who owns the centre of one of its own
+## polygons (an interior point, so a neighbouring region sharing an edge or
+## vertex cannot answer instead). Only polled while a route request is pending.
 func is_ready(clearance: NavigationClearance) -> bool:
 	var map: RID = _maps.get(clearance, RID())
 	if not map.is_valid() or NavigationServer3D.map_get_iteration_id(map) == 0:
 		return false
 	for region: ClearanceRegion in _regions[clearance]:
-		var vertices := region.navigation_mesh.get_vertices()
-		if vertices.is_empty():
+		var navigation_mesh := region.navigation_mesh
+		if navigation_mesh.get_polygon_count() == 0:
 			return false
-		var probe := region.global_transform * vertices[0]
+		var vertices := navigation_mesh.get_vertices()
+		var centre := Vector3.ZERO
+		var polygon := navigation_mesh.get_polygon(0)
+		for index in polygon:
+			centre += vertices[index]
+		centre /= polygon.size()
+		var probe := region.global_transform * centre
 		if NavigationServer3D.map_get_closest_point_owner(map, probe) != region.get_rid():
 			return false
 	return true
@@ -50,18 +61,21 @@ func is_ready(clearance: NavigationClearance) -> bool:
 
 ## Returns a route ending exactly at goal, or an empty array if the goal is
 ## unreachable for this clearance. All checks are planar (XZ).
-func find_route(clearance: NavigationClearance, from: Vector3, goal: Vector3, tolerance: float) -> PackedVector3Array:
+func find_route(clearance: NavigationClearance, from: Vector3, goal: Vector3) -> PackedVector3Array:
 	var map: RID = _maps[clearance]
-	# The exact goal must lie on this clearance's navmesh; otherwise it is
-	# inside the berth around an obstacle.
+	# The exact goal must lie on this clearance's navmesh (its closest mesh
+	# point is directly below it); otherwise it is inside the berth around an
+	# obstacle, however close to the edge.
 	var closest := NavigationServer3D.map_get_closest_point(map, goal)
-	if _planar_distance(closest, goal) > NavigationServer3D.map_get_cell_size(map):
+	if _planar_distance(closest, goal) > PLANAR_EPSILON:
 		return PackedVector3Array()
-	# Godot may end a path at the nearest reachable point; that is a failure,
-	# never a substitute destination.
+	# The path must end at the goal itself. Godot may end it at the nearest
+	# reachable point instead (another island); that is a failure, never a
+	# substitute destination.
 	var path := NavigationServer3D.map_get_path(map, from, goal, true)
-	if path.is_empty() or _planar_distance(path[path.size() - 1], goal) > tolerance:
+	if path.is_empty() or _planar_distance(path[path.size() - 1], goal) > PLANAR_EPSILON:
 		return PackedVector3Array()
+	# Same planar point; only the height changes from the mesh to the ship plane.
 	path[path.size() - 1] = goal
 	return path
 

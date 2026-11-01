@@ -134,11 +134,24 @@ that request at `acceleration` (speeding up) or `braking` (slowing down) and
 is never clamped afterwards, so a yaw change cannot snap speed. Yaw turns
 toward the desired direction at `yaw_rate`.
 
-Route Follower (1d): owns the waypoint index and advances it when the
-actual planar (XZ) position is within `waypoint_tolerance` of the current
-waypoint. It steers at the current waypoint with desired speed
-`min(max_forward_speed, sqrt(2 × braking × remaining route length))`, so it
-slows only for the final goal. Y is never chased.
+Route Follower (1d), all planar (XZ) from the actual position; Y is never
+chased:
+
+- **Progress:** owns the current segment index (`_waypoint`, the segment's end
+  point). It advances only once the ship's projection along the segment has
+  passed its end. It never advances early, so it doesn't cut across the
+  clearance band, and never goes back, so a passed corner is never chased.
+- **Steering:** aims `waypoint_tolerance` ahead along the current segment from
+  the ship's projection, clamped to the segment's end, so it never aims past
+  a corner.
+- **Speed:** the lowest of `max_forward_speed`,
+  `sqrt(2 × braking × distance to goal)` and, for each remaining corner,
+  `sqrt(v_corner² + 2 × braking × distance to corner)`.
+  - Corner speed: `v_corner = sqrt(2 × min(acceleration, braking) ×
+    margin) / |Δdirection|`. This keeps the velocity change at each turn
+    absorbable within the clearance margin.
+  - Only existing values are used: profile rates and `NavigationClearance`
+    margin.
 
 Before 1e,
 avoidance passes preferred movement through unchanged.
@@ -241,18 +254,22 @@ Blocked (1c):
 - **Readiness:** a route request waits (order `Moving`, nothing requested,
   no failure) until the map holds every region's polygons. Godot 4.7 builds
   regions asynchronously, so the map's first sync can precede them. The check
-  is that the map's closest-point owner at one of each region's own vertices
-  is that region. `stop()` or a new order cancels a pending request. No
+  is that the map's closest-point owner at the **centre of one of each
+  region's own polygons** is that region. An interior point is used because
+  at a vertex or edge shared with an adjacent region the map reports only
+  one owner. `stop()` or a new order cancels a pending request. No
   `map_force_update()`.
 - **Validation** (`find_route`, all planar XZ). A route is returned only if:
-  1. the exact goal lies on the clearance's navmesh (closest point within
-     one map cell), so it isn't inside the berth;
+  1. the exact goal lies **on** the clearance's navmesh: its closest mesh
+     point is directly below it (within floating-point noise, 0.001), so a
+     goal even 0.1 inside the berth fails;
   2. the path is not empty;
-  3. its last point is within `arrival_tolerance` of the original goal.
+  3. the path ends at the goal itself (same 0.001), not at the nearest
+     reachable point of another island.
 
-  Only then is the last point replaced by the exact goal; by (1) that leg is
-  at most one cell and stays on the mesh. Otherwise → `order_failed` once,
-  `Idle`; never a partial route or a substitute destination.
+  The last point then differs from the goal only in height and is replaced by
+  it. Otherwise → `order_failed` once, `Idle`; never a partial route or a
+  substitute destination. `arrival_tolerance` is used only for arrival.
 - **Direct route:** only by explicit `direct_route = true` on ship instances
   in scenes that intentionally have no navigation (the 1b/1c checks). It is
   never inferred from an empty or unsynced map.
@@ -313,9 +330,16 @@ large formations.
   - two ships moving head on both stop, with up to 0.006 units of
     interpenetration (within the engine margin);
   - contact recovery stays on the XZ plane.
-- Observed in 1d, not a guarantee: corner-cutting at waypoints used most of
-  the 2-unit margin. The closest footprint-centre distance to an obstacle
-  edge was 10.65 against a 10.5 footprint radius, with no contact.
+- Observed in 1d (default bake settings), not a guarantee:
+  - the baked edge is exactly `agent_radius` (12.5) beside straight obstacle
+    sides;
+  - Godot's erosion approximates obstacle **corners** closer: vertices at
+    11.85, and straight route legs between them at 11.29;
+  - the ship tracks the route and stays at ≥ 11.42 (≥ 11.98 on a single
+    route), with no contact.
+  - The approved 2-unit berth is therefore held beside sides but not fully
+    at corners. Reducing `edge_max_error` didn't help. Owner decision
+    pending (see `HANDOFF.md`).
 - UNKNOWN: 2D RVO callback behavior in 4.7 (verify in 1e).
 - UNDECIDED (owner): target fleet scale; unit confirmation. `MovementProfile`
   starting values are owner-confirmed for play; turning feel is judged by

@@ -129,30 +129,72 @@ func _request_route() -> void:
 	if navigation == null or not navigation.is_ready(clearance):
 		return
 	_route_pending = false
-	_route = navigation.find_route(clearance, global_position, _destination, profile.arrival_tolerance)
+	_route = navigation.find_route(clearance, global_position, _destination)
 	if _route.is_empty():
 		_desired_direction = Vector3.ZERO
 		_state = State.IDLE
 		order_failed.emit()
 
 
-## Route follower: owns waypoint progress (planar, from actual position) and
-## returns preferred world velocity toward the current waypoint, slowing only
-## so the ship can brake to rest at the goal.
+## Route follower: owns segment progress along the route (planar, from actual
+## position) and returns preferred world velocity. _waypoint is the end of the
+## current segment. It advances only once the ship has passed that corner
+## (along the segment), never earlier, so the ship does not cut across the
+## clearance band, and never back, so a passed corner is never chased.
 func _follow_route() -> Vector3:
 	var here := _planar(global_position)
 	var last := _route.size() - 1
-	while _waypoint < last and here.distance_to(_planar(_route[_waypoint])) <= profile.waypoint_tolerance:
+	# route[0] is the path's start point; the first segment ends at route[1].
+	_waypoint = maxi(_waypoint, mini(1, last))
+	while _waypoint < last:
+		var segment_start := _planar(_route[_waypoint - 1])
+		var segment_end := _planar(_route[_waypoint])
+		var along := (here - segment_start).dot((segment_end - segment_start).normalized())
+		if along < segment_start.distance_to(segment_end):
+			break
 		_waypoint += 1
-	var to_waypoint := _planar(_route[_waypoint]) - here
-	if to_waypoint.is_zero_approx():
+	# Aim waypoint_tolerance ahead along the current segment, never past its
+	# corner.
+	var end := _planar(_route[_waypoint])
+	var aim := end
+	if _waypoint > 0:
+		var start := _planar(_route[_waypoint - 1])
+		var direction := (end - start).normalized()
+		var ahead := clampf((here - start).dot(direction) + profile.waypoint_tolerance, 0.0, start.distance_to(end))
+		aim = start + direction * ahead
+	var to_aim := aim - here
+	if to_aim.is_zero_approx():
 		return Vector3.ZERO
-	var remaining := to_waypoint.length()
-	for i in range(_waypoint, last):
-		remaining += _planar(_route[i]).distance_to(_planar(_route[i + 1]))
-	_desired_direction = to_waypoint.normalized()
-	var speed := minf(profile.max_forward_speed, sqrt(2.0 * profile.braking * remaining))
-	return _desired_direction * speed
+	_desired_direction = to_aim.normalized()
+	return _desired_direction * _route_speed(here)
+
+
+## Highest speed from which the ship can still take every remaining corner
+## and come to rest at the goal.
+func _route_speed(here: Vector3) -> float:
+	var last := _route.size() - 1
+	var speed := profile.max_forward_speed
+	var distance := here.distance_to(_planar(_route[_waypoint]))
+	for i in range(_waypoint, last + 1):
+		var corner_speed := 0.0 if i == last else _corner_speed(i)
+		speed = minf(speed, sqrt(corner_speed * corner_speed + 2.0 * profile.braking * distance))
+		if i < last:
+			distance += _planar(_route[i]).distance_to(_planar(_route[i + 1]))
+	return speed
+
+
+## Speed at which the velocity change needed to turn onto the next segment can
+## be absorbed by the ship's acceleration and braking within the clearance
+## margin, so the turn overshoots the route by no more than the margin.
+func _corner_speed(i: int) -> float:
+	var corner := _planar(_route[i])
+	var incoming := (corner - _planar(_route[i - 1])).normalized()
+	var outgoing := (_planar(_route[i + 1]) - corner).normalized()
+	var change := incoming.distance_to(outgoing)
+	if is_zero_approx(change):
+		return profile.max_forward_speed
+	var rate := minf(profile.acceleration, profile.braking)
+	return sqrt(2.0 * rate * clearance.margin) / change
 
 
 func _planar(point: Vector3) -> Vector3:
