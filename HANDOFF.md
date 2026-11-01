@@ -108,14 +108,18 @@ No ship avoidance yet.
     12.5);
   - around obstacle corners, Godot's erosion puts the route as close as
     11.29; the ship tracks the route closely and passes at ≥ 11.27 on
-    forward routes and 11.21 on one reverse pass after an order replacement
-    (0.71 beyond the footprint), with no contact. Accepted as tested, not a
-    guaranteed floor.
+    forward routes and ≥ 11.20 on reverse passes after an order replacement
+    (0.70 beyond the footprint; 21 replacement timings, no contact).
+    Accepted as tested, not a guaranteed floor.
 - Steady speed through closely spaced corners makes those routes slower
   (Reachable: about 6 s longer than with speed-ups between corners).
 - After an order replacement that leaves the ship far off its new route,
-  it slides back with a small overshoot (about 1 unit) and one brief speed
-  trim of about 0.3 units/s; it doesn't rotate the hull for it.
+  it backs and slides back to it while turning; a turnaround past a wall
+  corner can overshoot the new route's heading by about 17° and turn back.
+- A ship type without reverse (`max_reverse_speed` 0, the pre-1d.1
+  behaviour) can touch the wall corner after an order replacement (6 of 21
+  timings measured: 10.48, up to 12 `Blocked` ticks, then one completion).
+  The frigate doesn't.
 - Navmeshes are pre-baked: after moving an obstacle, re-bake the scene's
   region in the editor. No dynamic map changes.
 - Only the frigate clearance class exists; other classes need owner-confirmed

@@ -384,8 +384,10 @@ large formations.
     11.85, and straight route legs between them at 11.29;
   - the ship tracks the route closely (cross-track ≤ 0.34 on forward
     routes), so at corners it passes near that chord: ≥ 11.27 on forward
-    routes and 11.21 on one reverse pass after an order replacement, with no
-    contact.
+    routes and ≥ 11.20 on reverse passes after an order replacement (1d.1:
+    21 replacement timings with reverse 1.5, no contact). Without reverse
+    (`max_reverse_speed` 0, the pre-1d.1 behaviour) 6 of those timings touch
+    the wall at 10.48 and are briefly `Blocked` before completing.
   - The approved 2-unit berth is therefore held beside sides but not fully
     at corners. Reducing `edge_max_error` didn't help. The owner accepted
     this (option A) and the reduced observed minimum (smooth steering over
