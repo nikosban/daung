@@ -139,19 +139,23 @@ chased:
 
 - **Progress:** owns the current segment index (`_waypoint`, the segment's end
   point). It advances only once the ship's projection along the segment has
-  passed its end. It never advances early, so it doesn't cut across the
-  clearance band, and never goes back, so a passed corner is never chased.
-- **Steering:** aims `waypoint_tolerance` ahead along the current segment from
-  the ship's projection, clamped to the segment's end, so it never aims past
-  a corner.
+  passed its end, and never goes back, so a passed corner is never chased.
+- **Steering (pure pursuit):** aims `waypoint_tolerance` ahead **along the
+  route's arc length** from the ship's projection on the current segment. The
+  aim point slides continuously past corners, so the commanded direction
+  never jumps at a segment end and short legs blend into one turn.
 - **Speed:** the lowest of `max_forward_speed`,
   `sqrt(2 × braking × distance to goal)` and, for each remaining corner,
   `sqrt(v_corner² + 2 × braking × distance to corner)`.
   - Corner speed: `v_corner = sqrt(2 × min(acceleration, braking) ×
-    margin) / |Δdirection|`. This keeps the velocity change at each turn
-    absorbable within the clearance margin.
-  - Only existing values are used: profile rates and `NavigationClearance`
-    margin.
+    corner_drift_limit) / |Δdirection|`, with `Δdirection` measured from the
+    current segment, so a chain of small bends counts as one turn. This keeps
+    the outward swing at each turn within `corner_drift_limit`.
+  - Turn-rate cap, only while a route bend is still ahead: the pure-pursuit
+    arc to the aim point has curvature `2 × sin(heading error) /
+    waypoint_tolerance`; speed is capped so it needs no more than `yaw_rate`
+    (never below `max_lateral_speed`). Single-segment orders and straight
+    final legs are not capped, so open-space movement is unchanged.
 
 Before 1e,
 avoidance passes preferred movement through unchanged.
@@ -335,11 +339,13 @@ large formations.
     sides;
   - Godot's erosion approximates obstacle **corners** closer: vertices at
     11.85, and straight route legs between them at 11.29;
-  - the ship tracks the route and stays at ≥ 11.42 (≥ 11.98 on a single
-    route), with no contact.
+  - with the pure-pursuit follower the ship stays at ≥ 11.48 on forward
+    routes and reaches 11.22 on one reverse pass after an order replacement,
+    with no contact.
   - The approved 2-unit berth is therefore held beside sides but not fully
     at corners. Reducing `edge_max_error` didn't help. The owner accepted
-    this (option A, see `HANDOFF.md`).
+    this (option A) and the 11.22 pass (smooth steering over the former
+    11.42 observation); see `HANDOFF.md`.
 - UNKNOWN: 2D RVO callback behavior in 4.7 (verify in 1e).
 - UNDECIDED (owner): target fleet scale; unit confirmation. `MovementProfile`
   starting values are owner-confirmed for play; turning feel is judged by
@@ -355,7 +361,7 @@ fields, units and editor ranges only.
 
 | Asset | Module | Values |
 |---|---|---|
-| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), acceleration (units/s²), braking (units/s²), yaw rate (°/s), arrival tolerance (units), waypoint tolerance (units), blocked speed tolerance (units/s) |
+| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), acceleration (units/s²), braking (units/s²), yaw rate (°/s), arrival tolerance (units), waypoint tolerance / look-ahead (units), corner drift limit (units), blocked speed tolerance (units/s) |
 | Footprint (`CylinderShape3D`) | Movement | Radius (units), height (units) |
 | `AvoidanceProfile` | Movement | Radius, neighbor range, time horizon, neighbor limit |
 | `NavigationClearance` | Movement | Footprint (reference to the footprint shape), margin (units); the class is the resource itself, its map is owned by the scene's `StaticNavigation` |

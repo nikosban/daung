@@ -11,4 +11,5 @@ braking = 1.5
 yaw_rate = 20.0
 arrival_tolerance = 1.0
 waypoint_tolerance = 2.0
+corner_drift_limit = 0.5
 blocked_speed_tolerance = 0.05

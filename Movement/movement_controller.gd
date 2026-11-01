@@ -136,11 +136,13 @@ func _request_route() -> void:
 		order_failed.emit()
 
 
-## Route follower: owns segment progress along the route (planar, from actual
-## position) and returns preferred world velocity. _waypoint is the end of the
-## current segment. It advances only once the ship has passed that corner
-## (along the segment), never earlier, so the ship does not cut across the
-## clearance band, and never back, so a passed corner is never chased.
+## Route follower (pure pursuit): owns segment progress along the route
+## (planar, from actual position) and returns preferred world velocity.
+## _waypoint is the end of the current segment; it advances only once the ship
+## has passed that corner and never goes back. The ship aims at the point a
+## look-ahead distance further along the route from its projection on the
+## current segment. That point slides continuously past corners, so the
+## commanded direction never jumps at a segment end and short legs blend.
 func _follow_route() -> Vector3:
 	var here := _planar(global_position)
 	var last := _route.size() - 1
@@ -153,20 +155,54 @@ func _follow_route() -> Vector3:
 		if along < segment_start.distance_to(segment_end):
 			break
 		_waypoint += 1
-	# Aim waypoint_tolerance ahead along the current segment, never past its
-	# corner.
-	var end := _planar(_route[_waypoint])
-	var aim := end
+	var aim := _planar(_route[_waypoint])
 	if _waypoint > 0:
 		var start := _planar(_route[_waypoint - 1])
-		var direction := (end - start).normalized()
-		var ahead := clampf((here - start).dot(direction) + profile.waypoint_tolerance, 0.0, start.distance_to(end))
-		aim = start + direction * ahead
+		var end := aim
+		var projected := clampf((here - start).dot((end - start).normalized()), 0.0, start.distance_to(end))
+		aim = _point_along_route(projected + _lookahead())
 	var to_aim := aim - here
 	if to_aim.is_zero_approx():
 		return Vector3.ZERO
 	_desired_direction = to_aim.normalized()
-	return _desired_direction * _route_speed(here)
+	var speed := _route_speed(here)
+	# Slow for the hull's turn rate only while a route bend is still ahead
+	# (around obstacles); a straight final leg moves exactly as in open space.
+	if _waypoint < _route.size() - 1:
+		speed = minf(speed, _turn_speed())
+	return _desired_direction * speed
+
+
+## Look-ahead distance along the route. A longer, speed-scaled look-ahead
+## (the turning radius) was measured to cut obstacle corners to contact, so it
+## stays at waypoint_tolerance.
+func _lookahead() -> float:
+	return profile.waypoint_tolerance
+
+
+## The route point the given distance past the start of the current segment,
+## continuing across later segments; the goal if the route ends first.
+func _point_along_route(distance: float) -> Vector3:
+	for i in range(_waypoint, _route.size()):
+		var start := _planar(_route[i - 1])
+		var end := _planar(_route[i])
+		var length := start.distance_to(end)
+		if distance <= length:
+			return start + (end - start).normalized() * distance
+		distance -= length
+	return _planar(_route[_route.size() - 1])
+
+
+## Pure-pursuit speed limit: the arc to the aim point has curvature
+## 2·sin(α)/L for heading error α; the hull can only follow it at speeds where
+## that curvature needs no more than yaw_rate.
+func _turn_speed() -> float:
+	var heading := _planar(-global_basis.z).normalized()
+	var sin_error := absf(heading.cross(_desired_direction).y)
+	if is_zero_approx(sin_error):
+		return profile.max_forward_speed
+	var curvature := 2.0 * sin_error / _lookahead()
+	return maxf(profile.max_lateral_speed, deg_to_rad(profile.yaw_rate) / curvature)
 
 
 ## Highest speed from which the ship can still take every remaining corner
@@ -183,18 +219,19 @@ func _route_speed(here: Vector3) -> float:
 	return speed
 
 
-## Speed at which the velocity change needed to turn onto the next segment can
-## be absorbed by the ship's acceleration and braking within the clearance
-## margin, so the turn overshoots the route by no more than the margin.
+## Speed at which the velocity change from the current segment's direction to
+## the direction after corner i can be absorbed by the ship's acceleration and
+## braking within corner_drift_limit, so the turn swings outward off the route
+## by no more than that. Measuring from the current segment makes a chain of
+## small bends count as the one larger turn it is.
 func _corner_speed(i: int) -> float:
-	var corner := _planar(_route[i])
-	var incoming := (corner - _planar(_route[i - 1])).normalized()
-	var outgoing := (_planar(_route[i + 1]) - corner).normalized()
+	var incoming := (_planar(_route[_waypoint]) - _planar(_route[_waypoint - 1])).normalized()
+	var outgoing := (_planar(_route[i + 1]) - _planar(_route[i])).normalized()
 	var change := incoming.distance_to(outgoing)
 	if is_zero_approx(change):
 		return profile.max_forward_speed
 	var rate := minf(profile.acceleration, profile.braking)
-	return sqrt(2.0 * rate * clearance.margin) / change
+	return sqrt(2.0 * rate * profile.corner_drift_limit) / change
 
 
 func _planar(point: Vector3) -> Vector3:
