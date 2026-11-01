@@ -30,6 +30,8 @@ var _route_pending := false
 var _desired_direction := Vector3.ZERO
 # Facing reference for the hull, separate from the translation direction.
 var _heading := Vector3.ZERO
+# Per-order yaw lead; translation and collision keep running while it expires.
+var _rotation_lead_remaining := 0.0
 # Route speed plan, built once per route: arc length at each route point, and
 # arc ranges [start, end] where speed is held at or below a planned speed.
 var _arc := PackedFloat32Array()
@@ -47,8 +49,11 @@ func _ready() -> void:
 
 
 ## Replaces any active order with a new destination on the XZ plane. The old
-## route and any pending route request are discarded.
+## route and any pending route request are discarded. Actual planar speed at
+## receipt selects the profile's from-rest or already-moving yaw lead.
 func move_to(world_position: Vector3) -> void:
+	var speed := _planar(velocity).length()
+	_rotation_lead_remaining = profile.rotation_lead_from_rest if speed <= profile.blocked_speed_tolerance else profile.rotation_lead_while_moving
 	_destination = Vector3(world_position.x, global_position.y, world_position.z)
 	_set_route(PackedVector3Array())
 	_route_pending = true
@@ -58,6 +63,7 @@ func move_to(world_position: Vector3) -> void:
 
 ## Cancels the active order. The ship brakes to rest; no event is emitted.
 func stop() -> void:
+	_rotation_lead_remaining = 0.0
 	_set_route(PackedVector3Array())
 	_route_pending = false
 	_desired_direction = Vector3.ZERO
@@ -98,7 +104,12 @@ func _physics_process(delta: float) -> void:
 	var requested := Vector3.ZERO
 	if following:
 		requested = _limit_to_hull(_follow_route())
-		_turn_toward(_heading, delta)
+		# Only following ticks consume the lead, even with no physical progress.
+		# No catch-up turn on expiry, and no restart at route corners.
+		if _rotation_lead_remaining > 0.0:
+			_rotation_lead_remaining = maxf(0.0, _rotation_lead_remaining - delta)
+		else:
+			_turn_toward(_heading, delta)
 
 	var rate := profile.acceleration if requested.length() > velocity.length() else profile.braking
 	velocity = velocity.move_toward(requested, rate * delta)
@@ -140,6 +151,7 @@ func _request_route() -> void:
 	_route_pending = false
 	_set_route(navigation.find_route(clearance, global_position, _destination))
 	if _route.is_empty():
+		_rotation_lead_remaining = 0.0
 		_desired_direction = Vector3.ZERO
 		_state = State.IDLE
 		order_failed.emit()
@@ -365,7 +377,7 @@ func _limit_to_hull(requested: Vector3) -> Vector3:
 	var forward := -global_basis.z
 	var right := global_basis.x
 	# Bounded reverse: a target behind is reached by backing, sliding and
-	# turning at once; the mix changes continuously as yaw aligns.
+	# turning after the order's yaw lead; the mix changes as yaw aligns.
 	var forward_speed := clampf(requested.dot(forward), -profile.max_reverse_speed, profile.max_forward_speed)
 	var lateral_speed := clampf(requested.dot(right), -profile.max_lateral_speed, profile.max_lateral_speed)
 	return forward * forward_speed + right * lateral_speed
@@ -395,6 +407,7 @@ func _check_arrival() -> void:
 	var stopping_travel := velocity * (velocity.length() / (2.0 * profile.braking))
 	if (offset - stopping_travel).length() > tolerance:
 		return
+	_rotation_lead_remaining = 0.0
 	_set_route(PackedVector3Array())
 	_desired_direction = Vector3.ZERO
 	_state = State.ARRIVED

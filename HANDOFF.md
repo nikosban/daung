@@ -5,13 +5,14 @@ Current state only. Replace outdated content; do not append history.
 ## Current state
 
 Godot 4.7 project (Forward Plus, Jolt Physics). Ship movement works on the
-XZ plane with planar collision and static routing (Tasks 1b–1d, 1d.1):
+XZ plane with planar collision and static routing (Tasks 1b–1d, 1d.1, 1d.3):
 
 - One reusable ship (`Movement/ship.tscn`, owner placeholder model
   `Arrata_Frigate_001`) takes `move_to()` / `stop()` orders, accelerates and
   brakes per its `MovementProfile`, and backs up (bounded reverse) and
-  slides sideways while yaw turns gradually. A short move behind can arrive
-  before the hull has turned to face it.
+  slides sideways immediately. Yaw starts after an order-onset lead, then
+  turns gradually during travel. A short move behind can arrive before the
+  hull has turned to face it; arrival never requires alignment.
 - It moves through one `move_and_collide()` per tick. Ships and obstacles
   block it without sliding; a blocked ship keeps its order, waits and
   resumes on its own when the way clears.
@@ -31,6 +32,11 @@ select a ship, right-click to move, `C` to stop; the route is drawn in blue):
   Unreachable marker inside an enclosure.
 
 No ship avoidance yet.
+
+Task 1d.3 regression runner:
+`godot --headless --path . --fixed-fps 60 --script Movement/Check/rotation_lead_check.gd`.
+It reuses the ship and check scenes, emitting full 60-Hz CSV traces and JSON
+results under ignored `builds/issue-14/`. Visual feel remains for owner playtest.
 
 ## Accepted decisions
 
@@ -96,7 +102,16 @@ No ship avoidance yet.
     brake; longer straights accelerate normally;
   - the hull faces the route's direction while translation corrects drift,
     so the ship slides instead of rotating for small corrections;
-  - translation and gradual rotation start together.
+- Translation-first order onset (Task 1d.3, approved for provisional playtest):
+  - actual XZ speed at receipt ≤ `blocked_speed_tolerance` (0.05 units/s)
+    selects `rotation_lead_from_rest` **0.35 s**; higher speed selects
+    `rotation_lead_while_moving` **0.10 s**, including no-order coasting;
+  - both values live in the shared frigate MovementProfile, editor range
+    0–1 s, step 0.01 s; one remaining-time float lives on each controller;
+  - only following ticks consume time; pending navigation does not;
+    Blocked/no-progress ticks do, and waypoints never restart the lead;
+  - translation keeps running; expiry permits the normal bounded yaw;
+    stop, failure and arrival clear the lead before events.
 
 ## Known limitations
 
@@ -107,9 +122,9 @@ No ship avoidance yet.
   - the 2-unit berth holds beside straight obstacle sides (baked edge exactly
     12.5);
   - around obstacle corners, Godot's erosion puts the route as close as
-    11.29; the ship tracks the route closely and passes at ≥ 11.27 on
-    forward routes and ≥ 11.20 on reverse passes after an order replacement
-    (0.70 beyond the footprint; 21 replacement timings, no contact).
+    11.29; the earlier forward-route check measured clearance ≥ 11.27.
+    The 1d.3 replacement sweep measured ≥ **11.207** (0.707 beyond the
+    footprint; 21 timings, no contact or Blocked ticks; 1d.1 baseline 11.198).
     Accepted as tested, not a guaranteed floor.
 - Steady speed through closely spaced corners makes those routes slower
   (Reachable: about 6 s longer than with speed-ups between corners).
@@ -130,6 +145,15 @@ No ship avoidance yet.
   21-unit circle around a 5.9-wide hull.
 - A blocked ship's displayed speed flickers between 0.00 and about 0.03
   units/s from engine contact recovery.
+- Replacing an order at resting safe-margin contact can report `Moving`
+  while making negligible travel (collision-check centre (-40, 10.501),
+  goal (-40, -30), same result with zero or 0.35 s lead). Collision still
+  prevents passage. This existing contact-state edge case was not changed.
+- Provisional onset timing is technically verified, not visually approved:
+  from rest, 0.0703 units travelled before first yaw (22 held 60-Hz ticks);
+  a ~5 units/s retarget travelled 0.5719 units (7 held ticks). Each timing
+  is within one tick of its configured interval. The rest cue may be hard
+  to see; final timing/feel remains the owner's decision.
 - Native RVO predicts imperfectly for slow-turning ships.
 - One static route map per clearance class.
 - No global traffic scheduler.
@@ -146,5 +170,6 @@ No ship avoidance yet.
 
 ## Next task
 
-#6 — Task 1e: Add predictive ship avoidance. Avoidance must use the same
-locomotion limits, including reverse.
+#14 — owner playtest/review and merge of the translation-first onset change.
+After merge: #6 — Task 1e, predictive ship avoidance, using the same
+locomotion limits including reverse. #13 remains deferred.
