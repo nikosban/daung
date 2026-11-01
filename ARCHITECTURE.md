@@ -37,9 +37,10 @@ and the project has none installed.
 
 ## Movement
 
-Status: Tasks 1b–1d implemented — orders, validated static routes per
-clearance class, waypoint following, locomotion, planar collision through one
-`move_and_collide()` commit, all four states and both events. Avoidance (1e)
+Status: Tasks 1b–1d and 1d.1 implemented — orders, validated static routes
+per clearance class, waypoint following, locomotion with bounded reverse,
+planar collision through one `move_and_collide()` commit, all four states and
+both events. Avoidance (1e)
 is still planned; engine mechanisms named for it are candidate choices, not
 verified behavior.
 
@@ -127,9 +128,13 @@ Run in this order each tick. Each is introduced by the ticket shown.
 | 5 | Planar Collision | Nothing; engine moves the body | Proposed displacement, footprint, world geometry | Body moved once; collision/contact and actual travel | 1c |
 | 6 | Controller state/commit | Order, actual velocity, yaw, state, events | Actual travel and collision result | Reconciled velocity, state, events | 1b (extended in 1c–1e) |
 
-Locomotion (1b): the requested velocity is limited to the hull's current
-forward and lateral axes, with no commanded reverse (a target behind is
-reached by turning and sliding sideways). Actual velocity then moves toward
+Locomotion (1b, reverse 1d.1): the requested velocity is limited to the
+hull's current axes: forward component `−max_reverse_speed …
++max_forward_speed`, lateral `±max_lateral_speed`. A target behind is
+reached by backing, sliding and turning at once; the mix changes continuously
+as yaw aligns (no modes or distance thresholds). The reverse limit bounds the
+backward component, not the combined diagonal speed. Actual velocity then
+moves toward
 that request at `acceleration` (speeding up) or `braking` (slowing down) and
 is never clamped afterwards, so a yaw change cannot snap speed. Yaw turns
 toward the facing reference at `yaw_rate`: the desired direction for direct
@@ -176,13 +181,16 @@ chased:
     back up to it.
   - **Goal braking distance:** the route distance left, but never less than
     the actual XZ distance to the goal. A ship carried past the route's end,
-    or off to its side, is still asked to cover that distance (turning and
-    sliding back if needed), never to stop short of the goal.
+    or off to its side, is still asked to cover that distance (backing,
+    sliding and turning as needed), never to stop short of the goal.
 - **Hull cap,** only on routes that bend: speed never exceeds what the hull,
   as currently turned, can thrust along the translation direction
-  (`max_lateral_speed / sin(angle)`; sideways only if the direction is
-  behind the hull). Direct and single-segment orders aren't capped, so
-  open-space movement is unchanged.
+  (`max_lateral_speed / sin(angle)`). Behind the hull, the backward share
+  must also fit: `min(max_lateral_speed / |sin|, max(max_lateral_speed,
+  max_reverse_speed / |cos|))`. The cap never drops below
+  `max_lateral_speed`, so a ship with reverse 0 still slides sideways while
+  it turns (`_limit_to_hull` drops the backward share). Direct and
+  single-segment orders aren't capped, so open-space movement is unchanged.
 
 Before 1e,
 avoidance passes preferred movement through unchanged.
@@ -354,6 +362,14 @@ large formations.
   on wait indefinitely (observed in 1c).
 - Navmeshes are pre-baked; moving a static obstacle needs an editor re-bake.
   No dynamic map changes.
+- Ship types with reverse below lateral: behind the hull, the lateral floor of
+  the hull cap asks for more backward speed than allowed, and the trimmed
+  request leaves the route direction (measured 17.6° with reverse 0.5, vs
+  41.2° with reverse 0 and 1.9° for the frigate). The speed plan
+  (`_corner_speed`) does not model reverse.
+- Actual velocity is never clamped to the hull limits, so while the hull
+  turns under a diagonal velocity its hull-relative components can briefly
+  exceed the requested limits (measured lateral up to 1.58 with limit 1.5).
 
 ### Open
 
@@ -389,7 +405,7 @@ fields, units and editor ranges only.
 
 | Asset | Module | Values |
 |---|---|---|
-| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), acceleration (units/s²), braking (units/s²), yaw rate (°/s), arrival tolerance (units), waypoint tolerance / look-ahead (units), corner drift limit (units), blocked speed tolerance (units/s) |
+| `MovementProfile` | Movement | Max forward speed (units/s), max lateral speed (units/s), max reverse speed (units/s, below forward; 0 = no reverse), acceleration (units/s²), braking (units/s²), yaw rate (°/s), arrival tolerance (units), waypoint tolerance / look-ahead (units), corner drift limit (units), blocked speed tolerance (units/s) |
 | Footprint (`CylinderShape3D`) | Movement | Radius (units), height (units) |
 | `AvoidanceProfile` | Movement | Radius, neighbor range, time horizon, neighbor limit |
 | `NavigationClearance` | Movement | Footprint (reference to the footprint shape), margin (units); the class is the resource itself, its map is owned by the scene's `StaticNavigation` |

@@ -5,12 +5,13 @@ Current state only. Replace outdated content; do not append history.
 ## Current state
 
 Godot 4.7 project (Forward Plus, Jolt Physics). Ship movement works on the
-XZ plane with planar collision and static routing (Tasks 1b–1d):
+XZ plane with planar collision and static routing (Tasks 1b–1d, 1d.1):
 
 - One reusable ship (`Movement/ship.tscn`, owner placeholder model
   `Arrata_Frigate_001`) takes `move_to()` / `stop()` orders, accelerates and
-  brakes per its `MovementProfile`, and slides sideways while yaw turns
-  gradually.
+  brakes per its `MovementProfile`, and backs up (bounded reverse) and
+  slides sideways while yaw turns gradually. A short move behind can arrive
+  before the hull has turned to face it.
 - It moves through one `move_and_collide()` per tick. Ships and obstacles
   block it without sliding; a blocked ship keeps its order, waits and
   resumes on its own when the way clears.
@@ -56,8 +57,14 @@ No ship avoidance yet.
 - Starting `MovementProfile` for `Arrata_Frigate_001`: forward 5 units/s,
   lateral 1.5 units/s, acceleration 1.0 units/s², braking 1.5 units/s², yaw
   20°/s, arrival tolerance 1.0 units — owner: "I agree" (Task 1b).
-- No commanded reverse; a target behind is reached by turning and sliding
-  sideways — owner: "I agree" (Task 1b).
+- Bounded reverse while rotating: a target behind is reached by translating
+  backward and sideways while the hull turns gradually, even if rotation
+  isn't complete on arrival; no reverse mode or distance threshold — owner
+  answers on PR #10, Task 1d.1 (#11). Replaces the 1b "no commanded reverse"
+  decision.
+- Frigate `max_reverse_speed` 1.5 units/s (backward hull component), chosen
+  by the tech lead on the owner's delegation; reverse must stay below forward
+  speed (Task 1d.1).
 - Limits apply to the requested velocity; actual velocity changes only at
   the acceleration/braking rate (Task 1b).
 - Frigate footprint `CylinderShape3D` radius 10.5 units, height 4 units —
@@ -122,6 +129,12 @@ No ship avoidance yet.
 - Native RVO predicts imperfectly for slow-turning ships.
 - One static route map per clearance class.
 - No global traffic scheduler.
+- Ship types with reverse below lateral drift off the route direction when
+  the route lies behind the hull (17.6° measured with reverse 0.5); the
+  frigate (reverse = lateral) does not.
+- While the hull turns under a diagonal velocity, actual hull-relative speed
+  can briefly exceed the axis limits (lateral up to 1.58 of 1.5 measured);
+  actual velocity is never clamped, to avoid snaps.
 - QA deferred: congestion deadlock resolution, hull-exact rotating contact,
   large formations, pre-overlapped spawns, high-speed tunnelling.
 - UNDECIDED (owner): final movement feel (tuned in play), fleet scale,
@@ -129,7 +142,5 @@ No ship avoidance yet.
 
 ## Next task
 
-After #5 merges: a separate ticket for limited reverse translation while
-rotating (agreed direction on PR #10; frigate `max_reverse_speed` 1.5
-units/s, delegated to the tech lead). Then #6 — Task 1e: Add predictive ship
-avoidance.
+#6 — Task 1e: Add predictive ship avoidance. Avoidance must use the same
+locomotion limits, including reverse.
