@@ -7,34 +7,50 @@ extends CharacterBody3D
 
 ## Emitted once when the active order arrives.
 signal order_completed
-## Emitted once when the active order's route is unreachable (static
-## navigation, Task 1d). The direct route used before 1d always succeeds.
+## Emitted once when the active order's destination is unreachable for this
+## ship's clearance on the static navigation map.
 signal order_failed
 
 enum State { IDLE, MOVING, BLOCKED, ARRIVED }
 
 @export var profile: MovementProfile
+## Clearance class for static routes.
+@export var clearance: NavigationClearance
+## The scene's static navigation. Required unless direct_route is set.
+@export var navigation: StaticNavigation
+## Only for scenes that intentionally have no navigation (the 1b/1c checks):
+## route straight to the goal. Collision still applies.
+@export var direct_route := false
 
 var _state := State.IDLE
 var _destination := Vector3.ZERO
 var _route := PackedVector3Array()
+var _waypoint := 0
+var _route_pending := false
 var _desired_direction := Vector3.ZERO
 
 
 func _ready() -> void:
 	assert(profile != null, "MovementController needs a MovementProfile.")
+	if not direct_route and (navigation == null or clearance == null):
+		push_error("%s needs a StaticNavigation and a NavigationClearance, or direct_route." % name)
 
 
-## Replaces any active order with a new destination on the XZ plane.
+## Replaces any active order with a new destination on the XZ plane. The old
+## route and any pending route request are discarded.
 func move_to(world_position: Vector3) -> void:
 	_destination = Vector3(world_position.x, global_position.y, world_position.z)
-	_route = _request_route(_destination)
+	_route = PackedVector3Array()
+	_waypoint = 0
+	_route_pending = true
 	_state = State.MOVING
+	_request_route()
 
 
 ## Cancels the active order. The ship brakes to rest; no event is emitted.
 func stop() -> void:
 	_route = PackedVector3Array()
+	_route_pending = false
 	_desired_direction = Vector3.ZERO
 	_state = State.IDLE
 
@@ -51,15 +67,27 @@ func get_desired_direction() -> Vector3:
 	return _desired_direction
 
 
+func get_route() -> PackedVector3Array:
+	return _route
+
+
+func get_waypoint_index() -> int:
+	return _waypoint
+
+
 func _physics_process(delta: float) -> void:
+	if _route_pending:
+		_request_route()
 	var has_order := _state == State.MOVING or _state == State.BLOCKED
 	if not has_order and velocity.is_zero_approx():
 		velocity = Vector3.ZERO
 		return
 
-	# No active order: zero request, so locomotion brakes to rest.
+	# No active order, or its route is still pending: zero request, so
+	# locomotion brakes to rest.
+	var following := has_order and not _route_pending
 	var requested := Vector3.ZERO
-	if has_order:
+	if following:
 		requested = _limit_to_hull(_follow_route())
 		_turn_toward(_desired_direction, delta)
 
@@ -76,7 +104,7 @@ func _physics_process(delta: float) -> void:
 	travel.y = 0.0
 	velocity = travel / delta
 
-	if not has_order:
+	if not following:
 		return
 	# Collision takes precedence over arrival: a blocked tick never completes
 	# the order. The next tick retries with the same order. A contact enters
@@ -90,22 +118,45 @@ func _physics_process(delta: float) -> void:
 	_check_arrival()
 
 
-## Route provider seam. Direct route until Task 1d adds static navigation.
-func _request_route(goal: Vector3) -> PackedVector3Array:
-	return PackedVector3Array([goal])
+## Requests the route for the active order once static navigation is ready.
+## Until then the request stays pending; no pathfinding runs per tick after.
+func _request_route() -> void:
+	if direct_route:
+		_route = PackedVector3Array([_destination])
+		_route_pending = false
+		return
+	# Misconfigured ships (reported in _ready) never route around anything.
+	if navigation == null or not navigation.is_ready(clearance):
+		return
+	_route_pending = false
+	_route = navigation.find_route(clearance, global_position, _destination, profile.arrival_tolerance)
+	if _route.is_empty():
+		_desired_direction = Vector3.ZERO
+		_state = State.IDLE
+		order_failed.emit()
 
 
-## Route follower: preferred world velocity toward the route's end, slowing
+## Route follower: owns waypoint progress (planar, from actual position) and
+## returns preferred world velocity toward the current waypoint, slowing only
 ## so the ship can brake to rest at the goal.
 func _follow_route() -> Vector3:
-	var to_goal := _route[_route.size() - 1] - global_position
-	to_goal.y = 0.0
-	var distance := to_goal.length()
-	if is_zero_approx(distance):
+	var here := _planar(global_position)
+	var last := _route.size() - 1
+	while _waypoint < last and here.distance_to(_planar(_route[_waypoint])) <= profile.waypoint_tolerance:
+		_waypoint += 1
+	var to_waypoint := _planar(_route[_waypoint]) - here
+	if to_waypoint.is_zero_approx():
 		return Vector3.ZERO
-	_desired_direction = to_goal / distance
-	var speed := minf(profile.max_forward_speed, sqrt(2.0 * profile.braking * distance))
+	var remaining := to_waypoint.length()
+	for i in range(_waypoint, last):
+		remaining += _planar(_route[i]).distance_to(_planar(_route[i + 1]))
+	_desired_direction = to_waypoint.normalized()
+	var speed := minf(profile.max_forward_speed, sqrt(2.0 * profile.braking * remaining))
 	return _desired_direction * speed
+
+
+func _planar(point: Vector3) -> Vector3:
+	return Vector3(point.x, 0.0, point.z)
 
 
 ## Limits the requested velocity to the hull's current local axes. Actual

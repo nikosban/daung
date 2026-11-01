@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="NavigationClearance" format=3]
+
+[ext_resource type="Script" path="res://Movement/navigation_clearance.gd" id="1_clearance"]
+[ext_resource type="Shape3D" path="res://Movement/Profiles/arrata_frigate_footprint.tres" id="2_footprint"]
+
+[resource]
+script = ExtResource("1_clearance")
+footprint = ExtResource("2_footprint")
+margin = 2.0

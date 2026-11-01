@@ -5,7 +5,7 @@ Current state only. Replace outdated content; do not append history.
 ## Current state
 
 Godot 4.7 project (Forward Plus, Jolt Physics). Ship movement works on the
-XZ plane with planar collision (Tasks 1b–1c):
+XZ plane with planar collision and static routing (Tasks 1b–1d):
 
 - One reusable ship (`Movement/ship.tscn`, owner placeholder model
   `Arrata_Frigate_001`) takes `move_to()` / `stop()` orders, accelerates and
@@ -14,16 +14,22 @@ XZ plane with planar collision (Tasks 1b–1c):
 - It moves through one `move_and_collide()` per tick. Ships and obstacles
   block it without sliding; a blocked ship keeps its order, waits and
   resumes on its own when the way clears.
+- In scenes with a `StaticNavigation` node, ships route around fixed
+  obstacles on a pre-baked navmesh for their clearance class (footprint +
+  margin). An order whose exact goal is unreachable fires `order_failed`
+  once and doesn't move.
 - `order_completed` fires once on arrival.
 
 Check scenes (F6 with the tab active, or Run Specific Scene; number keys
-select a ship, right-click to move, `C` to stop):
+select a ship, right-click to move, `C` to stop; the route is drawn in blue):
 
-- `Movement/Check/movement_check.tscn`: one ship in open space;
+- `Movement/Check/movement_check.tscn`: one ship in open space (direct route);
 - `Movement/Check/collision_check.tscn`: Lane A ship vs obstacle, Lane B
-  ship vs ship.
+  ship vs ship (direct route);
+- `Movement/Check/routing_check.tscn`: Reachable marker behind a wall,
+  Unreachable marker inside an enclosure.
 
-No obstacle routing or ship avoidance yet.
+No ship avoidance yet.
 
 ## Accepted decisions
 
@@ -59,11 +65,24 @@ No obstacle routing or ship avoidance yet.
   for 1d/1e.
 - No sliding; a grazing contact also blocks until the path clears — owner:
   "I accept" (Task 1c).
+- Clearance margin 2 units beyond the footprint (frigate bake radius 12.5);
+  waypoint tolerance 2.0 units — owner: "Approved" (Task 1d).
+- Scene-owned navigation maps per clearance class; pre-baked navmeshes;
+  direct route only by explicit `direct_route`; route validation requires
+  the exact goal on the clearance navmesh and the path end within arrival
+  tolerance; planar (XZ) waypoint progress (Task 1d review).
 
 ## Known limitations
 
-- Until 1d, routes are a straight line to the destination, so a ship ordered
-  through an obstacle stays `Blocked`, and `order_failed` never fires.
+- A destination closer to an obstacle than footprint + margin is
+  unreachable (`order_failed`), even if it looks open.
+- Corner-cutting at waypoints uses most of the 2-unit margin (closest
+  observed approach 0.15 units above the footprint radius); tighter corners
+  or larger waypoint tolerance could reach contact and a permanent `Blocked`.
+- Navmeshes are pre-baked: after moving an obstacle, re-bake the scene's
+  region in the editor. No dynamic map changes.
+- Only the frigate clearance class exists; other classes need owner-confirmed
+  ship sizes.
 - Until 1e, ships do not avoid each other; two ships blocking each other
   head on wait indefinitely.
 - The circular footprint overestimates hull clearance: the frigate blocks a
@@ -80,4 +99,4 @@ No obstacle routing or ship avoidance yet.
 
 ## Next task
 
-#5 — Task 1d: Add static navigation and route following.
+#6 — Task 1e: Add predictive ship avoidance.

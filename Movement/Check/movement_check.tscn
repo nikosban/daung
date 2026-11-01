@@ -20,6 +20,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -5, 0)
 mesh = SubResource("PlaneMesh_ground")
 
 [node name="Ship" parent="." instance=ExtResource("2_ship")]
+direct_route = true
 
 [node name="HUD" type="CanvasLayer" parent="."]
 
