@@ -30,6 +30,10 @@ var _route_pending := false
 var _desired_direction := Vector3.ZERO
 # Facing reference for the hull, separate from the translation direction.
 var _heading := Vector3.ZERO
+# Per-order yaw onset. Only actual progress along the live follower counts.
+var _rotation_lead_distance_remaining := 0.0
+var _rotation_lead_timeout_remaining := 0.0
+var _rotation_lead_stall_remaining := 0.0
 # Route speed plan, built once per route: arc length at each route point, and
 # arc ranges [start, end] where speed is held at or below a planned speed.
 var _arc := PackedFloat32Array()
@@ -47,8 +51,13 @@ func _ready() -> void:
 
 
 ## Replaces any active order with a new destination on the XZ plane. The old
-## route and any pending route request are discarded.
+## route and any pending route request are discarded. Actual planar speed at
+## receipt selects the profile's from-rest or already-moving yaw lead.
 func move_to(world_position: Vector3) -> void:
+	var speed := _planar(velocity).length()
+	_rotation_lead_distance_remaining = profile.rotation_lead_distance_from_rest if speed <= profile.blocked_speed_tolerance else profile.rotation_lead_distance_while_moving
+	_rotation_lead_timeout_remaining = profile.rotation_lead_timeout
+	_rotation_lead_stall_remaining = profile.rotation_lead_stall_timeout
 	_destination = Vector3(world_position.x, global_position.y, world_position.z)
 	_set_route(PackedVector3Array())
 	_route_pending = true
@@ -58,6 +67,7 @@ func move_to(world_position: Vector3) -> void:
 
 ## Cancels the active order. The ship brakes to rest; no event is emitted.
 func stop() -> void:
+	_clear_rotation_lead()
 	_set_route(PackedVector3Array())
 	_route_pending = false
 	_desired_direction = Vector3.ZERO
@@ -95,10 +105,13 @@ func _physics_process(delta: float) -> void:
 	# No active order, or its route is still pending: zero request, so
 	# locomotion brakes to rest.
 	var following := has_order and not _route_pending
+	var preferred := Vector3.ZERO
 	var requested := Vector3.ZERO
 	if following:
-		requested = _limit_to_hull(_follow_route())
-		_turn_toward(_heading, delta)
+		preferred = _follow_route()
+		requested = _limit_to_hull(preferred)
+		if _rotation_lead_distance_remaining <= 0.0:
+			_turn_toward(_heading, delta)
 
 	var rate := profile.acceleration if requested.length() > velocity.length() else profile.braking
 	velocity = velocity.move_toward(requested, rate * delta)
@@ -115,6 +128,7 @@ func _physics_process(delta: float) -> void:
 
 	if not following:
 		return
+	_advance_rotation_lead(preferred, requested, travel, delta)
 	# Collision takes precedence over arrival: a blocked tick never completes
 	# the order. The next tick retries with the same order. A contact enters
 	# Blocked; only real progress leaves it, because engine contact recovery
@@ -125,6 +139,35 @@ func _physics_process(delta: float) -> void:
 		return
 	_state = State.MOVING
 	_check_arrival()
+
+
+## Count only actual forward projection along this tick's local route request.
+## Onset release takes effect next tick, preserving this tick's single commit.
+func _advance_rotation_lead(preferred: Vector3, requested: Vector3, travel: Vector3, delta: float) -> void:
+	if _rotation_lead_distance_remaining <= 0.0:
+		return
+	_rotation_lead_distance_remaining = maxf(0.0, _rotation_lead_distance_remaining - maxf(0.0, travel.dot(_planar(preferred).normalized())))
+	_rotation_lead_timeout_remaining = maxf(0.0, _rotation_lead_timeout_remaining - delta)
+	var slow := velocity.length() <= profile.blocked_speed_tolerance
+	if slow:
+		_rotation_lead_stall_remaining = maxf(0.0, _rotation_lead_stall_remaining - delta)
+	else:
+		_rotation_lead_stall_remaining = profile.rotation_lead_stall_timeout
+	# An impossible initial request (e.g. no reverse, exactly behind) must be
+	# allowed to turn promptly. Opposing momentum at speed is not a stall.
+	if (
+		_rotation_lead_distance_remaining <= 0.0
+		or (not preferred.is_zero_approx() and requested.is_zero_approx() and slow)
+		or is_zero_approx(_rotation_lead_stall_remaining)
+		or is_zero_approx(_rotation_lead_timeout_remaining)
+	):
+		_clear_rotation_lead()
+
+
+func _clear_rotation_lead() -> void:
+	_rotation_lead_distance_remaining = 0.0
+	_rotation_lead_timeout_remaining = 0.0
+	_rotation_lead_stall_remaining = 0.0
 
 
 ## Requests the route for the active order once static navigation is ready.
@@ -140,6 +183,7 @@ func _request_route() -> void:
 	_route_pending = false
 	_set_route(navigation.find_route(clearance, global_position, _destination))
 	if _route.is_empty():
+		_clear_rotation_lead()
 		_desired_direction = Vector3.ZERO
 		_state = State.IDLE
 		order_failed.emit()
@@ -365,7 +409,7 @@ func _limit_to_hull(requested: Vector3) -> Vector3:
 	var forward := -global_basis.z
 	var right := global_basis.x
 	# Bounded reverse: a target behind is reached by backing, sliding and
-	# turning at once; the mix changes continuously as yaw aligns.
+	# turning after the order's yaw lead; the mix changes as yaw aligns.
 	var forward_speed := clampf(requested.dot(forward), -profile.max_reverse_speed, profile.max_forward_speed)
 	var lateral_speed := clampf(requested.dot(right), -profile.max_lateral_speed, profile.max_lateral_speed)
 	return forward * forward_speed + right * lateral_speed
@@ -395,6 +439,7 @@ func _check_arrival() -> void:
 	var stopping_travel := velocity * (velocity.length() / (2.0 * profile.braking))
 	if (offset - stopping_travel).length() > tolerance:
 		return
+	_clear_rotation_lead()
 	_set_route(PackedVector3Array())
 	_desired_direction = Vector3.ZERO
 	_state = State.ARRIVED
