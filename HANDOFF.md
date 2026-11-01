@@ -67,6 +67,8 @@ No ship avoidance yet.
   "I accept" (Task 1c).
 - Clearance margin 2 units beyond the footprint (frigate bake radius 12.5);
   waypoint tolerance 2.0 units — owner: "Approved" (Task 1d).
+- Corner berth: keep the default bake and accept about 0.8–0.9 units beyond
+  the footprint at obstacle corners — owner: option A (Task 1d).
 - Static navigation (Task 1d review):
   - scene-owned navigation maps per clearance class and pre-baked
     navmeshes;
@@ -82,13 +84,13 @@ No ship avoidance yet.
 
 - A destination closer to an obstacle than footprint + margin is
   unreachable (`order_failed`), even if it looks open.
-- **Owner decision pending:** the 2-unit berth holds beside straight
-  obstacle sides (baked edge exactly 12.5). Around obstacle corners, Godot's
-  erosion puts the route as close as 11.29 and the ship as close as 11.42,
-  still 0.9 beyond the footprint and with no contact.
-- Navmeshes are pre-baked: after moving an obstacle, re-bake the scene's
-  region in the editor. No dynamic map changes.
-- Only the frigate clearance class exists; other classes need owner-confirmed
+- Reduced berth at obstacle corners, accepted by the owner (option A; to
+  reassess in real levels):
+  - the 2-unit berth holds beside straight obstacle sides (baked edge exactly
+    12.5);
+  - around obstacle corners, Godot's erosion puts the route as close as
+    11.29 and the ship as close as 11.42, still about 0.8–0.9 beyond the
+    footprint, with no contact.
 - Navmeshes are pre-baked: after moving an obstacle, re-bake the scene's
   region in the editor. No dynamic map changes.
 - Only the frigate clearance class exists; other classes need owner-confirmed

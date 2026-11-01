@@ -338,8 +338,8 @@ large formations.
   - the ship tracks the route and stays at ≥ 11.42 (≥ 11.98 on a single
     route), with no contact.
   - The approved 2-unit berth is therefore held beside sides but not fully
-    at corners. Reducing `edge_max_error` didn't help. Owner decision
-    pending (see `HANDOFF.md`).
+    at corners. Reducing `edge_max_error` didn't help. The owner accepted
+    this (option A, see `HANDOFF.md`).
 - UNKNOWN: 2D RVO callback behavior in 4.7 (verify in 1e).
 - UNDECIDED (owner): target fleet scale; unit confirmation. `MovementProfile`
   starting values are owner-confirmed for play; turning feel is judged by
