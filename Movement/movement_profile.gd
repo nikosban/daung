@@ -8,6 +8,10 @@ extends Resource
 @export_range(0.0, 30.0, 0.1, "suffix:units/s") var max_forward_speed: float
 ## Top sideways speed relative to the hull.
 @export_range(0.0, 30.0, 0.1, "suffix:units/s") var max_lateral_speed: float
+## Top speed backward along the hull's forward axis (the backward component,
+## not the combined diagonal speed). 0 = cannot reverse. Must stay below
+## max_forward_speed.
+@export_range(0.0, 30.0, 0.1, "suffix:units/s") var max_reverse_speed: float
 ## Rate at which actual velocity grows toward the requested velocity.
 @export_range(0.1, 20.0, 0.1, "suffix:units/s²") var acceleration: float
 ## Rate at which actual velocity shrinks; also used to stop after stop() or arrival.

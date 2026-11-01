@@ -42,6 +42,8 @@ func _ready() -> void:
 	assert(profile != null, "MovementController needs a MovementProfile.")
 	if not direct_route and (navigation == null or clearance == null):
 		push_error("%s needs a StaticNavigation and a NavigationClearance, or direct_route." % name)
+	if profile.max_reverse_speed >= profile.max_forward_speed:
+		push_error("%s: max_reverse_speed must stay below max_forward_speed." % name)
 
 
 ## Replaces any active order with a new destination on the XZ plane. The old
@@ -226,15 +228,20 @@ func _point_along_route(distance: float) -> Vector3:
 
 ## Highest speed at which the hull, as currently turned, can thrust along the
 ## desired direction without its sideways share exceeding max_lateral_speed.
-## A direction behind the hull is reached sideways only (no commanded reverse).
+## Behind the hull, its backward share must also fit max_reverse_speed, but the
+## cap never drops below max_lateral_speed: _limit_to_hull then trims any excess
+## backward share and keeps the sideways share, so a ship that cannot reverse
+## still slides sideways while it turns.
 func _hull_speed() -> float:
 	var heading := _planar(-global_basis.z).normalized()
 	var sin_angle := absf(heading.cross(_desired_direction).y)
-	if heading.dot(_desired_direction) <= 0.0:
-		return profile.max_lateral_speed
-	if is_zero_approx(sin_angle):
-		return profile.max_forward_speed
-	return profile.max_lateral_speed / sin_angle
+	var cos_angle := heading.dot(_desired_direction)
+	var speed := profile.max_forward_speed
+	if not is_zero_approx(sin_angle):
+		speed = minf(speed, profile.max_lateral_speed / sin_angle)
+	if cos_angle < 0.0:
+		speed = minf(speed, maxf(profile.max_lateral_speed, profile.max_reverse_speed / -cos_angle))
+	return speed
 
 
 ## Planned speed at the given arc-length progress: the lowest of the top speed,
@@ -357,8 +364,9 @@ func _planar(point: Vector3) -> Vector3:
 func _limit_to_hull(requested: Vector3) -> Vector3:
 	var forward := -global_basis.z
 	var right := global_basis.x
-	# No commanded reverse: a target behind is reached by turning and sliding.
-	var forward_speed := clampf(requested.dot(forward), 0.0, profile.max_forward_speed)
+	# Bounded reverse: a target behind is reached by backing, sliding and
+	# turning at once; the mix changes continuously as yaw aligns.
+	var forward_speed := clampf(requested.dot(forward), -profile.max_reverse_speed, profile.max_forward_speed)
 	var lateral_speed := clampf(requested.dot(right), -profile.max_lateral_speed, profile.max_lateral_speed)
 	return forward * forward_speed + right * lateral_speed
 
