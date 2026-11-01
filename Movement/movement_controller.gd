@@ -190,7 +190,12 @@ func _follow_route() -> Vector3:
 		return Vector3.ZERO
 	_desired_direction = to_aim.normalized()
 	_heading = heading.normalized() if not heading.is_zero_approx() else _desired_direction
-	var speed := _route_speed(progress)
+	# Braking to the goal uses the route distance left, but never less than the
+	# actual distance to the goal: a ship carried past the route's end, or off
+	# to its side, still has a distance to cover and is never asked to stop
+	# short of it.
+	var goal_distance := maxf(_arc[last] - progress, here.distance_to(_planar(_route[last])))
+	var speed := _route_speed(progress, goal_distance)
 	# Routes that bend: never ask for more than the hull, as currently turned,
 	# can thrust along the desired direction. Direct and single-segment orders
 	# move exactly as in open space.
@@ -233,11 +238,12 @@ func _hull_speed() -> float:
 
 
 ## Planned speed at the given arc-length progress: the lowest of the top speed,
-## braking to rest at the goal, and, for each slow section, braking into it,
-## holding its speed inside it and accelerating out of it. This is the
-## forward-backward pass over the plan, evaluated where the ship is.
-func _route_speed(progress: float) -> float:
-	var speed := minf(profile.max_forward_speed, sqrt(2.0 * profile.braking * maxf(_arc[_arc.size() - 1] - progress, 0.0)))
+## braking to rest over the given distance to the goal, and, for each slow
+## section, braking into it, holding its speed inside it and accelerating out
+## of it. This is the forward-backward pass over the plan, evaluated where the
+## ship is.
+func _route_speed(progress: float, goal_distance: float) -> float:
+	var speed := minf(profile.max_forward_speed, sqrt(2.0 * profile.braking * goal_distance))
 	for k in _slow_speed.size():
 		var held := _slow_speed[k]
 		if progress < _slow_start[k]:

@@ -174,6 +174,10 @@ chased:
     accelerating out of it (a forward–backward pass evaluated in place). It
     is a ceiling, not a schedule: a ship slowed by contact simply accelerates
     back up to it.
+  - **Goal braking distance:** the route distance left, but never less than
+    the actual XZ distance to the goal. A ship carried past the route's end,
+    or off to its side, is still asked to cover that distance (turning and
+    sliding back if needed), never to stop short of the goal.
 - **Hull cap,** only on routes that bend: speed never exceeds what the hull,
   as currently turned, can thrust along the translation direction
   (`max_lateral_speed / sin(angle)`; sideways only if the direction is
