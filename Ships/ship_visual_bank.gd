@@ -13,7 +13,7 @@ func _physics_process(delta: float) -> void:
 	var target := 0.0
 	var deflection := movement.get_turn_deflection()
 	var planar_velocity := Vector3(movement.velocity.x, 0.0, movement.velocity.z)
-	var to_goal := movement.get_destination() - movement.global_position
+	var to_goal := movement.get_guidance_target() - movement.global_position
 	to_goal.y = 0.0
 	if movement.has_destination() and deflection != 0.0 and not planar_velocity.is_zero_approx() and not to_goal.is_zero_approx():
 		# Still turning while the actual course is off the goal by at least the settle angle.

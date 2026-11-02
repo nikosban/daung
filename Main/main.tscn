@@ -41,6 +41,21 @@ surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
+[node name="RouteTestMarker1" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, 0)
+mesh = SubResource("TorusMesh_marker")
+surface_material_override/0 = SubResource("StandardMaterial3D_marker")
+
+[node name="RouteTestMarker2" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, -40)
+mesh = SubResource("TorusMesh_marker")
+surface_material_override/0 = SubResource("StandardMaterial3D_marker")
+
+[node name="RouteTestMarker3" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -40)
+mesh = SubResource("TorusMesh_marker")
+surface_material_override/0 = SubResource("StandardMaterial3D_marker")
+
 [node name="RightClickMoveInput" type="Node" parent="." node_paths=PackedStringArray("camera", "ship")]
 script = ExtResource("2_input")
 camera = NodePath("../Camera3D")

@@ -11,3 +11,6 @@ extends Resource
 @export_range(1.0, 90.0, 0.1, "suffix:°/s") var travel_turn_rate: float = 12.0
 ## Orders at least this far from the current travel direction brake to rest before starting.
 @export_range(90.0, 180.0, 0.1, "suffix:°") var near_opposite_angle: float = 150.0
+## How far ahead along a multi-point route the ship aims, so it anticipates bends.
+## Not a stopping radius; intermediate points need not be passed exactly.
+@export_range(2.0, 100.0, 0.1, "suffix:m") var route_lookahead_distance: float = 25.0
