@@ -64,7 +64,7 @@ The rejected upfront alternative is a global command/orchestration framework, an
 
 - `project.godot`: Daung, main scene `res://Main/main.tscn`; the window opens maximized with `canvas_items`/`expand` stretch, so the view fills any window size or aspect; `physics/common/physics_interpolation=true`; otherwise engine defaults.
 - **Movement** (`Movement/`):
-  - `movement_profile.gd`: `MovementProfile` Resource with `max_speed` (8 m/s, 0–60), `acceleration` (6 m/s², 0.1–30), `braking` (10 m/s², 0.1–40), hull `turn_rate` (35 °/s, 1–120), `arrival_tolerance` (2 m, 0.1–10), `travel_turn_rate` (18 °/s, 1–90; about 90° in 5 s) and `near_opposite_angle` (150°, 90–180). All values are provisional.
+  - `movement_profile.gd`: `MovementProfile` Resource with `max_speed` (8 m/s, 0–60), `acceleration` (6 m/s², 0.1–30), `braking` (10 m/s², 0.1–40), hull `turn_rate` (20 °/s, 1–120), `arrival_tolerance` (2 m, 0.1–10), `travel_turn_rate` (12 °/s, 1–90; about 90° in 7.5 s) and `near_opposite_angle` (150°, 90–180). All values are provisional.
   - `Profiles/frigate_movement_profile.tres`: the shared frigate profile.
   - `ship_movement.gd`: `ShipMovement` (`CharacterBody3D`, floating mode), the single writer of planar position, velocity and yaw. Public: `move_to(world_position)`, `stop()`, `has_destination()`, `get_destination()` and the built-in `velocity`. No signals.
   - `move_to()` always replaces the order and classifies it once, against the actual planar velocity: at rest, a stationary start; at or above `near_opposite_angle`, brake to rest first; otherwise a moving turn.
@@ -72,8 +72,8 @@ The rejected upfront alternative is a global command/orchestration framework, an
     - **Travel direction:** set straight at the goal from rest; otherwise it rotates toward the goal by at most `travel_turn_rate`.
     - **Speed:** moves toward `min(max_speed, sqrt(2 · braking · d), ω · d / (2 sin θ))` at the acceleration or braking rate.
     - **Hull yaw:** turns toward the destination at `turn_rate`, independently of travel.
-  - **Brake to rest, then re-evaluate:** one private flag, set by near-opposite orders and on entering arrival tolerance. The ship brakes along its current direction with no steering or yaw. At rest, the order completes if the ship is within tolerance; otherwise the same order restarts from rest.
-  - An order completes only at rest inside tolerance.
+  - **Near-opposite pending:** one private flag, set at order receipt. The ship brakes along its current direction with no steering or yaw. At rest, the same order starts from rest, or completes if the ship is already within tolerance.
+  - **Arrival:** entering `arrival_tolerance` completes the order. The ship then brakes to rest along its current travel with no yaw, and may coast past the destination without turning back (owner-accepted). An order issued inside tolerance is an arrival, never a reversal.
 - **Ship** (`Ships/ship.tscn`): `ShipMovement` root with the frigate profile; a provisional `BoxShape3D` (5.9 × 3.2 × 20.3 m, derived from the model bounds) with no collision rules; `Visual` → the protected GLB instanced at identity (its bow already faces −Z).
 - **Main scene** (`Main/main.tscn`): fixed camera at (50, 55, 60) pitched 45° down, light and environment, one ship at the origin, 2 m ring markers at (100, 0, 0) and at the start location (0, 0, 0) sharing one mesh and material, and `right_click_move_input.gd` (scene glue that projects right-clicks onto the Y = 0 plane and calls `move_to`).
 - Protected ship source and its import sidecar, unchanged.

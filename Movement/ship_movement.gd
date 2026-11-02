@@ -7,12 +7,13 @@ extends CharacterBody3D
 
 var _destination := Vector3.ZERO
 var _has_destination := false
-## Brake to rest, then re-evaluate the same order: set by near-opposite orders and on entering arrival tolerance.
+## Near-opposite order pending: brake to rest, then start the same order from rest.
 var _awaiting_rest := false
 
 
 ## Sets or replaces the destination. Y is ignored; movement stays on the ship's plane.
 ## Classified once against the actual travel velocity: near-opposite orders brake to rest first.
+## Orders inside arrival tolerance count as arrivals, never as reversals.
 func move_to(world_position: Vector3) -> void:
 	_destination = Vector3(world_position.x, global_position.y, world_position.z)
 	_has_destination = true
@@ -20,7 +21,7 @@ func move_to(world_position: Vector3) -> void:
 	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
 	var offset := _destination - global_position
 	offset.y = 0.0
-	if not planar_velocity.is_zero_approx() and not offset.is_zero_approx():
+	if not planar_velocity.is_zero_approx() and offset.length() > profile.arrival_tolerance:
 		var angle := rad_to_deg(planar_velocity.angle_to(offset))
 		_awaiting_rest = angle >= profile.near_opposite_angle or is_equal_approx(angle, profile.near_opposite_angle)
 
@@ -47,9 +48,10 @@ func _physics_process(delta: float) -> void:
 	offset.y = 0.0
 	var distance := offset.length()
 
-	# An order completes only at rest inside tolerance, so brake first and re-evaluate at rest.
+	# Arrival: the order completes on entering tolerance; the ship then brakes to rest along
+	# its current travel and may coast slightly past, without turning back.
 	if _has_destination and not _awaiting_rest and distance <= profile.arrival_tolerance:
-		_awaiting_rest = true
+		_has_destination = false
 
 	var steering := _has_destination and not _awaiting_rest
 	var desired_speed := 0.0
