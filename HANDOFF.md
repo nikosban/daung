@@ -27,4 +27,4 @@ No gameplay scripts, authored gameplay scenes, Movement module, movement profile
 
 Movement, navigation and banking are unimplemented. Exact order lifecycle, motion defaults/ranges, near-opposite threshold, banking response, obstacle/collision/avoidance behavior and engine techniques are undecided or deferred. There is no measured performance target.
 
-Next: owner review and merge of Task #1's documentation/scaffold reset. Future playable work requires its own approved ticket and remaining owner decisions; no such implementation is authorized here.
+Next: plan and ticket the first playable open-space movement implementation in the developing game scene. Resolve the remaining owner decisions in that ticket; gameplay implementation requires separate approval and is not authorized by this reset.
