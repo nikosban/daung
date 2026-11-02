@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1_profile")
-max_speed = 20.0
+max_speed = 10.0
 acceleration = 6.0
 braking = 10.0
 turn_rate = 35.0

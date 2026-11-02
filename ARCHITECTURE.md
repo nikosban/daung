@@ -62,14 +62,14 @@ The rejected upfront alternative is a global command/orchestration framework, an
 
 ## Actually implemented inventory
 
-- `project.godot`: Daung, main scene `res://Main/main.tscn`, `physics/common/physics_interpolation=true`; otherwise engine defaults.
+- `project.godot`: Daung, main scene `res://Main/main.tscn`; the window opens maximized with `canvas_items`/`expand` stretch, so the view fills any window size or aspect; `physics/common/physics_interpolation=true`; otherwise engine defaults.
 - **Movement** (`Movement/`):
-  - `movement_profile.gd`: `MovementProfile` Resource with `max_speed` (20 m/s, 0–60), `acceleration` (6 m/s², 0.1–30), `braking` (10 m/s², 0.1–40), `turn_rate` (35 °/s, 1–120) and `arrival_tolerance` (2 m, 0.1–10). All values are provisional.
+  - `movement_profile.gd`: `MovementProfile` Resource with `max_speed` (10 m/s, 0–60), `acceleration` (6 m/s², 0.1–30), `braking` (10 m/s², 0.1–40), `turn_rate` (35 °/s, 1–120) and `arrival_tolerance` (2 m, 0.1–10). All values are provisional.
   - `Profiles/frigate_movement_profile.tres`: the shared frigate profile.
   - `ship_movement.gd`: `ShipMovement` (`CharacterBody3D`, floating mode), the single writer of planar position, velocity and yaw. Public: `move_to(world_position)`, `stop()`, `has_destination()`, `get_destination()` and the built-in `velocity`. No signals.
   - Each physics tick, the planar velocity moves toward `direction × min(max_speed, sqrt(2 · braking · distance))` at the acceleration or braking rate. Yaw turns toward the destination at `turn_rate`, independently of translation. Entering arrival tolerance clears the destination; the ship then brakes to rest without further rotation. Orders inside tolerance are ignored.
 - **Ship** (`Ships/ship.tscn`): `ShipMovement` root with the frigate profile; a provisional `BoxShape3D` (5.9 × 3.2 × 20.3 m, derived from the model bounds) with no collision rules; `Visual` → the protected GLB instanced at identity (its bow already faces −Z).
-- **Main scene** (`Main/main.tscn`): fixed camera, light and environment, one ship at the origin, a 2 m ring marker at (100, 0, 0), and `right_click_move_input.gd` (scene glue that projects right-clicks onto the Y = 0 plane and calls `move_to`).
+- **Main scene** (`Main/main.tscn`): fixed camera at (50, 55, 60) pitched 45° down, light and environment, one ship at the origin, a 2 m ring marker at (100, 0, 0), and `right_click_move_input.gd` (scene glue that projects right-clicks onto the Y = 0 plane and calls `move_to`).
 - Protected ship source and its import sidecar, unchanged.
 - Not implemented: designed moving retarget or reversal, routing, obstacles, collision or avoidance behavior, banking, selection, UI, tests and export presets. No added dependencies.
 
