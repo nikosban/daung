@@ -2,7 +2,7 @@
 
 ## Current state
 
-Daung has open-space ship movement with moving turns and near-opposite reversals (Tasks #3 and #5). Running the project opens `Main/main.tscn`: a fixed camera, one frigate at the origin facing −Z, and 2 m ring markers at (100, 0, 0) and at the start location (0, 0, 0). Right-clicking the Y = 0 plane orders the ship there.
+Daung has open-space ship movement with moving turns, near-opposite reversals and model-only banking (Tasks #3, #5 and #7). Running the project opens `Main/main.tscn`: a fixed camera, one frigate at the origin facing −Z, and 2 m ring markers at (100, 0, 0) and at the start location (0, 0, 0). Right-clicking the Y = 0 plane orders the ship there.
 
 - `Movement/`: the `MovementProfile` Resource (seven provisional tunables), the shared `frigate_movement_profile.tres`, and `ShipMovement` (`CharacterBody3D`), the single writer of planar position, velocity and yaw, with `move_to()` and `stop()`.
 - **Each order is classified once, from the actual travel velocity:**
@@ -11,6 +11,11 @@ Daung has open-space ship movement with moving turns and near-opposite reversals
   - anything else: a moving turn at up to 12 °/s of travel direction, slowing for near goals (pure-pursuit cap).
 - Entering the 2 m tolerance completes an order. The ship brakes to rest along its travel and may coast past without turning back. A click inside 2 m is an arrival, never a reversal.
 - `Ships/ship.tscn`: the reusable ship. It has the movement root, a provisional box collision shape with no collision rules, and the protected GLB as a `Visual` child at identity.
+- **Banking:** `Visual` runs `ShipVisualBank`, which reads Movement's `get_turn_deflection()` and live course and rolls only the visual wrapper.
+  - A moving turn under 70° heels outward 4°; 70° or more banks inward 9°.
+  - The class is fixed per order and mirrors left and right.
+  - The roll changes at up to 7 °/s and returns to level when the course is within 3°, on stop or arrival, during reversal braking, and on starts from rest.
+  - Values live in `Ships/Profiles/frigate_bank_profile.tres`.
 - `Main/right_click_move_input.gd`: temporary scene input glue.
 - `project.godot` sets the main scene, opens the window maximized with `canvas_items`/`expand` stretch, and enables physics interpolation.
 
@@ -40,8 +45,9 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 - **Short clicks at speed (accepted by the owner):** a click within 2 m of a ship at 8 m/s finishes where braking ends, up to about 3.2 m past the click (8² ÷ (2 × 10)). The 2 m tolerance triggers arrival braking; it does not guarantee the final rest distance.
 - **Slow-but-moving ships:** a ship that is moving slowly but not stopped, given an order 90°–149° away, swings wider as it speeds up during the turn, because the travel turn rate is fixed in °/s.
 - **Hull yaw versus travel:** the hull turns toward the destination at 20 °/s, so during moving turns it leads the travel direction.
-- **Deferred QA:** complex chained retargets and extreme tunings are not validated. There is no routing, obstacles, collision response, banking, selection or UI.
+- **Bank visibility:** at the fixed camera distance and current lighting, a 4–9° lean is subtle. Its readability is the owner's playtest call.
+- **Deferred QA:** complex chained retargets (including rapid retargets while banked), extreme movement or visual tunings, other hull proportions and multi-ship scale are not validated. There is no routing, obstacles, collision response, pitch, selection or UI.
 
 ## Remaining work
 
-Task 4: banking. Obstacle/collision/avoidance behavior and banking values remain undecided. There is no measured performance target.
+Final banking values await owner playtest. Obstacle/collision/avoidance behavior remains undecided. There is no measured performance target.

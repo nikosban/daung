@@ -9,6 +9,8 @@ var _destination := Vector3.ZERO
 var _has_destination := false
 ## Near-opposite order pending: brake to rest, then start the same order from rest.
 var _awaiting_rest := false
+## Signed degrees from travel direction to goal at order receipt (positive = left turn); 0 unless a moving turn.
+var _turn_deflection := 0.0
 
 
 ## Sets or replaces the destination. Y is ignored; movement stays on the ship's plane.
@@ -18,18 +20,22 @@ func move_to(world_position: Vector3) -> void:
 	_destination = Vector3(world_position.x, global_position.y, world_position.z)
 	_has_destination = true
 	_awaiting_rest = false
+	_turn_deflection = 0.0
 	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
 	var offset := _destination - global_position
 	offset.y = 0.0
 	if not planar_velocity.is_zero_approx() and offset.length() > profile.arrival_tolerance:
 		var angle := rad_to_deg(planar_velocity.angle_to(offset))
 		_awaiting_rest = angle >= profile.near_opposite_angle or is_equal_approx(angle, profile.near_opposite_angle)
+		if not _awaiting_rest:
+			_turn_deflection = rad_to_deg(planar_velocity.signed_angle_to(offset, Vector3.UP))
 
 
 ## Clears the destination. The ship brakes to rest and stops turning.
 func stop() -> void:
 	_has_destination = false
 	_awaiting_rest = false
+	_turn_deflection = 0.0
 
 
 func has_destination() -> bool:
@@ -38,6 +44,13 @@ func has_destination() -> bool:
 
 func get_destination() -> Vector3:
 	return _destination
+
+
+## Initial course change of the current order, fixed at receipt: signed degrees from the actual
+## travel direction to the goal (positive = left turn). 0 for orders from rest, near-opposite
+## orders, orders inside arrival tolerance, and once the order ends (arrival or stop()).
+func get_turn_deflection() -> float:
+	return _turn_deflection
 
 
 func _physics_process(delta: float) -> void:
@@ -52,6 +65,7 @@ func _physics_process(delta: float) -> void:
 	# its current travel and may coast slightly past, without turning back.
 	if _has_destination and not _awaiting_rest and distance <= profile.arrival_tolerance:
 		_has_destination = false
+		_turn_deflection = 0.0
 
 	var steering := _has_destination and not _awaiting_rest
 	var desired_speed := 0.0
