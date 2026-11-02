@@ -7,20 +7,29 @@ extends CharacterBody3D
 
 var _destination := Vector3.ZERO
 var _has_destination := false
+## Near-opposite order pending: brake to rest, then start the same order from rest.
+var _awaiting_rest := false
 
 
 ## Sets or replaces the destination. Y is ignored; movement stays on the ship's plane.
+## Classified once against the actual travel velocity: near-opposite orders brake to rest first.
+## Orders inside arrival tolerance count as arrivals, never as reversals.
 func move_to(world_position: Vector3) -> void:
-	var target := Vector3(world_position.x, global_position.y, world_position.z)
-	if global_position.distance_to(target) <= profile.arrival_tolerance:
-		return
-	_destination = target
+	_destination = Vector3(world_position.x, global_position.y, world_position.z)
 	_has_destination = true
+	_awaiting_rest = false
+	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	var offset := _destination - global_position
+	offset.y = 0.0
+	if not planar_velocity.is_zero_approx() and offset.length() > profile.arrival_tolerance:
+		var angle := rad_to_deg(planar_velocity.angle_to(offset))
+		_awaiting_rest = angle >= profile.near_opposite_angle or is_equal_approx(angle, profile.near_opposite_angle)
 
 
 ## Clears the destination. The ship brakes to rest and stops turning.
 func stop() -> void:
 	_has_destination = false
+	_awaiting_rest = false
 
 
 func has_destination() -> bool:
@@ -32,25 +41,46 @@ func get_destination() -> Vector3:
 
 
 func _physics_process(delta: float) -> void:
-	var desired_velocity := Vector3.ZERO
-	if _has_destination:
-		var offset := _destination - global_position
-		offset.y = 0.0
-		var distance := offset.length()
+	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	var speed := planar_velocity.length()
+	var direction := planar_velocity / speed if speed > 0.0 else Vector3.ZERO
+	var offset := _destination - global_position
+	offset.y = 0.0
+	var distance := offset.length()
+
+	# Arrival: the order completes on entering tolerance; the ship then brakes to rest along
+	# its current travel and may coast slightly past, without turning back.
+	if _has_destination and not _awaiting_rest and distance <= profile.arrival_tolerance:
+		_has_destination = false
+
+	var steering := _has_destination and not _awaiting_rest
+	var desired_speed := 0.0
+	if steering:
+		var goal_direction := offset / distance
+		if planar_velocity.is_zero_approx():
+			direction = goal_direction
+		else:
+			var max_turn := deg_to_rad(profile.travel_turn_rate) * delta
+			direction = direction.rotated(Vector3.UP, clampf(direction.signed_angle_to(goal_direction, Vector3.UP), -max_turn, max_turn))
+		# Cap speed so the ship can still brake to rest at the destination.
+		desired_speed = minf(profile.max_speed, sqrt(2.0 * profile.braking * distance))
+		# Pure pursuit: keep the turn radius v / ω inside the circle through the goal
+		# tangent to travel, R = d / (2 sin θ), so near goals are reached instead of orbited.
+		var sin_theta := absf(sin(direction.angle_to(goal_direction)))
+		if sin_theta > 0.001:
+			desired_speed = minf(desired_speed, deg_to_rad(profile.travel_turn_rate) * distance / (2.0 * sin_theta))
+
+	var rate := profile.acceleration if desired_speed > speed else profile.braking
+	speed = move_toward(speed, desired_speed, rate * delta)
+	velocity = direction * speed
+
+	if _awaiting_rest and speed == 0.0:
+		_awaiting_rest = false
 		if distance <= profile.arrival_tolerance:
 			_has_destination = false
-		else:
-			# Cap speed so the ship can still brake to rest at the destination.
-			var desired_speed := minf(profile.max_speed, sqrt(2.0 * profile.braking * distance))
-			desired_velocity = offset / distance * desired_speed
 
-	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
-	var rate := profile.acceleration if desired_velocity.length() > planar_velocity.length() else profile.braking
-	velocity = planar_velocity.move_toward(desired_velocity, rate * delta)
-
-	if _has_destination:
-		var to_destination := _destination - global_position
-		var target_yaw := atan2(-to_destination.x, -to_destination.z)
+	if steering:
+		var target_yaw := atan2(-offset.x, -offset.z)
 		rotation.y = rotate_toward(rotation.y, target_yaw, deg_to_rad(profile.turn_rate) * delta)
 
 	move_and_slide()

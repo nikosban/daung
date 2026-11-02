@@ -32,12 +32,12 @@ The command flow is caller → move-to or stop request → Movement's internal n
 
 - From rest, translation and turning begin together. Movement accommodates forward, backward, lateral and diagonal directions. Short journeys may end before the hull faces the destination.
 - While moving, turns are relatively wide and momentum-aware. Very sharp corners need not be followed exactly; the ship follows a continuous trajectory toward its destination.
-- A near-opposite order, measured relative to **actual travel direction**, brakes the ship to rest before stationary movement begins. The near-opposite angle threshold is a future owner tuning decision.
+- A near-opposite order, measured relative to **actual travel direction**, brakes the ship to rest before stationary movement begins. The threshold is 150° (provisional, `near_opposite_angle`).
 - Acceleration and braking are gradual, with straightforward tunable rates. Heavy, momentous movement remains controlled; special stopping curves and a generic state-machine framework are not required.
 - Arrival ends commanded rotation. There is no final alignment phase or requirement to finish yaw before arrival.
 - Intermediate route vertices are not arrival targets. Route following must avoid waypoint-induced stop/start, heading resets and jitter, producing one continuous journey.
 
-Task #3 uses `CharacterBody3D` in floating mode, bounded `move_toward` velocity changes with stopping-distance braking, and built-in physics interpolation. Obstacle pathfinding, collision response and moving-retarget techniques remain open.
+Movement uses `CharacterBody3D` in floating mode with one `move_and_slide()` per physics tick, separate bounded travel-direction and speed changes, stopping-distance braking, a pure-pursuit speed cap (`R = d / (2 sin θ)`) for near goals, and built-in physics interpolation. Obstacle pathfinding and collision response remain open.
 
 ## Reusable ship composition
 
@@ -64,17 +64,23 @@ The rejected upfront alternative is a global command/orchestration framework, an
 
 - `project.godot`: Daung, main scene `res://Main/main.tscn`; the window opens maximized with `canvas_items`/`expand` stretch, so the view fills any window size or aspect; `physics/common/physics_interpolation=true`; otherwise engine defaults.
 - **Movement** (`Movement/`):
-  - `movement_profile.gd`: `MovementProfile` Resource with `max_speed` (10 m/s, 0–60), `acceleration` (6 m/s², 0.1–30), `braking` (10 m/s², 0.1–40), `turn_rate` (35 °/s, 1–120) and `arrival_tolerance` (2 m, 0.1–10). All values are provisional.
+  - `movement_profile.gd`: `MovementProfile` Resource with `max_speed` (8 m/s, 0–60), `acceleration` (6 m/s², 0.1–30), `braking` (10 m/s², 0.1–40), hull `turn_rate` (20 °/s, 1–120), `arrival_tolerance` (2 m, 0.1–10), `travel_turn_rate` (12 °/s, 1–90; about 90° in 7.5 s) and `near_opposite_angle` (150°, 90–180). All values are provisional.
   - `Profiles/frigate_movement_profile.tres`: the shared frigate profile.
   - `ship_movement.gd`: `ShipMovement` (`CharacterBody3D`, floating mode), the single writer of planar position, velocity and yaw. Public: `move_to(world_position)`, `stop()`, `has_destination()`, `get_destination()` and the built-in `velocity`. No signals.
-  - Each physics tick, the planar velocity moves toward `direction × min(max_speed, sqrt(2 · braking · distance))` at the acceleration or braking rate. Yaw turns toward the destination at `turn_rate`, independently of translation. Entering arrival tolerance clears the destination; the ship then brakes to rest without further rotation. Orders inside tolerance are ignored.
+  - `move_to()` always replaces the order and classifies it once, against the actual planar velocity: at rest, a stationary start; at or above `near_opposite_angle`, brake to rest first; otherwise a moving turn.
+  - Each physics tick:
+    - **Travel direction:** set straight at the goal from rest; otherwise it rotates toward the goal by at most `travel_turn_rate`.
+    - **Speed:** moves toward `min(max_speed, sqrt(2 · braking · d), ω · d / (2 sin θ))` at the acceleration or braking rate.
+    - **Hull yaw:** turns toward the destination at `turn_rate`, independently of travel.
+  - **Near-opposite pending:** one private flag, set at order receipt. The ship brakes along its current direction with no steering or yaw. At rest, the same order starts from rest, or completes if the ship is already within tolerance.
+  - **Arrival:** entering `arrival_tolerance` completes the order. The ship then brakes to rest along its current travel with no yaw, and may coast past the destination without turning back (owner-accepted). An order issued inside tolerance is an arrival, never a reversal.
 - **Ship** (`Ships/ship.tscn`): `ShipMovement` root with the frigate profile; a provisional `BoxShape3D` (5.9 × 3.2 × 20.3 m, derived from the model bounds) with no collision rules; `Visual` → the protected GLB instanced at identity (its bow already faces −Z).
-- **Main scene** (`Main/main.tscn`): fixed camera at (50, 55, 60) pitched 45° down, light and environment, one ship at the origin, a 2 m ring marker at (100, 0, 0), and `right_click_move_input.gd` (scene glue that projects right-clicks onto the Y = 0 plane and calls `move_to`).
+- **Main scene** (`Main/main.tscn`): fixed camera at (50, 55, 60) pitched 45° down, light and environment, one ship at the origin, 2 m ring markers at (100, 0, 0) and at the start location (0, 0, 0) sharing one mesh and material, and `right_click_move_input.gd` (scene glue that projects right-clicks onto the Y = 0 plane and calls `move_to`).
 - Protected ship source and its import sidecar, unchanged.
-- Not implemented: designed moving retarget or reversal, routing, obstacles, collision or avoidance behavior, banking, selection, UI, tests and export presets. No added dependencies.
+- Not implemented: routing, obstacles, collision or avoidance behavior, banking, selection, UI, tests and export presets. No added dependencies.
 
 ## Undecided and deferred
 
-**UNDECIDED (owner, later tickets):** exact order lifecycle and notifications; final speed/acceleration/braking/yaw balance; near-opposite angle and low-speed travel-direction classification; arrival/braking feel; banking parameters; obstacle/pathfinding and collision/avoidance behavior; and a performance target beyond the intended scale.
+**UNDECIDED (owner, later tickets):** exact order lifecycle and notifications; final speed/acceleration/braking/yaw balance; final near-opposite angle, travel turn rate and arrival/braking feel; banking parameters; obstacle/pathfinding and collision/avoidance behavior; and a performance target beyond the intended scale.
 
-**DEFERRED:** designed moving retarget and near-opposite reversal (Task 3), banking (Task 4), obstacle routing, collision/avoidance, dense fleets, unusual maneuvers and vertical animation.
+**DEFERRED:** banking (Task 4), complex chained retargets, extreme tunings, obstacle routing, collision/avoidance, dense fleets, unusual maneuvers and vertical animation.
