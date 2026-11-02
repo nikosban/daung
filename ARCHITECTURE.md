@@ -46,7 +46,7 @@ The reusable ship scene `Ships/ship.tscn` separates authoritative movement from 
 - The child consumes Movement's read-only motion/turn output; Movement never calls it.
 - Only the child tilts visually. The authoritative root and collision never tilt; visual roll does not affect physical movement or navigation coordinates.
 - Broad gradual maneuvers heel outward; sharper maneuvers bank inward. These are different maneuvers, not phases of one turn. The model straightens on straight travel.
-- Banking thresholds, angles, intensity and response curves are **UNDECIDED**. No separate top-level visual module is introduced.
+- `Ships/ship_visual_bank.gd` on `Visual` implements this (Task #7): the class is fixed per order from Movement's initial turn deflection, and the roll is bounded-rate about the wrapper's local Z. Its values are provisional, in `ShipBankProfile`. No separate top-level visual module is introduced.
 
 Shared function and appearance use one authoritative scene/script/resource. Ship differences use configuration rather than duplicated implementations; check existing assets before creating another shared definition. Per-instance runtime state must not modify shared resources.
 
@@ -54,7 +54,7 @@ The owner's placeholder is `Assets/Ships/Whitebox/Arrata_Frigate_001.glb`. Prese
 
 ## Data and validation
 
-Per-ship tuning belongs in Godot `Resource` data assets, not code constants. Shared assets hold configuration only; runtime state belongs to the individual ship. Each tunable requires a default, unit and owner-approved range, including the future near-opposite angle and banking parameters. `MovementProfile` holds the five provisional Task #3 values (see the inventory). Start conservatively and adjust in play.
+Per-ship tuning belongs in Godot `Resource` data assets, not code constants. Shared assets hold configuration only; runtime state belongs to the individual ship. Each tunable requires a default, unit and owner-approved range, including the future near-opposite angle and banking parameters. `MovementProfile` and `ShipBankProfile` hold the provisional values (see the inventory). Start conservatively and adjust in play.
 
 The first playable work uses one ship in open space in the developing game scene, rather than multiple test scenes. The intended battle scale is tens of units; assess it with real combat later, without treating that intention as a measured performance target.
 
@@ -66,7 +66,8 @@ The rejected upfront alternative is a global command/orchestration framework, an
 - **Movement** (`Movement/`):
   - `movement_profile.gd`: `MovementProfile` Resource with `max_speed` (8 m/s, 0–60), `acceleration` (6 m/s², 0.1–30), `braking` (10 m/s², 0.1–40), hull `turn_rate` (20 °/s, 1–120), `arrival_tolerance` (2 m, 0.1–10), `travel_turn_rate` (12 °/s, 1–90; about 90° in 7.5 s) and `near_opposite_angle` (150°, 90–180). All values are provisional.
   - `Profiles/frigate_movement_profile.tres`: the shared frigate profile.
-  - `ship_movement.gd`: `ShipMovement` (`CharacterBody3D`, floating mode), the single writer of planar position, velocity and yaw. Public: `move_to(world_position)`, `stop()`, `has_destination()`, `get_destination()` and the built-in `velocity`. No signals.
+  - `ship_movement.gd`: `ShipMovement` (`CharacterBody3D`, floating mode), the single writer of planar position, velocity and yaw. Public: `move_to(world_position)`, `stop()`, `has_destination()`, `get_destination()`, `get_turn_deflection()` and the built-in `velocity`. No signals.
+  - `get_turn_deflection()` is read-only: the signed degrees from the actual travel direction to the goal, fixed when a moving-turn order is received (positive = left turn). It is 0 for orders from rest, near-opposite orders, orders inside tolerance, and after arrival or `stop()`.
   - `move_to()` always replaces the order and classifies it once, against the actual planar velocity: at rest, a stationary start; at or above `near_opposite_angle`, brake to rest first; otherwise a moving turn.
   - Each physics tick:
     - **Travel direction:** set straight at the goal from rest; otherwise it rotates toward the goal by at most `travel_turn_rate`.
@@ -75,12 +76,20 @@ The rejected upfront alternative is a global command/orchestration framework, an
   - **Near-opposite pending:** one private flag, set at order receipt. The ship brakes along its current direction with no steering or yaw. At rest, the same order starts from rest, or completes if the ship is already within tolerance.
   - **Arrival:** entering `arrival_tolerance` completes the order. The ship then brakes to rest along its current travel with no yaw, and may coast past the destination without turning back (owner-accepted). An order issued inside tolerance is an arrival, never a reversal.
 - **Ship** (`Ships/ship.tscn`): `ShipMovement` root with the frigate profile; a provisional `BoxShape3D` (5.9 × 3.2 × 20.3 m, derived from the model bounds) with no collision rules; `Visual` → the protected GLB instanced at identity (its bow already faces −Z).
+  - `Visual` carries `ship_visual_bank.gd` (`ShipVisualBank`), which reads Movement only and writes only its own local Z rotation.
+  - **Target roll:** level unless there is an order with a non-zero deflection, the ship is moving, and the course error is at least `settle_angle`.
+    - |deflection| below `sharp_turn_angle`: heel **outward** by `outward_heel`.
+    - |deflection| at or above `sharp_turn_angle`: bank **inward** by `inward_bank`.
+    - Mirrored by the turn's sign.
+  - The roll moves toward the target at up to `roll_rate`.
+  - `Ships/ship_bank_profile.gd` (`ShipBankProfile` Resource, all provisional): `outward_heel` (4°, 0–12), `inward_bank` (9°, 0–20), `sharp_turn_angle` (70°, 10–149), `roll_rate` (7 °/s, 0.5–30) and `settle_angle` (3°, 0.1–10).
+  - `Ships/Profiles/frigate_bank_profile.tres` is the shared frigate bank profile.
 - **Main scene** (`Main/main.tscn`): fixed camera at (50, 55, 60) pitched 45° down, light and environment, one ship at the origin, 2 m ring markers at (100, 0, 0) and at the start location (0, 0, 0) sharing one mesh and material, and `right_click_move_input.gd` (scene glue that projects right-clicks onto the Y = 0 plane and calls `move_to`).
 - Protected ship source and its import sidecar, unchanged.
-- Not implemented: routing, obstacles, collision or avoidance behavior, banking, selection, UI, tests and export presets. No added dependencies.
+- Not implemented: routing, obstacles, collision or avoidance behavior, pitch or other visual motion, selection, UI, tests and export presets. No added dependencies.
 
 ## Undecided and deferred
 
-**UNDECIDED (owner, later tickets):** exact order lifecycle and notifications; final speed/acceleration/braking/yaw balance; final near-opposite angle, travel turn rate and arrival/braking feel; banking parameters; obstacle/pathfinding and collision/avoidance behavior; and a performance target beyond the intended scale.
+**UNDECIDED (owner, later tickets):** exact order lifecycle and notifications; final speed/acceleration/braking/yaw balance; final near-opposite angle, travel turn rate and arrival/braking feel; final banking amplitude, threshold and response; obstacle/pathfinding and collision/avoidance behavior; and a performance target beyond the intended scale.
 
-**DEFERRED:** banking (Task 4), complex chained retargets, extreme tunings, obstacle routing, collision/avoidance, dense fleets, unusual maneuvers and vertical animation.
+**DEFERRED:** rapid chained retargets with banking, extreme visual tuning, other hull proportions, complex chained retargets, extreme tunings, obstacle routing, collision/avoidance, dense fleets, unusual maneuvers and vertical animation.

@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="ShipBankProfile" format=3]
+
+[ext_resource type="Script" path="res://Ships/ship_bank_profile.gd" id="1_bank"]
+
+[resource]
+script = ExtResource("1_bank")
+outward_heel = 4.0
+inward_bank = 9.0
+sharp_turn_angle = 70.0
+roll_rate = 7.0
+settle_angle = 3.0

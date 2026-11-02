@@ -1,8 +1,10 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://Movement/ship_movement.gd" id="1_movement"]
 [ext_resource type="Resource" path="res://Movement/Profiles/frigate_movement_profile.tres" id="2_profile"]
 [ext_resource type="PackedScene" uid="uid://bt7o1ldcdkadv" path="res://Assets/Ships/Whitebox/Arrata_Frigate_001.glb" id="3_model"]
+[ext_resource type="Script" path="res://Ships/ship_visual_bank.gd" id="4_bank"]
+[ext_resource type="Resource" path="res://Ships/Profiles/frigate_bank_profile.tres" id="5_bank_profile"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_hull"]
 size = Vector3(5.9, 3.2, 20.3)
@@ -16,6 +18,9 @@ profile = ExtResource("2_profile")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.25, 0.12)
 shape = SubResource("BoxShape3D_hull")
 
-[node name="Visual" type="Node3D" parent="."]
+[node name="Visual" type="Node3D" parent="." node_paths=PackedStringArray("movement")]
+script = ExtResource("4_bank")
+profile = ExtResource("5_bank_profile")
+movement = NodePath("..")
 
 [node name="Model" parent="Visual" instance=ExtResource("3_model")]
