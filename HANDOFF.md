@@ -2,29 +2,33 @@
 
 ## Current state
 
-Daung is a blank Godot project with a minimal `project.godot` and the owner's placeholder `Assets/Ships/Whitebox/Arrata_Frigate_001.glb`, plus its import sidecar. The source model is protected: do not edit, relocate, rename, rescale or change its pivot.
+Daung has its first playable movement slice (Task #3). Running the project opens `Main/main.tscn`: a fixed camera, one frigate at the origin facing −Z, and a 2 m ring marker at (100, 0, 0). Right-clicking the Y = 0 plane orders the ship there.
 
-No gameplay scripts, authored gameplay scenes, Movement module, movement profiles, routing or banking exist. There is no main scene, export preset, gameplay test suite or added dependency.
+- `Movement/`: the `MovementProfile` Resource (five provisional tunables), the shared `frigate_movement_profile.tres`, and `ShipMovement` (`CharacterBody3D`), the single writer of planar position, velocity and yaw, with `move_to()` and `stop()`.
+- `Ships/ship.tscn`: the reusable ship. It has the movement root, a provisional box collision shape with no collision rules, and the protected GLB as a `Visual` child at identity.
+- `Main/right_click_move_input.gd`: temporary scene input glue.
+- `project.godot` sets the main scene, opens the window maximized with `canvas_items`/`expand` stretch, and enables physics interpolation.
 
-`ARCHITECTURE.md` records the approved target design separately from implemented files. `AGENTS.md` and `TICKET.md` provide the workflow. Generic UTF-8, line-ending and Godot-ignore rules remain in the repository.
+The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidecar are unchanged. Do not edit, relocate, rename, rescale or repivot them.
+
+`ARCHITECTURE.md` lists the exact inventory and tuning values.
 
 ## Accepted decisions
 
 - 1 world unit = 1 metre; authoritative gameplay movement uses X/Z.
-- Movement is the only planned top-level gameplay module and may use Godot APIs only. It alone owns authoritative movement; guidance and locomotion stay internal.
+- Movement is the only top-level gameplay module and may use Godot APIs only. It alone owns authoritative movement; guidance and locomotion stay internal.
 - Translate and turn together from rest; moving turns are continuous and momentum-aware. Near-opposite orders relative to travel direction brake to rest before restarting. Acceleration/braking are gradual; arrival ends commanded rotation.
 - Model-only presentation heels outward in broad maneuvers and banks inward in sharper ones. Visual tilt never affects the authoritative root or collision.
-- Future ship differences use shared reusable definitions and Resource configuration, with per-instance runtime state. First playable work uses one ship in the developing game scene.
+- Ship differences use shared reusable definitions and Resource configuration, with per-instance runtime state. Work happens in the one developing game scene.
+- Right-click to move, with the ship already controlled (no selection), for this slice. No stop key. The fixed camera looks 45° down.
+- Provisional movement defaults: 10 m/s (halved by the owner after the first playtest), 6 m/s², 10 m/s² braking, 35 °/s, 2 m arrival tolerance. Final balance comes from owner playtests.
 
-## Verification
+## Known limitations
 
-- Godot `4.7.2.stable.official.ed1daf0bf`: headless editor import completed with exit code 0; the protected model was rebuilt from source after removing its generated import cache. Import and visible editor logs contain no reported errors or warnings.
-- Visible editor opened Daung with an empty scene, all canonical documents and the imported placeholder available as a PackedScene. The editor regenerated ignored local caches and added only its version feature metadata to `project.godot`; no rendering/physics/stretch overrides were restored.
-- Protected source Git blob remains `7a3486cb05fddde69a6c32270ada0fad53f9560d`; its import sidecar also remains unchanged (`7e12b828f21bcd9dad92a0df5b6b0bd493526de4`).
-- No gameplay verification applies to the blank scaffold; editor startup does not establish movement behavior. No playable build/export or gameplay tests were run.
+- A retarget while moving reuses the same bounded velocity change. It has no designed arc, and a near-opposite order decelerates through zero instead of using a brake-to-rest policy. Both are deferred to Task 3.
+- The ship can coast slightly past the destination after entering tolerance; the measured overshoot is 0.08 m at the defaults. Extreme tunings are not validated.
+- No routing, obstacles, collision response, banking, selection or UI.
 
 ## Remaining work
 
-Movement, navigation and banking are unimplemented. Exact order lifecycle, motion defaults/ranges, near-opposite threshold, banking response, obstacle/collision/avoidance behavior and engine techniques are undecided or deferred. There is no measured performance target.
-
-Next: plan and ticket the first playable open-space movement implementation in the developing game scene. Resolve the remaining owner decisions in that ticket; gameplay implementation requires separate approval and is not authorized by this reset.
+Task 3: moving retarget and near-opposite reversal. Task 4: banking. Obstacle/collision/avoidance behavior, the near-opposite threshold and banking values remain undecided. There is no measured performance target.
