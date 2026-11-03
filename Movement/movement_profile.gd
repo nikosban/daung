@@ -7,11 +7,12 @@ extends Resource
 @export_range(0.1, 40.0, 0.1, "suffix:m/s²") var braking: float = 10.0
 @export_range(1.0, 120.0, 0.1, "suffix:°/s") var turn_rate: float = 20.0
 @export_range(0.1, 10.0, 0.1, "suffix:m") var arrival_tolerance: float = 2.0
-## Directional (sideways) thrust: how strongly the ship can change its velocity across its travel
-## (not its hull). It shares one combined budget with acceleration or braking along travel.
+## Thruster strength toward the hull's right or stern (not its travel); the main drive (acceleration)
+## pushes only along the bow, and braking acts against travel. All share one combined budget. Also the
+## coefficient of the near-goal and route-bend speed limits.
 @export_range(0.1, 20.0, 0.1, "suffix:m/s²") var lateral_acceleration: float = 1.7
-## Stronger directional thrust at low speed (provisional). It applies in full at rest and fades
-## smoothly (smoothstep) to lateral_acceleration at precision_fade_speed. Sideways thrust only; the
+## Stronger thrusters at low speed (provisional). It applies in full at rest and fades smoothly
+## (smoothstep) to lateral_acceleration at precision_fade_speed. Hull right and stern thrust only; the
 ## near-goal and route-bend speed limits keep lateral_acceleration. At or below lateral_acceleration it
 ## has no effect.
 @export_range(1.7, 12.0, 0.1, "suffix:m/s²") var precision_lateral_acceleration: float = 4.0
