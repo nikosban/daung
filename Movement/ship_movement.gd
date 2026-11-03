@@ -23,32 +23,67 @@ var _awaiting_rest := false
 ## Signed degrees from travel direction to goal at order receipt, or to the next leg when guidance
 ## crosses a route vertex (positive = left turn); 0 unless a moving turn.
 var _turn_deflection := 0.0
-## Latest normal order received before navigation was ready; started once it is.
+## Latest normal order (the requested point), waiting for its physics tick, for navigation to be
+## ready, or for its destination search; the previous order continues meanwhile.
 var _pending_order := Vector3.ZERO
 var _has_pending_order := false
+## Points appended while a normal order waits outside navigation syncing; appended once it starts.
+var _pending_waypoints := PackedVector3Array()
+## Destination search of the pending order: ring 0 is the nearest reachable navigation point; samples
+## start at its direction from the requested point. The search ends past the farthest region corner.
+var _searching := false
+var _search_origin := Vector3.ZERO
+var _search_angle := 0.0
+var _search_limit := 0.0
+var _search_ring := 0
+var _search_sample := 0
+## Vertical cylinder bounding the hull's collision box at any yaw, and its height offset; derived.
+var _hull_bound: CylinderShape3D
+var _hull_bound_offset := 0.0
 ## Route index of a generated detour's final point (the requested destination); 0 for manual routes.
 var _detour_end := 0
 
 
+func _ready() -> void:
+	for child in get_children():
+		var hull := child as CollisionShape3D
+		if hull != null and hull.shape is BoxShape3D:
+			var half := (hull.shape as BoxShape3D).size / 2.0
+			_hull_bound = CylinderShape3D.new()
+			_hull_bound.radius = Vector2(half.x + absf(hull.position.x), half.z + absf(hull.position.z)).length()
+			_hull_bound.height = half.y * 2.0
+			_hull_bound_offset = hull.position.y
+			return
+	push_error("ShipMovement needs a CollisionShape3D child with a BoxShape3D.")
+
+
 ## Replaces any route with an order to the requested point. Y is ignored; movement stays on the
-## ship's plane. Navigation plans a detour around static obstacles when one is needed; otherwise the
-## order aims directly at the point. Before navigation is ready the latest order waits, replacing any
-## earlier waiting order, and starts on the first tick it is. Classified once against the actual travel
-## velocity: near-opposite orders brake to rest first. Orders inside arrival tolerance count as
-## arrivals, never as reversals.
+## ship's plane. The order starts in the next physics tick, once navigation is ready; until then the
+## previous order continues and the latest request replaces any earlier waiting one. A point on the
+## navigation surface that the ship can reach and fits at is kept exactly, with a detour around static
+## obstacles when needed. Otherwise a destination search picks an approximately nearest such point,
+## possibly over several ticks; if none is found the ship brakes to rest. Without navigation data a free
+## point is aimed at directly. Classified once against the actual travel velocity: near-opposite orders
+## brake to rest first. Orders inside arrival tolerance count as arrivals, never as reversals.
 func move_to(world_position: Vector3) -> void:
 	_pending_order = Vector3(world_position.x, global_position.y, world_position.z)
 	_has_pending_order = true
-	_start_pending_order()
+	_searching = false
+	_pending_waypoints.clear()
 
 
 ## Appends a point to the end of the active route; the previous final point becomes intermediate.
-## Never navigates, re-classifies, restarts or brakes the journey. Without an active order, or while
-## a normal order waits for navigation, it replaces that with a direct order to the point.
+## Never navigates, re-classifies, restarts or brakes the journey. While a normal order waits for its
+## tick or search, the point is appended once that order starts. Without an active order, or while a
+## normal order waits for navigation to sync, it replaces that with a direct order to the point.
 func append_waypoint(world_position: Vector3) -> void:
 	var point := Vector3(world_position.x, global_position.y, world_position.z)
+	if _has_pending_order and _navigation_state() != _Navigation.SYNCING:
+		_pending_waypoints.append(point)
+		return
 	if not _has_destination or _has_pending_order:
 		_has_pending_order = false
+		_searching = false
 		_start_order(PackedVector3Array([global_position, point]), 0)
 		return
 	if _route.size() == 2:
@@ -61,10 +96,12 @@ func append_waypoint(world_position: Vector3) -> void:
 		_route.append(point)
 
 
-## Clears the route, including pending points and any order waiting for navigation. The ship brakes
-## to rest and stops turning.
+## Clears the route, including pending points and any waiting order or destination search. The ship
+## brakes to rest and stops turning.
 func stop() -> void:
 	_has_pending_order = false
+	_searching = false
+	_pending_waypoints.clear()
 	_end_route()
 
 
@@ -158,37 +195,151 @@ func _physics_process(delta: float) -> void:
 				break
 
 
-## Starts the waiting normal order once navigation is ready. A detour is used only when the path
-## bends and ends at the requested point; otherwise, or without usable navigation data, the order
-## aims directly at the point and the static-contact hard stop remains the fallback.
+## Resolves and starts the waiting normal order once navigation is not syncing; runs in the physics
+## tick, since hull checks query the physics space. A requested point on the navigation surface that
+## the ship can reach and fits at is kept; otherwise the destination search continues. Without
+## navigation data a free point becomes a direct order and an occupied one is declined.
 func _start_pending_order() -> void:
 	var navigation := _navigation_state()
 	if navigation == _Navigation.SYNCING:
 		return
+	var requested := _pending_order
+	if navigation == _Navigation.UNAVAILABLE:
+		_finish_pending_order(PackedVector3Array([global_position, requested]) if _hull_fits(requested) else PackedVector3Array())
+		return
+	if not _searching:
+		var path := _query_path(requested)
+		if _on_navigation_surface(requested) and _path_reaches(path, requested) and _hull_fits(requested):
+			_finish_pending_order(_route_from_path(path, requested))
+			return
+		_begin_destination_search(requested, path)
+	_search_destination(requested)
+
+
+## Starts the order on the given route, or declines it when the route is empty (the ship brakes to
+## rest, replacing the previous order). Points appended while it waited are then appended.
+func _finish_pending_order(route: PackedVector3Array) -> void:
 	_has_pending_order = false
-	var destination := _pending_order
-	var route := PackedVector3Array([global_position, destination])
-	if navigation == _Navigation.READY:
-		var query := NavigationPathQueryParameters3D.new()
-		query.map = get_world_3d().navigation_map
-		query.start_position = global_position
-		query.target_position = destination
-		query.simplify_path = true
-		query.simplify_epsilon = profile.path_simplify_epsilon
-		var result := NavigationPathQueryResult3D.new()
-		NavigationServer3D.query_path(query, result)
-		var path := result.path
-		var end_offset := destination - (path[-1] if not path.is_empty() else global_position)
-		end_offset.y = 0.0
-		if path.size() > 2 and end_offset.length() <= profile.arrival_tolerance:
-			# Interior points flattened onto the ship's plane; zero-length legs are dropped.
-			route = PackedVector3Array([global_position])
-			for i in range(1, path.size() - 1):
-				var point := Vector3(path[i].x, global_position.y, path[i].z)
-				if not point.is_equal_approx(route[-1]) and not point.is_equal_approx(destination):
-					route.append(point)
-			route.append(destination)
-	_start_order(route, route.size() - 1 if route.size() > 2 else 0)
+	_searching = false
+	if route.is_empty():
+		_end_route()
+	else:
+		_start_order(route, route.size() - 1 if route.size() > 2 else 0)
+	var waypoints := _pending_waypoints
+	_pending_waypoints = PackedVector3Array()
+	for point in waypoints:
+		append_waypoint(point)
+
+
+## Sets up the destination search around the requested point. Ring 0 is the path's end (the nearest
+## reachable navigation point), or the nearest navigation point when there is no path. The search
+## limit is the farthest corner of the enabled navigation regions, beyond which no surface exists.
+func _begin_destination_search(requested: Vector3, path: PackedVector3Array) -> void:
+	var map := get_world_3d().navigation_map
+	var origin: Vector3 = path[-1] if not path.is_empty() else NavigationServer3D.map_get_closest_point(map, requested)
+	_search_origin = Vector3(origin.x, global_position.y, origin.z)
+	var direction := Vector2(origin.x - requested.x, origin.z - requested.z)
+	if direction.is_zero_approx():
+		direction = Vector2(global_position.x - requested.x, global_position.z - requested.z)
+	_search_angle = direction.angle()
+	_search_limit = 0.0
+	for region in NavigationServer3D.map_get_regions(map):
+		if NavigationServer3D.region_get_enabled(region):
+			var bounds := NavigationServer3D.region_get_bounds(region)
+			for x in [bounds.position.x, bounds.end.x]:
+				for z in [bounds.position.z, bounds.end.z]:
+					_search_limit = maxf(_search_limit, Vector2(x - requested.x, z - requested.z).length())
+	_search_ring = 0
+	_search_sample = 0
+	_searching = true
+
+
+## Advances the destination search by at most destination_search_budget samples. Rings around the
+## requested point start at ring 0's distance and grow by destination_search_spacing; samples about
+## one spacing apart start at ring 0's direction and alternate sides, each snapped onto the navigation
+## surface. The first sample within its ring where the hull fits and the ship's current position can
+## reach becomes the destination, and its path from the ship is the route. Once the rings pass the
+## search limit the order is declined. Approximately nearest: pockets narrower than the spacing can be
+## missed, so a declined order does not prove that no free space exists.
+func _search_destination(requested: Vector3) -> void:
+	var map := get_world_3d().navigation_map
+	var spacing := profile.destination_search_spacing
+	var start_radius := Vector2(_search_origin.x - requested.x, _search_origin.z - requested.z).length()
+	var budget := profile.destination_search_budget
+	while budget > 0:
+		var radius := start_radius + spacing * _search_ring
+		if _search_ring > 0 and radius > _search_limit:
+			_finish_pending_order(PackedVector3Array())
+			return
+		var samples := 1 if _search_ring == 0 else ceili(TAU * radius / spacing)
+		if _search_sample == samples:
+			_search_ring += 1
+			_search_sample = 0
+			continue
+		var angle := _search_angle + TAU * ceili(_search_sample / 2.0) / samples * (1.0 if _search_sample % 2 == 1 else -1.0)
+		_search_sample += 1
+		budget -= 1
+		var candidate := _search_origin
+		if _search_ring > 0:
+			candidate = NavigationServer3D.map_get_closest_point(map, requested + Vector3(cos(angle), 0.0, sin(angle)) * radius)
+			candidate.y = global_position.y
+		# A sample snapped beyond its ring belongs to a later ring, keeping the search nearest-first.
+		var distance := Vector2(candidate.x - requested.x, candidate.z - requested.z).length()
+		if (distance <= radius or is_equal_approx(distance, radius)) and _hull_fits(candidate):
+			var path := _query_path(candidate)
+			if _path_reaches(path, candidate):
+				_finish_pending_order(_route_from_path(path, candidate))
+				return
+
+
+## Navigation path from the ship to the target on the ship's map.
+func _query_path(target: Vector3) -> PackedVector3Array:
+	var query := NavigationPathQueryParameters3D.new()
+	query.map = get_world_3d().navigation_map
+	query.start_position = global_position
+	query.target_position = target
+	query.simplify_path = true
+	query.simplify_epsilon = profile.path_simplify_epsilon
+	var result := NavigationPathQueryResult3D.new()
+	NavigationServer3D.query_path(query, result)
+	return result.path
+
+
+## Whether the point lies on the navigation surface: its nearest navigation point is directly above or below it.
+func _on_navigation_surface(point: Vector3) -> bool:
+	var closest := NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, point)
+	return is_equal_approx(closest.x, point.x) and is_equal_approx(closest.z, point.z)
+
+
+## Whether the path ends at the point, within the path's own simplification tolerance (XZ).
+func _path_reaches(path: PackedVector3Array, point: Vector3) -> bool:
+	return not path.is_empty() and Vector2(path[-1].x - point.x, path[-1].z - point.z).length() <= profile.path_simplify_epsilon
+
+
+## Whether the hull, at any yaw, fits at the point without overlapping a static obstacle (the same
+## bodies the hard stop reacts to).
+func _hull_fits(point: Vector3) -> bool:
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = _hull_bound
+	query.transform = Transform3D(Basis.IDENTITY, Vector3(point.x, global_position.y + _hull_bound_offset, point.z))
+	query.collision_mask = collision_mask
+	query.exclude = [get_rid()]
+	for hit in get_world_3d().direct_space_state.intersect_shape(query):
+		if hit.collider is StaticBody3D and not hit.collider is AnimatableBody3D:
+			return false
+	return true
+
+
+## Route from the ship along the path to the destination. A path that bends becomes a detour: its
+## interior points flattened onto the ship's plane, zero-length legs dropped; otherwise a direct route.
+func _route_from_path(path: PackedVector3Array, destination: Vector3) -> PackedVector3Array:
+	var route := PackedVector3Array([global_position])
+	for i in range(1, path.size() - 1):
+		var point := Vector3(path[i].x, global_position.y, path[i].z)
+		if not point.is_equal_approx(route[-1]) and not point.is_equal_approx(destination):
+			route.append(point)
+	route.append(destination)
+	return route
 
 
 ## Navigation readiness for this ship's map. Syncing until the map and every region on it have

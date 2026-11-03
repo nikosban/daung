@@ -15,3 +15,5 @@ route_lookahead_distance = 25.0
 detour_lookahead_distance = 20.0
 detour_corner_tolerance = 1.0
 path_simplify_epsilon = 0.1
+destination_search_spacing = 1.0
+destination_search_budget = 32

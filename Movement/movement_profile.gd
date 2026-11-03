@@ -22,4 +22,12 @@ extends Resource
 ## this far from any detour point it skips, so guidance does not pull the ship far inside a curve.
 @export_range(0.1, 10.0, 0.1, "suffix:m") var detour_corner_tolerance: float = 1.0
 ## Tolerance when simplifying navigation paths into route points; unobstructed paths reduce to the click.
+## Also how close a path's end must be to a destination for the destination to count as reachable.
 @export_range(0.01, 1.0, 0.01, "suffix:m") var path_simplify_epsilon: float = 0.1
+## Destination search around an occupied or off-surface click: the distance between search rings and
+## between samples along a ring (provisional). The chosen destination is approximately the nearest
+## valid one; smaller values are more precise but cost more samples.
+@export_range(0.25, 5.0, 0.05, "suffix:m") var destination_search_spacing: float = 1.0
+## Destination search work per ship per physics tick, in samples (provisional). A longer search stays
+## pending for more ticks while the previous order continues.
+@export_range(8, 512, 1) var destination_search_budget: int = 32
