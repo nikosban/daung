@@ -163,21 +163,24 @@ func _physics_process(delta: float) -> void:
 			desired_speed = minf(desired_speed, sqrt(profile.lateral_acceleration * distance / (2.0 * sin_theta)))
 		desired_velocity = goal_direction * desired_speed
 
-	# One bounded velocity change toward the desired velocity. It is resolved along and across the
-	# actual travel (from rest, along the change itself) and limited by one combined budget, an
-	# ellipse of acceleration or braking along travel and directional thrust across it: the requested
-	# change is scaled onto the ellipse, keeping its direction. Below precision_fade_speed the
-	# directional thrust rises smoothly toward precision_lateral_acceleration.
+	# One bounded velocity change toward the desired velocity, limited by one combined budget.
+	# Braking acts on travel: the part of the change against the actual travel direction, at most the
+	# current speed, so it only slows the ship and never reverses or redirects it. The rest is
+	# propulsion in the hull frame: the main drive (acceleration) along the bow; thrusters toward the
+	# hull's right or stern (lateral_acceleration, rising smoothly toward precision_lateral_acceleration
+	# below precision_fade_speed). The requested change is scaled onto the ellipse of these limits,
+	# keeping its direction. Yaw never rotates the velocity.
 	var change := desired_velocity - planar_velocity
-	var change_size := change.length()
-	if change_size > 0.0:
-		var axis := direction if speed > 0.0 else change / change_size
-		var along := change.dot(axis)
-		var across := (change - axis * along).length()
-		var longitudinal := (profile.acceleration if along > 0.0 else profile.braking) * delta
+	if change.length() > 0.0:
+		var brake := clampf(change.dot(direction), -speed, 0.0)
+		var thrust := change - direction * brake
+		var bow := Vector3(-sin(rotation.y), 0.0, -cos(rotation.y))
+		var forward := thrust.dot(bow)
+		var sideways := (thrust - bow * forward).length()
 		var cruise := profile.lateral_acceleration
-		var lateral := lerpf(maxf(profile.precision_lateral_acceleration, cruise), cruise, smoothstep(0.0, profile.precision_fade_speed, speed)) * delta
-		var demand := sqrt(pow(along / longitudinal, 2.0) + pow(across / lateral, 2.0))
+		var thruster := lerpf(maxf(profile.precision_lateral_acceleration, cruise), cruise, smoothstep(0.0, profile.precision_fade_speed, speed)) * delta
+		var drive := profile.acceleration * delta if forward > 0.0 else thruster
+		var demand := sqrt(pow(brake / (profile.braking * delta), 2.0) + pow(forward / drive, 2.0) + pow(sideways / thruster, 2.0))
 		planar_velocity += change / maxf(demand, 1.0)
 	velocity = planar_velocity
 	speed = planar_velocity.length()
