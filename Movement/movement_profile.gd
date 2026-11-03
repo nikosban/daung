@@ -7,11 +7,11 @@ extends Resource
 @export_range(0.1, 40.0, 0.1, "suffix:m/s²") var braking: float = 10.0
 @export_range(1.0, 120.0, 0.1, "suffix:°/s") var turn_rate: float = 20.0
 @export_range(0.1, 10.0, 0.1, "suffix:m") var arrival_tolerance: float = 2.0
-## Directional (sideways) thrust: how strongly a moving ship can turn its travel direction (not its
-## hull). The travel turn rate is this divided by speed, so slower ships turn tighter.
+## Directional (sideways) thrust: how strongly the ship can change its velocity across its travel
+## (not its hull). It shares one combined budget with acceleration or braking along travel.
 @export_range(0.1, 20.0, 0.1, "suffix:m/s²") var lateral_acceleration: float = 1.7
-## Stronger directional thrust for steering at low speed (provisional). It applies in full at rest and
-## fades smoothly (smoothstep) to lateral_acceleration at precision_fade_speed. Steering only; the
+## Stronger directional thrust at low speed (provisional). It applies in full at rest and fades
+## smoothly (smoothstep) to lateral_acceleration at precision_fade_speed. Sideways thrust only; the
 ## near-goal and route-bend speed limits keep lateral_acceleration. At or below lateral_acceleration it
 ## has no effect.
 @export_range(1.7, 12.0, 0.1, "suffix:m/s²") var precision_lateral_acceleration: float = 4.0

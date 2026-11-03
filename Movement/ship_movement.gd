@@ -148,30 +148,39 @@ func _physics_process(delta: float) -> void:
 	if _has_destination and not _awaiting_rest and at_final and distance <= profile.arrival_tolerance:
 		_end_route()
 
+	# Desired velocity: toward the guidance point at the capped speed while steering; otherwise rest
+	# (arrival, idle, stop() and near-opposite braking).
 	var steering := _has_destination and not _awaiting_rest and distance > 0.0
-	var desired_speed := 0.0
+	var desired_velocity := Vector3.ZERO
 	if steering:
 		var goal_direction := offset / distance
-		if planar_velocity.is_zero_approx():
-			direction = goal_direction
-		else:
-			# Bounded lateral acceleration a = v · ω: the travel direction turns at up to a / v. Below
-			# precision_fade_speed the steering thrust rises smoothly toward precision_lateral_acceleration.
-			var cruise := profile.lateral_acceleration
-			var thrust := lerpf(maxf(profile.precision_lateral_acceleration, cruise), cruise, smoothstep(0.0, profile.precision_fade_speed, speed))
-			var max_turn := thrust / speed * delta
-			direction = direction.rotated(Vector3.UP, clampf(direction.signed_angle_to(goal_direction, Vector3.UP), -max_turn, max_turn))
 		# Cap speed so the ship can still brake to rest at the final destination.
-		desired_speed = minf(minf(profile.max_speed, bend_limit), sqrt(2.0 * profile.braking * (distance + remaining)))
-		# Pure pursuit: keep the turn radius v² / a inside the circle through the goal
-		# tangent to travel, R = d / (2 sin θ), so near goals are reached instead of orbited.
+		var desired_speed := minf(minf(profile.max_speed, bend_limit), sqrt(2.0 * profile.braking * (distance + remaining)))
+		# Pure pursuit: keep the turn radius v² / a inside the circle through the goal tangent to the
+		# actual travel, R = d / (2 sin θ), so near goals are reached instead of orbited.
 		var sin_theta := absf(sin(direction.angle_to(goal_direction)))
 		if sin_theta > 0.001:
 			desired_speed = minf(desired_speed, sqrt(profile.lateral_acceleration * distance / (2.0 * sin_theta)))
+		desired_velocity = goal_direction * desired_speed
 
-	var rate := profile.acceleration if desired_speed > speed else profile.braking
-	speed = move_toward(speed, desired_speed, rate * delta)
-	velocity = direction * speed
+	# One bounded velocity change toward the desired velocity. It is resolved along and across the
+	# actual travel (from rest, along the change itself) and limited by one combined budget, an
+	# ellipse of acceleration or braking along travel and directional thrust across it: the requested
+	# change is scaled onto the ellipse, keeping its direction. Below precision_fade_speed the
+	# directional thrust rises smoothly toward precision_lateral_acceleration.
+	var change := desired_velocity - planar_velocity
+	var change_size := change.length()
+	if change_size > 0.0:
+		var axis := direction if speed > 0.0 else change / change_size
+		var along := change.dot(axis)
+		var across := (change - axis * along).length()
+		var longitudinal := (profile.acceleration if along > 0.0 else profile.braking) * delta
+		var cruise := profile.lateral_acceleration
+		var lateral := lerpf(maxf(profile.precision_lateral_acceleration, cruise), cruise, smoothstep(0.0, profile.precision_fade_speed, speed)) * delta
+		var demand := sqrt(pow(along / longitudinal, 2.0) + pow(across / lateral, 2.0))
+		planar_velocity += change / maxf(demand, 1.0)
+	velocity = planar_velocity
+	speed = planar_velocity.length()
 
 	if _awaiting_rest and speed == 0.0:
 		_awaiting_rest = false
