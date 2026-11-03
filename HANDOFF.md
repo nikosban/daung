@@ -2,43 +2,62 @@
 
 ## Current state
 
-Daung has open-space ship movement with moving turns, near-opposite reversals, model-only banking, player-defined routes, a hard stop on static obstacles, automatic detours around them for normal right-clicks, resolution of occupied or off-surface destinations, stronger low-speed directional control, momentum-based locomotion through one combined thrust budget, a heavier frigate tuning trial (6 s from rest to 8 m/s), and a hull-relative thrust trial: the main drive pushes along the bow and weak thrusters (0.4 m/s² at cruise) push sideways or sternward (Tasks #3, #5, #7, #9, #11, #13, #15, #17, #19, #21 and #23). Running the project opens `Main/main.tscn`: a fixed camera, one frigate at the origin facing −Z, 2 m ring markers at (100, 0, 0), at the start location (0, 0, 0) and at the route test points (60, 0, 0), (60, 0, −40) and (20, 0, −40), and a grey 6 m radius test sphere at (83, 0, 0) that blocks the straight path to (100, 0, 0). Right-clicking the Y = 0 plane orders the ship there, around the sphere if needed; a click on the sphere or too close to it sends the ship to about (75.4, 0, −15.2), the nearest spot found where it fits. Shift + right-click appends a manual waypoint.
+Daung has open-space ship movement on **heading-and-throttle locomotion** (Task #25, the owner's Movement v2 proposal; it replaces the Task #19–#23 desired-velocity controller). It also has model-only banking, player-defined routes, a hard stop on static obstacles, automatic detours around them for normal right-clicks, and resolution of occupied or off-surface destinations (Tasks #3–#15).
 
-- `Movement/`: the `MovementProfile` Resource (fifteen provisional tunables), the shared `frigate_movement_profile.tres`, and `ShipMovement` (`CharacterBody3D`), the single writer of planar position, velocity and yaw, with `move_to()`, `append_waypoint()` and `stop()`.
+Running the project opens `Main/main.tscn`:
+- **Scene:** one frigate at the origin facing −Z; 2 m ring markers at (100, 0, 0), at the start location (0, 0, 0) and at the route test points (60, 0, 0), (60, 0, −40) and (20, 0, −40); a grey 6 m radius test sphere at (83, 0, 0) that blocks the straight path to (100, 0, 0).
+- **Test area:** **800 × 800 m** (navigable X −339.25…439.25, Z ±389.25).
+- **Camera:** starts at the old 45° view. **Middle-drag** pans and the **wheel** zooms; the camera never follows the ship.
+- **Orders:** right-clicking the Y = 0 plane orders the ship there, around the sphere if needed. A click on the sphere or too close to it goes to about (75.4, 0, −15.2). Shift + right-click appends a manual waypoint.
+- **F3** toggles a readout of the phase, heading and commanded heading, speed and commanded speed, and slip.
+
+- `Movement/`:
+  - the `MovementProfile` Resource (nineteen provisional tunables);
+  - the shared `frigate_movement_profile.tres`;
+  - `ManeuverPlan` (per-order corner plan, clearance gate and the shared motion step);
+  - `ShipMovement` (`CharacterBody3D`), the single writer of planar position, velocity and yaw, with `move_to()`, `append_waypoint()` and `stop()`.
+- **Motion:** each tick the velocity is `bow · speed + right · slip + thruster velocity`. Yaw never rotates the thruster velocity; it does carry `speed` (deliberately non-Newtonian).
+  - **Yaw:** the hull turns toward a commanded heading at up to 10 °/s, with the rate changing at up to 10 °/s², so turns ease in and out without snapping at alignment.
+  - **Main engine:** speed changes along the bow at 1.0 m/s² up and 0.75 m/s² down, up to 5 m/s.
+  - **Slip:** each tick of yaw adds `0.5 · speed · sin(Δyaw)` of sideways slip, which fades at 0.25 m/s².
+  - **Thrusters:** push in any direction at 0.35 m/s².
+- **Phases:** IDLE, TURN, CRUISE, BRAKE, TRANSLATE.
 - **Each new order (`move_to`) is classified once, from the actual travel velocity:**
-  - at rest: translate and turn together;
-  - 150° or more from travel: brake to rest, then start from rest;
-  - anything else: a moving turn. The ship keeps its velocity and redirects it through its available thrust: mainly the main drive once the bow comes round.
-- **Locomotion (Task #19; hull-relative thrust, Task #23 trial):** each tick the ship changes its actual velocity toward a desired velocity: toward the guidance point at the capped speed, or zero when braking. The change is split into three parts that share one combined budget (a friction ellipse); a request beyond it is scaled down, keeping its direction:
-  - **Braking** acts against the actual travel, whatever the hull's facing: up to 6 m/s². It can only slow the ship along its current direction, never reverse or redirect it. `stop()`, arrival, declined orders and 150° reversals therefore still brake at 6 m/s² in any hull orientation.
-  - **Main drive** along the bow: up to 1.333… m/s² (8/6, so 6 s from rest to 8 m/s).
-  - **Thrusters** toward the hull's right or stern: 0.4 m/s² at cruise (`lateral_acceleration`, Task #23 trial; 1.4 before), rising smoothly below 4 m/s (`precision_fade_speed`) to 4.0 m/s² at rest (`precision_lateral_acceleration`, Task #17 trial). There is no reverse mode (owner-approved).
-
-  Yaw never rotates the velocity. In a turn at speed the old velocity carries on while the hull yaws at 20 °/s; the weak thrusters dominate the shared budget, so braking is scaled down too, and the course curves once the main drive comes to bear. With the hull aligned to travel, behavior is as before (straight launch to 8 m/s on the 361st active tick). Starts from rest: translation and hull yaw begin together; a sideways or backward start is initially pushed by the thrusters at up to 4.0 m/s², three times the main drive (owner-accepted). The near-goal (pure-pursuit) cap reads the actual travel direction and, like the bend limit, uses `lateral_acceleration` (now 0.4 m/s²). On multi-point routes the ship brakes ahead of bends and accelerates again on straighter travel (bend limit, owner-approved trial).
+  - **At rest:**
+    - A single leg within 15 m whose thruster-only time is at most 1.2 × turn-and-burn's is a TRANSLATE: the thrusters move the ship while the hull yaws toward the click; short moves end before full alignment.
+    - Otherwise a heading error above 5° is a **departure TURN**: the hull yaws and the thrusters push toward the aim point on the same physics tick. On reaching the heading, the forward part of that thrust becomes engine speed (world velocity unchanged) and the rest fades.
+    - Otherwise CRUISE.
+  - **150° or more from travel:** brake to rest, then start from rest.
+  - **Anything else:** a continuous moving TURN at a latched reduced speed (`min(0.6 × speed, the speed whose turn circle passes through the aim point)`), then CRUISE. There is no stop.
+- **CRUISE** aims at the current leg's end at up to 5 m/s, braking ahead with 0.75 m/s² for planned corners (to their corner speed at their turn-start point) and for the final point. **BRAKE** is that final braking (and reversal braking).
 - **Routes:** each ship keeps its own route (the anchor, then the requested points; never empty).
-  - A plain right-click replaces the whole route, starting in the next physics tick. The click is kept exactly when it is on the navigation surface, reachable, and the hull fits there; the route is a detour if the path bends, otherwise direct, as before.
-  - Otherwise (on or near the sphere, off the 400 × 400 m navigation floor, unreachable) a **destination search** picks an approximately nearest reachable point where the hull fits: rings around the click every 1 m (`destination_search_spacing`), starting at the nearest reachable navigation point, at most 32 samples per ship per physics tick (`destination_search_budget`). The previous order continues until the new one starts. If the rings pass the navigation data without a result, the order is declined: the ship brakes to rest. There is no indicator for a moved or declined destination.
-  - Shift + right-click appends a manual point without navigating, re-classifying, restarting or braking. If it arrives while a normal click is still waiting (outside startup syncing), it is appended once that order starts. With no active order it starts a direct order (no detour).
-  - On manual multi-point routes the ship steers at a point 25 m further along the route (`route_lookahead_distance`), so it rounds bends early and may cut corners. Detours use 20 m (`detour_lookahead_distance`), blending to 25 m over the last 20 m before the detour's final point when manual points follow. Progress never goes backward. Intermediate points are guidance, never arrival targets.
-  - For a detour, the 150° reversal check uses the initial guidance point (20 m along the detour), not the first leg or the click.
-  - When guidance crosses a bend, the turn deflection is reset from the actual travel direction to the new leg, so banking follows the current bend.
-  - `stop()` clears the whole route.
-- Entering the 2 m tolerance of the final point completes an order. The ship brakes to rest along its travel and may coast past without turning back. A click inside 2 m is an arrival, never a reversal.
-- **Static obstacles:** moving into a `StaticBody3D` (not an `AnimatableBody3D`) ends the whole order, pending points included, with an immediate stop at the contact; it stays the safety fallback for direct orders and manual legs. A ship resting against an obstacle can be ordered away from it. Other body types keep the engine's default sliding; their behavior is undecided.
-- **Navigation:** `Main/main.tscn` has a `NavigationRegion3D` with the baked `Main/navigation_mesh.tres` (10.75 m clearance, 7 m agent height), baked from the colliders in group `navigation_source`: `TestObstacle` and an invisible 400 × 400 m `NavigationFloor` on layer 2 that the ship never touches. Rebake (select `NavigationRegion3D`, Bake NavigationMesh) after changing them.
+  - A plain right-click replaces the whole route, starting in the next physics tick. The click is kept exactly when it is on the navigation surface, reachable, and the hull fits there; the route follows the navigation path (a detour if it bends).
+  - Otherwise (on or near the sphere, off the navigation floor, unreachable) a **destination search** picks an approximately nearest reachable point where the hull fits: rings around the click every 1 m, at most 32 samples per ship per physics tick. The previous order continues until the new one starts. If the rings pass the navigation data without a result, the order is declined: the ship brakes to rest. There is no indicator for a moved or declined destination.
+  - Shift + right-click appends a manual point without navigating; the previous final point becomes a planned corner. If it arrives while a normal click is still waiting (outside startup syncing), it is appended once that order starts. With no active order it starts a direct order (no detour).
+  - **Corners:**
+    - **Corner speed:** each route vertex bending by more than 5° gets a corner speed of up to 3 m/s (0.6 × 5), lower if its turn would not fit half of the adjacent legs.
+    - **Turn start:** the ship starts that corner's TURN `(v / yaw_rate) · tan(φ / 2)` before the vertex, aiming at the outgoing leg's direction.
+    - **Clearance gate:** before a corner is used, it must pass the gate, which replays the same motion step through the turn and sweeps the hull box against static obstacles (with an overlap check at every sample).
+    - **Stop-and-turn:** a corner that fails at all four speeds rests at the vertex and starts the next leg from rest. So does a corner the ship reaches before its check has finished (owner-approved Option A).
+  - Intermediate points are never arrival targets. `stop()` clears the whole route.
+- **Arrival:** entering the 2 m tolerance of the final point completes an order. Rotation is wound down before arrival and the heading freezes on the arrival tick. The ship then brakes to rest at 0.75 m/s² and may coast past without turning back. `stop()` and declined orders also freeze the heading on the same tick.
+- **Static obstacles:** moving into a `StaticBody3D` (not an `AnimatableBody3D`) ends the whole order, pending points included, with an immediate stop at the contact. It stays the safety fallback for direct orders, manual legs, moving TURNs and stop-and-turn rotations. A ship resting against an obstacle can be ordered away from it. Other body types keep the engine's default sliding; their behavior is undecided.
+- **Navigation:** `Main/main.tscn` has a `NavigationRegion3D` with the baked `Main/navigation_mesh.tres` (10.75 m clearance, 7 m agent height). It is baked from the colliders in group `navigation_source`: `TestObstacle`, and an invisible **800 × 800 m** `NavigationFloor` on layer 2 that the ship never touches. Rebake (select `NavigationRegion3D`, Bake NavigationMesh) after changing them.
 - **Startup readiness:** Godot's asynchronous navigation is usable from about physics frame 4–5 (≈ 70–83 ms). A normal click before then is held (only the latest), then resolved on the first ready tick; a Shift-click drops it and starts a direct order; `stop()` drops it. If navigation settles with no usable data (no region, an empty or missing mesh), a click where the hull fits becomes a direct order and an occupied one is declined.
 - **Fallback:** there is no direct order toward an occupied click any more. Direct orders remain for free clicks without usable navigation data and for Shift-built legs; the hard stop stays their safeguard. No failure is reported.
 - **Hull fit:** a vertical cylinder bounding the ship's collision box at any yaw (10.685 m radius for the frigate), derived from `Ships/ship.tscn`, checked against static obstacles only.
-- `get_destination()` returns the final point (the resolved one when the click moved); `get_guidance_target()` returns the point currently steered at. Both are always defined, including at startup and after `stop()`, arrival or a blocked stop.
+- `get_destination()` returns the final point (the resolved one when the click moved); `get_guidance_target()` returns the end of the current leg. Both are always defined, including at startup and after `stop()`, arrival or a blocked stop.
 - `Ships/ship.tscn`: the reusable ship. It has the movement root, a provisional box collision shape with no collision rules, and the protected GLB as a `Visual` child at identity.
 - **Banking:** `Visual` runs `ShipVisualBank`, which reads Movement's `get_turn_deflection()` and its course error to `get_guidance_target()`, and rolls only the visual wrapper.
   - A turn under 70° heels outward 4°; 70° or more banks inward 9°.
-  - The class is fixed per order or route bend and mirrors left and right.
+  - The class is fixed per order or planned corner and mirrors left and right.
   - The roll changes at up to 7 °/s and returns to level when the course is within 3°, on stop or arrival, during reversal braking, and on starts from rest.
   - Values live in `Ships/Profiles/frigate_bank_profile.tres`.
-- `Main/right_click_move_input.gd`: temporary scene input glue.
 - `Main/main.tscn` `TestObstacle`: a temporary `StaticBody3D` collision and navigation test fixture (sphere shape and plain grey mesh, radius 6 m), not asteroid art.
+- `Main/right_click_move_input.gd`: temporary scene input glue.
 - `project.godot` sets the main scene, opens the window maximized with `canvas_items`/`expand` stretch, and enables physics interpolation.
+- `Main/camera_pan_zoom.gd`: temporary camera glue (middle-drag pan, wheel zoom between 15 and 400 m height, 10 % of height per notch; exported values on the `Camera3D` node).
+- `Main/movement_debug_overlay.gd`: the temporary F3 readout (`MovementDebugOverlay` node); it reads Movement's read-only getters only.
 
 The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidecar are unchanged. Do not edit, relocate, rename, rescale or repivot them.
 
@@ -47,65 +66,112 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 ## Accepted decisions
 
 - 1 world unit = 1 metre; authoritative gameplay movement uses X/Z.
-- Movement is the only top-level gameplay module and may use Godot APIs only. It alone owns authoritative movement; guidance (including route guidance) and locomotion stay internal.
-- Translate and turn together from rest. Moving turns are continuous and broad, from bounded directional thrust (owner-approved trial, Task #13). Momentum is kept across orders and redirected through one combined thrust budget, with no independent travel-direction rotation (Task #19, approved). Hull-relative thrust trial (Task #23, approved): braking acts against actual travel and only slows the ship; the main drive acts along the bow; sideways and sternward thrust share the weak thruster limit (with the low-speed precision rise), with no reverse mode. Orders 150°–180° from actual travel brake fully to rest before restarting. Arrival ends commanded rotation.
-- Routes: Shift + right-click appends, a plain right-click replaces. The ship moves continuously through intermediate points and brakes only for the final one. A Shift-click after the final point's 2 m arrival trigger has completed the order starts a new order, which may brake to rest first if near-opposite.
-- Model-only presentation heels outward in broad maneuvers and banks inward in sharper ones. Visual tilt never affects the authoritative root or collision.
+- Movement is the only top-level gameplay module and may use Godot APIs only. It alone owns authoritative movement; guidance (including route following and the maneuver plan) and locomotion stay internal.
+- **Locomotion (Task #25, approved):** heading-and-throttle per the owner's Movement v2 proposal, replacing desired-velocity chasing.
+  - **From rest:** translation and yaw start on the same tick (thruster departure, the approved correction to v2).
+  - **Moving orders below 150°:** continuous, with no stop rule.
+  - **150° or more from actual travel:** brake to rest first (kept provisionally; powered reverse deferred).
+  - **Stop-and-turn:** only at a corner that fails the clearance gate, or one still unchecked when reached (owner-approved Option A).
+  - **Arrival and `stop()`:** both end rotation on that tick.
+- **Routes:** Shift + right-click appends, a plain right-click replaces. Intermediate points are never arrival targets. A Shift-click after the final point's 2 m arrival trigger has completed the order starts a new order, which may brake to rest first if near-opposite.
+- **Banking:** model-only presentation heels outward in broad maneuvers and banks inward in sharper ones. Visual tilt never affects the authoritative root or collision. Banking keeps reading `get_turn_deflection()` (unchanged contract).
 - Ship differences use shared reusable definitions and Resource configuration, with per-instance runtime state. Work happens in the one developing game scene.
-- Right-click to move, with the ship already controlled (no selection). No stop key. The fixed camera looks 45° down.
-- Obstacles: the immediate hard stop on contact, including grazing contacts, and the grey 6 m test sphere at (83, 0, 0) are provisional. Normal right-clicks detour around static obstacles with Godot navigation (`NavigationRegion3D` + baked mesh, one `query_path` per order, original click kept as the destination); Shift-built legs stay manual until the next slice, which must reuse the same path query and clearance method.
+- **Input:** right-click to move, with the ship already controlled (no selection). No stop key. The camera looks 45° down, pans with middle-drag and zooms with the wheel, and does not follow the ship (Task #25).
+- **Obstacles:**
+  - The immediate hard stop on contact, including grazing contacts, and the grey 6 m test sphere at (83, 0, 0) are provisional.
+  - Normal right-clicks detour around static obstacles with Godot navigation (`NavigationRegion3D` + baked mesh, one `query_path` per order, original click kept as the destination).
+  - Shift-built legs stay manual until the next slice, which must reuse the same path query and clearance method.
 - Navigation stays asynchronous (engine defaults); no `map_force_update()`.
-- Static destination resolution (Task #15): a normal click that is off the navigation surface, unreachable or occupied by a static obstacle moves to an approximately nearest reachable point where the hull fits, searching progressively farther with no relocation limit. If none is found, the click still replaces the previous order and the ship brakes to rest. Free clicks beyond the navigation floor resolve to its edge. During a search the previous order continues; the route is built from the ship's live position when the destination is accepted.
-- Provisional movement defaults:
-  - 8 m/s max speed;
-  - 1.3333333333333333 m/s² acceleration (8/6: 6 s from rest to 8 m/s; Inspector step 0.0001) and 6 m/s² braking; owner-approved playtest trial (Task #21);
-  - 20 °/s hull yaw;
-  - 0.4 m/s² lateral acceleration (range 0.1–20; Task #23 provisional trial in the owner's 0.3–0.5 starting band, previously 1.4): cruise thruster strength toward the hull's right or stern, not travel; it stays the coefficient of the pure-pursuit cap and the bend limit;
-  - 4.0 m/s² precision lateral acceleration (range 1.7–12) at rest, fading by smoothstep to `lateral_acceleration` at 4.0 m/s `precision_fade_speed` (range 1–8); hull right and stern thrusters only, including starts from rest; owner-approved playtest trial (Task #17), feel judged in F5. At or below `lateral_acceleration` it has no effect;
-  - 150° near-opposite angle;
-  - 2 m arrival tolerance;
-  - 25 m route lookahead for manual routes (range 2–100 m);
-  - 20 m detour lookahead (range 2–100 m), provisional;
-  - 1 m detour corner tolerance (range 0.1–10 m), provisional trial value;
-  - 0.1 m path simplify epsilon (range 0.01–1 m), also the reachability tolerance of a path's end;
-  - 1 m destination search spacing (range 0.25–5 m), approximate nearest placement accepted;
-  - 32 destination search samples per physics tick per ship (range 8–512);
-  - navigation clearance `agent_radius` 10.75 m and `agent_height` 7 m in `Main/navigation_mesh.tres`.
+- **Static destination resolution (Task #15):** a normal click that is off the navigation surface, unreachable or occupied by a static obstacle moves to an approximately nearest reachable point where the hull fits, searching progressively farther with no relocation limit. If none is found, the click still replaces the previous order and the ship brakes to rest. Free clicks beyond the navigation floor resolve to its edge. During a search the previous order continues; the route is built from the ship's live position when the destination is accepted.
+- **Provisional movement defaults** (Task #25, the owner's v2 values, literal):
+  - **Main engine:** 5 m/s max speed; 1.0 m/s² accel; 0.75 m/s² decel.
+  - **Yaw:** 10 °/s yaw rate; 10 °/s² yaw accel.
+  - **TURN:** turn speed factor 0.6; heading tolerance 5° (re-entry beyond 10°).
+  - **Slip:** gain 0.5; decay 0.25 m/s².
+  - **Thrusters:** 0.35 m/s² thruster accel; 15 m thruster range; TRANSLATE preference 1.2.
+  - **Kept:** 2 m arrival tolerance; 150° near-opposite angle; 0.1 m path simplify epsilon; 1 m destination search spacing; 32 destination search samples per tick.
+  - **Clearance gate:** 64 queries and 240 simulated steps per ship per physics tick.
+  - **Navigation:** `agent_radius` 10.75 m and `agent_height` 7 m in `Main/navigation_mesh.tres`.
 
-  Final balance comes from owner playtests.
+  The previous (Task #21/#23) values are in Git history (`main` at 5573f98). Final balance comes from owner playtests.
 
 ## Known limitations
 
-- **Short clicks at speed (accepted by the owner; longer with the Task #21 trial):** a click within 2 m of a ship at 8 m/s finishes where braking ends, up to about 5.3 m past the click (8² ÷ (2 × 6); 3.2 m before the trial). Measured: a click 1 m ahead at 8 m/s rests 4.27 m past it (2.13 m before). The 2 m tolerance triggers arrival braking; it does not guarantee the final rest distance.
-- **Turns at speed carry on, then slow (measured with the Task #23 trial):** the old velocity carries on while the hull yaws; braking shares the budget with the weak thrusters. A 90° retarget at 8 m/s (cruising toward −Z, ordered at z = −60, destination 20, 50, 100 or 150 m to the side) dips to 1.25 / 2.29 / 3.40 / 4.11 m/s (2.46 / 4.06 / 5.22 / 5.38 before Task #23), then peaks at about 8 m/s. The hull leads travel by up to about 65–75° (25–34° before). The trajectory carries 24.0 / 30.7 / 38.5 / 46.6 m past the turn point (13.8 / 20.8 / 26.3 / 27.1 before). Arrival comes 11.33 / 15.43 / 22.47 / 29.25 s after the order (7.70 / 11.57 / 17.02 / 22.90 before), resting 1.21 / 0.07 / 0.07 / 0.07 m from the click; the 20 m case arrives at 6.07 m/s and coasts 3.0 m past. No contact or orbit.
-- **Low-speed retargets realign quickly:** braking also cancels old velocity, and below 4 m/s the thrusters rise toward 4.0 m/s², so slow ships realign fast. Low-speed retargets were last measured in Task #19 (other values) and are not re-measured with the Task #21 or #23 trials. Velocity direction can change sharply per tick at very low speed (a tiny velocity; the change itself stays within the budget). The hull still yaws at 20 °/s and the roll stays rate-limited.
-- **Starts from rest (Task #23 trial, measured):** translation and hull yaw begin on the same tick. A hull-aligned launch is limited by `acceleration`: 8 m/s on the 361st active physics tick, as before (7.99998 m/s after 360, a single-precision residual of the 60 Hz integration). Sideways and sternward starts are pushed by the thrusters, up to 4.0 m/s² at rest fading to 0.4 m/s² by 4 m/s, then by the main drive as the bow comes round (owner-accepted). From the origin facing −Z: sideways to (60, 0, 0) reaches 2 / 4 / 8 m/s on active tick 38 / 164 / 373 (90 / 180 / 361 before) and arrives 10.10 s after it starts moving (10.35 before). Backward to (0, 0, 60): 37 / 186 / 560 (90 / 180 / 361), arriving after 11.28 s (10.35); the hull must swing 180° first. A short sideways move to (15, 0, 0) finishes without full hull alignment, resting 0.04 m from the click, after 3.97 s (4.43). Editing `acceleration` in the Inspector snaps it to 0.0001 (1.3333); measured in Task #21: 8 m/s is still reached on the 361st tick.
-- **Speed caps assume undivided, travel-frame budgets:** the stopping-distance cap assumes full braking, although during steering braking shares the budget with the thrusters and can be much weaker (e.g. the decisive 90° turn loses only 0.7 m/s in its first second). The bend limit and pure-pursuit cap use `lateral_acceleration` (0.4 m/s², hull-right thrust), while the real turning authority depends on where the bow points: lower than assumed while the hull points away, higher once the main drive faces the goal. The lower coefficient makes the caps numerically lower, but does not establish safety. Measured with the Task #23 trial: no new contacts, failed arrivals or orbits in the tested cases. This is an approximation, not a guarantee.
-- **Hull yaw versus travel:** the hull turns toward the guidance point at 20 °/s, so during turns it leads the travel direction, by up to about 75° in a 90° turn at speed with the Task #23 trial (the ship visibly drifts with its old momentum).
-- **Route bends slow the ship:** the bend limit brakes before a bend instead of during it. On the test route (Task #23 trial) the ship passes the two 90° corners at about 2.52 and 2.55 m/s (4.72 / 4.63 before Task #23) and comes to rest 31.2 s after the order (23.1 s before); its maximum distance from the route polyline is 8.7 m (7.9 before). It arrives at the final ring at 5.69 m/s and rests 1.21 m from it (0.07 before). The bend limit is an averaged-curvature estimate, not a swept-hull guarantee. Tight manual zigzags were last measured in Task #19 (about 2.8–3.2 m/s, no stall).
-- **Cut corners:** progress can jump forward when the ship's nearest route point moves onto the next leg (about 11 m at the first test corner). Travel direction, yaw and roll stay rate-limited.
-- **Bends right after a start from rest:** if the first leg is shorter than the lookahead, guidance can cross its bend while the ship is still at rest, so that bend keeps a 0 deflection and does not bank.
-- **Abrupt stop:** a blocked ship goes from up to 8 m/s to 0 in one physics tick at the contact (head-on: root X ≈ 66.97, about 1 mm from the sphere). There is no pre-brake or impact feedback.
-- **Grazing contacts stop the ship:** any motion into the obstacle's surface counts, however shallow. Within the impact tick the engine may slide the ship by at most one tick of motion (≈ 0.13 m at 8 m/s; 0 head-on) before the stop.
-- **Pure sideways order from contact stays blocked:** when the ship rests against an obstacle and is ordered exactly sideways, the hull's yaw swings its corner into the surface, which counts as a grazing contact and stops it again. Orders with any away component (e.g. back to (0, 0, 0)) escape.
-- **Detour clearance is measured, not guaranteed:** with the Task #23 trial the test detour from (0, 0, 0) to (100, 0, 0) keeps the hull 6.22 m from the sphere at its closest (6.75 before), and the return journey from rest at (100, 0, 0) to (0, 0, 0) keeps 6.10 m (6.10 before, on the straight first leg, in the Task #23 harness). Zero contacts; both arrive (forward 24.3 s after starting to move, 19.4 before; return 21.7 s, 18.4 before), resting 0.12 / 0.07 m from the click. Other obstacle shapes, approach angles, speeds or hull sizes are not validated, and there is no universal collision-safe radius. Raising `agent_radius` above about 11 m makes the test ring unreachable (fallback).
-- **Detour guidance pins and jumps at corners (provisional, owner-accepted for the Task #23 trial):** when the ship is more than `detour_corner_tolerance` from the detour, no chord past the next detour point fits, so guidance pins to that point and jumps forward when the ship passes it. The bend limit does not change this. With the Task #23 trial it happens at more corners: the forward detour has jumps of 8.29 m and 3.06 m (none before Task #23) and the return journey 3.35, 6.40 and 4.28 m (one of 3.40 m before). Around the sphere the ship moves at about 2.5–3.5 m/s (about 4.1–4.3 before) in short straight pieces between pins. Assumed, not verified: weak hull-right thrust lets the ship drift slightly further off the detour while the hull swings. The velocity heading does not oscillate (largest change 0.71 °/tick, 0.33 before), the ship never stops, and yaw and roll stay rate-limited. Accepted only for this trial; no navigation redesign is approved.
-- **Close-range re-orders can loop wide:** a normal order given while moving away from a detour's start (measured: plain click (100, 0, 0) at 6.2 m/s heading away near (80.6, 15.0)) can pin detour guidance while the ship is off the route; the ship then looped out to about 16 m beyond the route for about 6 s at 3.8 m/s before following it. No contact (closest gap 5.8 m). Not re-measured after Tasks #19, #21 and #23. Clicks inside the navigation clearance remain direct orders and still hard-stop on the obstacle.
-- **Orders start one tick later:** every normal click now starts in the next physics tick (≈ 17 ms), or later while navigation syncs (≈ 70–83 ms after start) or a search runs. Until then the getters show the previous order.
-- **Destination search is approximate:** samples are about 1 m apart, so the destination is approximately nearest (0.30 m beyond the true nearest for the sphere click) and free pockets narrower than the spacing can be missed. A declined order does not prove that no free space exists.
-- **Long searches stay pending:** the sphere click needs 2 samples (one tick). When nothing near the click is both navigable and free, the work grows with the square of the search radius: ≈ 16 s pending at 100 m and ≈ 2.5 min at 300 m at 32 samples per tick. A click on a map with no reachable surface (measured with an empty path) is declined only after the whole navigation area is searched (289 rings, 511 ticks at budget 512). The previous order continues meanwhile.
-- **Search cost adds up across ships:** each searching ship spends up to 32 samples per tick. Measured total for long searches: 0.15 ms (1 ship), 1.32 ms (10) and 3.46 ms (30) per tick. There is no shared budget; this is not a group-order solution.
-- **Arrival at a moved destination is measured, not guaranteed:** the fit test has 0.30 m of cylinder margin at the sphere click's destination and ships rested up to 0.73 m from it. Six approach directions had zero contacts (closest hull gap 2.02 m). Corner-first arrivals drifting into an obstacle, other obstacle shapes and other hulls are unverified.
+All values are measured with deterministic 60 Hz headless traces of the shipped profile (Task #25). Comparisons are with `main` at 5573f98, the previous controller.
+
+- **Starts from rest (measured):** translation and yaw begin on the first active tick for every direction.
+  - **Straight 100 m:** reaches 5 m/s on active tick 300 (5.00 s). It shows BRAKE for 4.33 s, arrives 23.5 s after starting (15.4 s before) and rests 0.04 m from the click.
+  - **30 m sideways:** a departure TURN for 9.0 s with thrusters, then CRUISE. It arrives after 13.5 s (6.4 s before).
+  - **10 m sideways:** a TRANSLATE. It arrives after 7.3 s with the hull at −60.8° (not aligned), resting 0.02 m from the click.
+  - **60 m rearward:** the hull swings 180° over 18 s while the thrusters carry it about 41 m stern-first, then it cruises. It arrives after 23.1 s (11.3 s before).
+- **Hand-off from departure thrust (measured):** on the TURN → CRUISE tick, world velocity changes by 0.0169 m/s, within one tick's limits (accel + thruster + slip ≈ 0.0267 m/s).
+  - **30 m sideways:** speed goes 3.000 → 3.017 m/s and the travel direction moves by 0.02°.
+  - **Afterwards:** a 0.25 m/s sideways thruster remainder fades at 0.35 m/s².
+- **Moving turns are slower and tighter-tracking (measured):** while cruising at 5 m/s toward −Z, a 90° order to a point 100 m to the side turns for 10.6 s, peaking at 0.23 m/s of slip. The hull stays within 4.4° of the travel direction (75° before). The ship arrives 28.6 s after the order (22.5 s before).
+  - **Decisive test:** (0, 0, −100), then (60, 0, −60) at z ≈ −30. It turns for 8.0 s with no snap, slips at most 0.20 m/s, stays within 3.8° of travel, brakes for 4.35 s and arrives 19.1 s after the second order, resting 0.04 m from the click.
+- **Close-range moving turns loop back once (measured; owner F5 call):**
+  - **The cases:** at 5 m/s, 90° orders to points 10, 20 and 40 m to the side overshoot by up to 16.7 / 22.0 / 40.2 m from the click. The ship comes round in one continuous turn (192° / 187° / 154° of total yaw) and arrives after 23.3 / 21.2 / 20.1 s, resting 0.02–0.04 m from the click.
+  - **Why:** the latched TURN speed needs about 2.7 s at 0.75 m/s² to be reached.
+  - **What it isn't:** there is no stop, no repeated orbit and no failed arrival.
+- **Reversals stop:** a 180° or 155° order at 5 m/s brakes to rest for 6.7 s (about 16.7 m) before the start from rest (the existing rule). The ship arrives after 33.2 / 28.2 s.
+- **Stopping is long:** `stop()`, declined orders and arrival brake at 0.75 m/s². From 5 m/s that is about 16.7 m and 6.7 s (measured: 16.6 m for a declined order; 5.3 m before). The heading freezes on the same tick, even at the full 10 °/s turn rate: this is the owner's `stop()` contract, a visible abrupt end of rotation.
+- **End of a turn:** on the last tick of a turn, a remaining yaw rate of at most 0.36 °/s is dropped to zero (one-tick discretization). Otherwise yaw acceleration stays within 10 °/s².
+- **Routes slow down for corners:**
+  - **Test route:** the manual route turns its two 90° corners at 3.0 m/s, starting each turn 17.2 m before the vertex. There are no waypoint stops. It arrives 41.9 s after the order (30.2 s before), resting 0.04 m from the final ring (1.21 before).
+  - **Detours:**
+    - **Forward (0, 0, 0) → (100, 0, 0):** arrives after 37.7 s (24.4 before). Arrival triggered during a corner TURN, so there was no visible BRAKE; it rests 0.50 m from the click.
+    - **Return:** arrives after 33.9 s (21.7 before).
+    - **Both:** zero contacts, and the minimum hull clearance to the sphere is 7.16 m (6.22 / 6.10 before).
+    - **No pins or jumps:** the old detour guidance pins and jumps no longer exist; the ship follows legs with planned corners.
+- **Clearance gate cost (measured):**
+  - **Detours:** each detour has 6 corners, all passing on the first attempt (1.28–3.0 m/s), checked within 3 ticks: 147 queries and 542 simulated steps, at most 0.60–0.71 ms per tick.
+  - **Manual route:** 2 corners checked within 6 ticks (350 queries, 1,080 steps).
+  - **Extra stops from unchecked corners:** none, on either detour.
+  - **Forced failure:** a corner whose turn sweeps the sphere (vertex (72, 0, −8)) failed all 4 attempts in 9 ticks (532 queries, 1,687 steps).
+  - **Fleet:** 10 plans of the forward detour at once: 3 ticks, at most 5.9 ms per tick. There is no shared budget across ships; this is not a fleet solution.
+- **The gate is measured, not guaranteed:**
+  - **What it covers:** it checks the replayed TURN at the planned speed against static bodies only. The executed path differs slightly (per-tick re-aiming, actual speed at the turn start).
+  - **What it doesn't cover:** the rotation of a stop-and-turn from rest at the vertex, and the first TURN of a moving order.
+  - **Measured:** at the forced-failure corner the ship rested at the vertex, then its hull hit the sphere while turning from rest, and the hard stop ended the order. A corner the gate passed with the sphere inside the turn (vertex (70, 0, −10)) was flown with 1.25 m minimum clearance and no contact.
+  - **Not implemented:** the rest-pose cylinder check mentioned in the plan, since it would have no further fallback.
+- **Filter proof (measured):** a 30 m sweep through a thin plate blocks only for a `StaticBody3D`; an `AnimatableBody3D` and a `CharacterBody3D` are excluded and pass. A full overlap result (32 hits) fails closed.
+- **Abrupt stop:** a blocked ship goes from up to 5 m/s to 0 in one physics tick at the contact (head-on: root X ≈ 66.97, as before). There is no pre-brake or impact feedback.
+- **Grazing contacts stop the ship:** any motion into the obstacle's surface counts, however shallow.
+- **Pure sideways order from contact stays blocked:** when the ship rests against an obstacle and is ordered exactly sideways, the hull's yaw can swing its corner into the surface, which counts as a grazing contact. Not re-measured in Task #25.
+- **Orders start one tick later:** every normal click starts in the next physics tick (≈ 17 ms), or later while navigation syncs (≈ 70–83 ms after start) or a search runs. Until then the getters show the previous order.
+- **Destination search is approximate:** samples are about 1 m apart, so the destination is approximately nearest and free pockets narrower than the spacing can be missed. A declined order does not prove that no free space exists.
+- **Long searches stay pending, longer since the area grew:** the work grows with the square of the search radius (≈ 16 s pending at 100 m and ≈ 2.5 min at 300 m at 32 samples per tick). A whole-area decline now scans about twice the radius (about 4× the work) of the 400 m area; not re-measured.
+- **Search cost adds up across ships:** each searching ship spends up to 32 samples per tick; there is no shared budget.
 - **Single region:** readiness waits for every region on the map to sync and is ready once any region with data is merged; partial readiness across several regions is not handled.
 - **Static navigation data:** one finite author-time surface; moving or editing obstacles needs a rebake. No live replanning.
-- **Bank visibility:** at the fixed camera distance and current lighting, a 4–9° lean is subtle. Its readability is the owner's playtest call.
-- **Deferred QA:** hairpin, U-turn and dense zigzag routes, rapid route editing during braking, complex chained retargets (including rapid retargets while banked), extreme movement or visual tunings, other hull proportions and multi-ship scale are not validated. Grazing-contact feel, dense obstacle fields, high-speed tunneling at extreme tunings, moving/dynamic obstacles and ship–ship contact are not validated. Multiple or overlapping obstacles, narrow passages and detours entered mid-motion or with sharp path entries are not validated. Destination search across disconnected regions, dynamic occupancy and mid-motion re-orders onto moved destinations are not validated. There are no Shift-leg detours or destination resolution, avoidance, route display, pitch, selection or UI. Not re-measured with the Task #23 hull-relative thrust trial: tight zigzags, the close-range detour re-order loop, the six moved-destination approach directions, low-speed retargets, dense obstacle fields, other hull classes, dynamic contacts and fleet arrival prediction.
+- **Bank visibility:** at the camera distance and current lighting, a 4–9° lean is subtle. With slow, tightly tracked turns the course-error condition is met less often; not re-measured.
+- **Camera far plane:** 1000 m. At maximum zoom (400 m height) the farthest part of the area can fall beyond it; not checked in F5.
+- **Deferred QA:**
+  - **Routes and retargets:** hairpin, U-turn and dense zigzag routes, rapid route editing during braking, and complex chained retargets (including rapid retargets while banked).
+  - **Obstacles:** multiple or overlapping obstacles, narrow passages, dense obstacle fields, moving/dynamic obstacles and ship–ship contact.
+  - **Tunings and hulls:** extreme movement or visual tunings, other hull proportions and multi-ship scale.
+  - **Close range:** close-range stress, and the six moved-destination approach directions with the new controller.
+  - **Not built:** Shift-leg detours or destination resolution, powered reverse, HOLD, avoidance, route display, pitch, selection and UI beyond F3.
 
 ## Remaining work
 
-Final banking values, the route lookahead feel, the hard-stop feel and the low-speed precision thrust trial (Task #17) await owner playtest. The Task #21 trial values (6 s from rest to 8 m/s, 6 m/s² braking) and the Task #23 hull-relative thrust trial (0.4 m/s² thrusters; the owner's dial, starting band 0.3–0.5) await owner F5 playtest; the extra detour guidance jumps are accepted only provisionally; whether they become permanent, and further tuning of how heavy the frigate feels, are owner decisions; combat coasting, controlled arcs, hull rotational inertia, powered reverse, and later changes to braking or precision thrust remain undecided. Planned follow-up slices: short bounded departure maneuvers, then dynamic occupancy and contact handling; automatic detours for Shift-built legs are also planned. Route-failure notifications, impact feedback, collisions with other body types and obstacle appearance remain undecided. There is no measured performance target.
+Owner F5 playtest of the Task #25 trial. The open questions it should answer:
+- **Feel:** slip, turn speed and corner speed.
+- **Close turns:** whether the single loop-back of close-range moving turns is acceptable.
+- **Stopping:** the 16.7 m stop distance.
+- **Departures:** the stern-first rearward departures.
+- **Camera:** the camera limits.
 
-**Refinement notes (owner, Task #13):**
-- The 20 m detour / 25 m manual lookahead split is provisional. Revisit the detour's clearance, rounding, speed and turning feel with more obstacle shapes, approaches and hull sizes. Do not silently merge these tunings or declare a universal collision-safe radius.
-- The pending-order startup handling is a provisional startup policy. Revisit it once navigation becomes larger or dynamic and more command types need coordination; measure readiness latency and verify latest-order replacement before any generalized orchestration.
-- Reversal classification against the initial guidance point is the current technical rule. Verify it on mid-motion retargets and sharp path entries; refine only if later evidence or owner feel requires it.
+Deferred original-v2 features:
+- powered REVERSE (`max_reverse` 1.5 m/s, `reverse_range` 40 m), which would replace the 150° brake-to-rest;
+- HOLD / station keeping;
+- a public heading/speed/fleet API and `order_ended` notifications;
+- timed and dynamic replanning;
+- the original banking rewrite.
+
+Other planned follow-up slices: dynamic occupancy and contact handling, and automatic detours for Shift-built legs. Route-failure notifications, impact feedback, collisions with other body types and obstacle appearance remain undecided. There is no measured performance target.
+
+**Refinement notes (owner, Task #13, still open):**
+- **Navigation clearance:** revisit it with more obstacle shapes, approaches and hull sizes. Do not declare a universal collision-safe radius.
+- **Startup policy:** the pending-order startup handling is a provisional startup policy. Revisit it once navigation becomes larger or dynamic and more command types need coordination.
+- **Reversal check:** reversal classification against the first aim point is the current technical rule. Verify it on mid-motion retargets and sharp path entries.

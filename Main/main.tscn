@@ -1,9 +1,10 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="1_ship"]
 [ext_resource type="Script" path="res://Main/right_click_move_input.gd" id="2_input"]
 [ext_resource type="NavigationMesh" path="res://Main/navigation_mesh.tres" id="3_navmesh"]
 [ext_resource type="Script" path="res://Main/camera_pan_zoom.gd" id="4_camera"]
+[ext_resource type="Script" path="res://Main/movement_debug_overlay.gd" id="5_overlay"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -96,4 +97,8 @@ navigation_mesh = ExtResource("3_navmesh")
 [node name="RightClickMoveInput" type="Node" parent="." node_paths=PackedStringArray("camera", "ship")]
 script = ExtResource("2_input")
 camera = NodePath("../Camera3D")
+ship = NodePath("../Ship")
+
+[node name="MovementDebugOverlay" type="CanvasLayer" parent="." node_paths=PackedStringArray("ship")]
+script = ExtResource("5_overlay")
 ship = NodePath("../Ship")

@@ -2,27 +2,39 @@ class_name ShipMovement
 extends CharacterBody3D
 ## Authoritative planar movement for a ship. The only writer of its XZ position,
 ## planar velocity and yaw. Callers request movement through move_to(), append_waypoint() and stop().
+## Locomotion is heading-and-throttle: the hull turns toward a commanded heading with bounded yaw rate
+## and yaw acceleration, the main engine changes speed along the bow, a small sideways slip fades, and
+## directional thrusters reposition the ship (TRANSLATE) or start it moving from rest.
 
 enum _Navigation { SYNCING, UNAVAILABLE, READY }
+enum Phase { IDLE, TURN, CRUISE, BRAKE, TRANSLATE }
 
 @export var profile: MovementProfile
 
 ## The route: the anchor (ship position when the route was set), then the route points (generated
-## detour points and/or requested points); the last entry is the final destination. Never empty: while idle it holds only the last final point.
+## detour points and/or requested points); the last entry is the final destination. Never empty: while
+## idle it holds only the last final point.
 var _route := PackedVector3Array([Vector3.ZERO])
 var _has_destination := false
-## Multi-point routes only: monotonic arc length of the ship's progress and the segment it lies on.
-var _route_progress := 0.0
-var _route_segment := 0
-## Point currently steered at, and its route segment. Equals the final destination unless the
-## lookahead on a multi-point route is still ahead of it. Derived; refreshed every steering tick.
-var _guidance_target := Vector3.ZERO
-var _guidance_segment := 0
+## Current leg, from _route[_leg] to _route[_leg + 1] (the aim point).
+var _leg := 0
+## Maneuver plan of the active route: corner speeds, turn-start trims and the clearance gate.
+var _plan: ManeuverPlan
+var _motion := ManeuverPlan.Motion.new()
+var _phase := Phase.IDLE
+## TURN: the latched commanded speed; the fixed commanded heading at a planned corner (NAN: aim at the
+## aim point); whether thrusters also push toward the aim point (a start from rest).
+var _turn_speed := 0.0
+var _turn_heading := NAN
+var _departure := false
 ## Near-opposite order pending: brake to rest, then start the same order from rest.
 var _awaiting_rest := false
-## Signed degrees from travel direction to goal at order receipt, or to the next leg when guidance
-## crosses a route vertex (positive = left turn); 0 unless a moving turn.
+## Signed degrees from travel direction to goal at order receipt, or to the next leg at a planned
+## corner's turn start (positive = left turn); 0 unless a moving turn.
 var _turn_deflection := 0.0
+## Last tick's commands (read-only debug getters).
+var _commanded_heading := NAN
+var _commanded_speed := 0.0
 ## Latest normal order (the requested point), waiting for its physics tick, for navigation to be
 ## ready, or for its destination search; the previous order continues meanwhile.
 var _pending_order := Vector3.ZERO
@@ -40,15 +52,20 @@ var _search_sample := 0
 ## Vertical cylinder bounding the hull's collision box at any yaw, and its height offset; derived.
 var _hull_bound: CylinderShape3D
 var _hull_bound_offset := 0.0
-## Route index of a generated detour's final point (the requested destination); 0 for manual routes.
-var _detour_end := 0
+## The hull's collision box and its local transform, for the corner clearance gate.
+var _hull_box: BoxShape3D
+var _hull_local := Transform3D.IDENTITY
 
 
 func _ready() -> void:
+	_motion.position = global_position
+	_motion.yaw = rotation.y
 	for child in get_children():
 		var hull := child as CollisionShape3D
 		if hull != null and hull.shape is BoxShape3D:
-			var half := (hull.shape as BoxShape3D).size / 2.0
+			_hull_box = hull.shape as BoxShape3D
+			_hull_local = hull.transform
+			var half := _hull_box.size / 2.0
 			_hull_bound = CylinderShape3D.new()
 			_hull_bound.radius = Vector2(half.x + absf(hull.position.x), half.z + absf(hull.position.z)).length()
 			_hull_bound.height = half.y * 2.0
@@ -72,10 +89,11 @@ func move_to(world_position: Vector3) -> void:
 	_pending_waypoints.clear()
 
 
-## Appends a point to the end of the active route; the previous final point becomes intermediate.
-## Never navigates, re-classifies, restarts or brakes the journey. While a normal order waits for its
-## tick or search, the point is appended once that order starts. Without an active order, or while a
-## normal order waits for navigation to sync, it replaces that with a direct order to the point.
+## Appends a point to the end of the active route; the previous final point becomes a corner, planned
+## and checked like the others. Never navigates, re-classifies or restarts the journey by itself. While
+## a normal order waits for its tick or search, the point is appended once that order starts. Without
+## an active order, or while a normal order waits for navigation to sync, it replaces that with a
+## direct order to the point.
 func append_waypoint(world_position: Vector3) -> void:
 	var point := Vector3(world_position.x, global_position.y, world_position.z)
 	if _has_pending_order and _navigation_state() != _Navigation.SYNCING:
@@ -84,20 +102,20 @@ func append_waypoint(world_position: Vector3) -> void:
 	if not _has_destination or _has_pending_order:
 		_has_pending_order = false
 		_searching = false
-		_start_order(PackedVector3Array([global_position, point]), 0)
+		_start_order(PackedVector3Array([global_position, point]))
 		return
 	if _route.size() == 2:
 		# Re-anchor at the ship so the aim at the old final point stays continuous.
 		_route = PackedVector3Array([global_position, _route[1], point])
-		_route_progress = 0.0
-		_route_segment = 0
-		_guidance_segment = 0
+		_leg = 0
+		_plan = _new_plan(_route)
 	else:
 		_route.append(point)
+		_plan.append(point)
 
 
 ## Clears the route, including pending points and any waiting order or destination search. The ship
-## brakes to rest and stops turning.
+## brakes to rest and stops turning on the same tick.
 func stop() -> void:
 	_has_pending_order = false
 	_searching = false
@@ -114,88 +132,117 @@ func get_destination() -> Vector3:
 	return _route[-1]
 
 
-## The point the ship currently steers at. Equals get_destination() for single destinations and while idle.
+## The point the ship currently steers at: the end of its current leg, or the final point while idle.
 func get_guidance_target() -> Vector3:
-	return _guidance_target
+	return _route[_leg + 1] if _has_destination else _route[-1]
 
 
-## Initial course change of the current order or route bend: signed degrees from the actual travel
-## direction to the goal, or to the next leg when guidance crosses a route vertex (positive = left
-## turn). 0 for orders from rest, near-opposite orders, orders inside arrival tolerance, and once the
-## order ends (arrival or stop()).
+## Initial course change of the current order or planned corner: signed degrees from the actual travel
+## direction to the goal, or to the next leg at a corner's turn start (positive = left turn). 0 for
+## orders from rest, near-opposite orders, and once the order ends (arrival or stop()).
 func get_turn_deflection() -> float:
 	return _turn_deflection
+
+
+## Read-only debug state (F3 readout). Headings are degrees of yaw (0 = −Z, positive = left); the
+## commanded heading is NAN when none is commanded.
+func get_phase_name() -> String:
+	return Phase.keys()[_phase]
+
+
+func get_commanded_heading() -> float:
+	return rad_to_deg(_commanded_heading)
+
+
+func get_heading() -> float:
+	return rad_to_deg(rotation.y)
+
+
+## Commanded main-engine speed, or the thruster speed target in TRANSLATE and departure TURNs (m/s).
+func get_commanded_speed() -> float:
+	return _commanded_speed
+
+
+## Actual planar speed (m/s).
+func get_speed() -> float:
+	return Vector2(velocity.x, velocity.z).length()
+
+
+## Sideways slip toward the hull's right (m/s).
+func get_slip() -> float:
+	return _motion.slip
 
 
 func _physics_process(delta: float) -> void:
 	if _has_pending_order:
 		_start_pending_order()
-	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
-	var speed := planar_velocity.length()
-	var direction := planar_velocity / speed if speed > 0.0 else Vector3.ZERO
-	var remaining := 0.0
-	var bend_limit := INF
-	if _has_destination and not _awaiting_rest and _route.size() > 2:
-		remaining = _update_route_guidance(direction)
-		bend_limit = _bend_speed_limit()
-	var offset := _guidance_target - global_position
-	offset.y = 0.0
-	var distance := offset.length()
-	var at_final := _guidance_target == get_destination()
-
-	# Arrival: only the final destination completes the order, once guidance has reached it. The ship
-	# then brakes to rest along its current travel and may coast slightly past, without turning back.
-	if _has_destination and not _awaiting_rest and at_final and distance <= profile.arrival_tolerance:
-		_end_route()
-
-	# Desired velocity: toward the guidance point at the capped speed while steering; otherwise rest
-	# (arrival, idle, stop() and near-opposite braking).
-	var steering := _has_destination and not _awaiting_rest and distance > 0.0
-	var desired_velocity := Vector3.ZERO
-	if steering:
-		var goal_direction := offset / distance
-		# Cap speed so the ship can still brake to rest at the final destination.
-		var desired_speed := minf(minf(profile.max_speed, bend_limit), sqrt(2.0 * profile.braking * (distance + remaining)))
-		# Pure pursuit: keep the turn radius v² / a inside the circle through the goal tangent to the
-		# actual travel, R = d / (2 sin θ), so near goals are reached instead of orbited.
-		var sin_theta := absf(sin(direction.angle_to(goal_direction)))
-		if sin_theta > 0.001:
-			desired_speed = minf(desired_speed, sqrt(profile.lateral_acceleration * distance / (2.0 * sin_theta)))
-		desired_velocity = goal_direction * desired_speed
-
-	# One bounded velocity change toward the desired velocity, limited by one combined budget.
-	# Braking acts on travel: the part of the change against the actual travel direction, at most the
-	# current speed, so it only slows the ship and never reverses or redirects it. The rest is
-	# propulsion in the hull frame: the main drive (acceleration) along the bow; thrusters toward the
-	# hull's right or stern (lateral_acceleration, rising smoothly toward precision_lateral_acceleration
-	# below precision_fade_speed). The requested change is scaled onto the ellipse of these limits,
-	# keeping its direction. Yaw never rotates the velocity.
-	var change := desired_velocity - planar_velocity
-	if change.length() > 0.0:
-		var brake := clampf(change.dot(direction), -speed, 0.0)
-		var thrust := change - direction * brake
-		var bow := Vector3(-sin(rotation.y), 0.0, -cos(rotation.y))
-		var forward := thrust.dot(bow)
-		var sideways := (thrust - bow * forward).length()
-		var cruise := profile.lateral_acceleration
-		var thruster := lerpf(maxf(profile.precision_lateral_acceleration, cruise), cruise, smoothstep(0.0, profile.precision_fade_speed, speed)) * delta
-		var drive := profile.acceleration * delta if forward > 0.0 else thruster
-		var demand := sqrt(pow(brake / (profile.braking * delta), 2.0) + pow(forward / drive, 2.0) + pow(sideways / thruster, 2.0))
-		planar_velocity += change / maxf(demand, 1.0)
-	velocity = planar_velocity
-	speed = planar_velocity.length()
-
-	if _awaiting_rest and speed == 0.0:
-		_awaiting_rest = false
-		if at_final and distance <= profile.arrival_tolerance:
+	if _plan != null:
+		for index in _plan.advance(get_world_3d().direct_space_state, global_position.y):
+			_apply_corner_result(index)
+	_motion.position = global_position
+	var heading := NAN
+	var speed_command := 0.0
+	var thrust_command := Vector3.ZERO
+	var yaw_limit := INF
+	var resting_at_vertex := false
+	if _has_destination:
+		_update_leg()
+		var offset := _route[_leg + 1] - global_position
+		offset.y = 0.0
+		var distance := offset.length()
+		var final_leg := _leg == _route.size() - 2
+		if final_leg and not _awaiting_rest and distance <= profile.arrival_tolerance:
+			# Arrival ends the order and its rotation; the ship then brakes to rest along its travel.
 			_end_route()
+		elif _awaiting_rest:
+			_phase = Phase.BRAKE
+		elif not final_leg and _plan.speeds[_leg + 1] <= 0.0 and distance <= profile.arrival_tolerance:
+			# A stop-and-turn corner, or one whose clearance check has not finished: rest here first.
+			_phase = Phase.BRAKE
+			resting_at_vertex = true
+		else:
+			var direction := offset / distance if distance > 0.0 else _motion.bow()
+			var bearing := atan2(-direction.x, -direction.z)
+			yaw_limit = deg_to_rad(profile.yaw_accel) * _time_to_arrival(distance)
+			if _phase == Phase.TRANSLATE:
+				heading = bearing
+				thrust_command = direction * minf(profile.max_speed, sqrt(2.0 * profile.thruster_accel * distance))
+			else:
+				var tolerance := deg_to_rad(profile.heading_tolerance)
+				if _phase == Phase.TURN and absf(angle_difference(rotation.y, bearing if is_nan(_turn_heading) else _turn_heading)) <= tolerance:
+					_enter_cruise()
+				if _phase != Phase.TURN and absf(angle_difference(rotation.y, bearing)) > 2.0 * tolerance:
+					_enter_turn(minf(profile.turn_speed_factor * _motion.speed, _fit_speed(direction, distance)), NAN, _motion.speed == 0.0)
+				if _phase == Phase.TURN:
+					heading = bearing if is_nan(_turn_heading) else _turn_heading
+					speed_command = _turn_speed
+					if _departure:
+						thrust_command = direction * minf(profile.turn_speed_factor * profile.max_speed, sqrt(2.0 * profile.thruster_accel * distance))
+				else:
+					heading = bearing
+					var cap := _route_speed_cap(distance)
+					speed_command = cap.x
+					var braking := cap.y > 0.0 and speed_command < profile.max_speed and _motion.speed > 0.0 and speed_command <= _motion.speed + profile.accel * delta
+					_phase = Phase.BRAKE if braking else Phase.CRUISE
 
-	if steering:
-		var target_yaw := atan2(-offset.x, -offset.z)
-		rotation.y = rotate_toward(rotation.y, target_yaw, deg_to_rad(profile.turn_rate) * delta)
-
+	_motion.step(profile, delta, heading, speed_command, thrust_command, yaw_limit)
+	_commanded_heading = heading
+	_commanded_speed = thrust_command.length() if _phase == Phase.TRANSLATE or (_phase == Phase.TURN and _departure) else speed_command
+	rotation.y = _motion.yaw
+	velocity = _motion.velocity()
 	var commanded := velocity
 	move_and_slide()
+	_motion.position = global_position
+
+	if _has_destination and _motion.is_at_rest():
+		if _awaiting_rest:
+			_awaiting_rest = false
+			_start_from_rest()
+		elif resting_at_vertex:
+			if _plan.is_unchecked(_leg + 1):
+				_plan.force_stop(_leg + 1)
+			_leg += 1
+			_start_from_rest()
 
 	# Blocked: moving into a static obstacle ends the whole order with a hard stop. A resting contact
 	# does not block an order away from it. Other bodies, including moving AnimatableBody3D, keep the
@@ -207,6 +254,9 @@ func _physics_process(delta: float) -> void:
 			if collider is StaticBody3D and not collider is AnimatableBody3D and commanded.dot(collision.get_normal()) < 0.0:
 				_end_route()
 				velocity = Vector3.ZERO
+				_motion.speed = 0.0
+				_motion.slip = 0.0
+				_motion.thrust_velocity = Vector3.ZERO
 				break
 
 
@@ -239,7 +289,7 @@ func _finish_pending_order(route: PackedVector3Array) -> void:
 	if route.is_empty():
 		_end_route()
 	else:
-		_start_order(route, route.size() - 1 if route.size() > 2 else 0)
+		_start_order(route)
 	var waypoints := _pending_waypoints
 	_pending_waypoints = PackedVector3Array()
 	for point in waypoints:
@@ -377,207 +427,202 @@ func _navigation_state() -> _Navigation:
 	return _Navigation.READY
 
 
-## Replaces any route with the given one (anchor first, destination last) and classifies the order
-## once against the actual travel velocity, using the initial guidance point as the goal.
-func _start_order(route: PackedVector3Array, detour_end: int) -> void:
+
+## Replaces any route with the given one (anchor first, destination last), plans it, and classifies
+## the order once against the actual travel velocity, using the first aim point as the goal: at rest,
+## a start from rest; at or beyond near_opposite_angle, brake to rest first; otherwise a continuous
+## TURN (heading error beyond heading_tolerance) or CRUISE.
+func _start_order(route: PackedVector3Array) -> void:
 	_route = route
-	_route_progress = 0.0
-	_route_segment = 0
-	_guidance_target = route[-1]
-	_guidance_segment = 0
-	_detour_end = detour_end
+	_leg = 0
+	_plan = _new_plan(route)
 	_has_destination = true
 	_awaiting_rest = false
 	_turn_deflection = 0.0
-	if route.size() > 2:
-		_update_route_guidance(Vector3.ZERO)
-	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	_departure = false
+	_turn_heading = NAN
+	if _motion.is_at_rest():
+		_start_from_rest()
+		return
+	var travel := _motion.velocity()
+	travel.y = 0.0
 	var to_destination := route[-1] - global_position
 	to_destination.y = 0.0
-	var offset := _guidance_target - global_position
+	var offset := route[1] - global_position
 	offset.y = 0.0
-	if not planar_velocity.is_zero_approx() and to_destination.length() > profile.arrival_tolerance:
-		var angle := rad_to_deg(planar_velocity.angle_to(offset))
-		_awaiting_rest = angle >= profile.near_opposite_angle or is_equal_approx(angle, profile.near_opposite_angle)
-		if not _awaiting_rest:
-			_turn_deflection = rad_to_deg(planar_velocity.signed_angle_to(offset, Vector3.UP))
+	_phase = Phase.CRUISE
+	if to_destination.length() <= profile.arrival_tolerance or offset.is_zero_approx():
+		return
+	var angle := rad_to_deg(travel.angle_to(offset))
+	_awaiting_rest = angle >= profile.near_opposite_angle or is_equal_approx(angle, profile.near_opposite_angle)
+	if _awaiting_rest:
+		_phase = Phase.BRAKE
+		return
+	_turn_deflection = rad_to_deg(travel.signed_angle_to(offset, Vector3.UP))
+	var distance := offset.length()
+	var bearing := atan2(-offset.x, -offset.z)
+	if absf(angle_difference(rotation.y, bearing)) > deg_to_rad(profile.heading_tolerance):
+		_enter_turn(minf(profile.turn_speed_factor * _motion.speed, _fit_speed(offset / distance, distance)), NAN, _motion.speed == 0.0)
 
 
-## Multi-point routes: advances progress and places the guidance point the lookahead distance
-## further along the route, clamped to the final destination. Returns the route length left beyond
-## the guidance point. Intermediate points are never arrival targets.
-func _update_route_guidance(direction: Vector3) -> float:
-	var lookahead := _lookahead(_route_progress)
-	var segment_start := 0.0
-	for i in _route_segment:
-		segment_start += _route[i].distance_to(_route[i + 1])
+## Starts the current leg from rest. A single-leg route within thruster_range uses TRANSLATE when its
+## estimated time is at most translate_preference times turn-and-burn's. Otherwise a heading error
+## beyond heading_tolerance is a departure TURN: the hull yaws and the thrusters push toward the aim
+## point from the same tick. Otherwise CRUISE.
+func _start_from_rest() -> void:
+	_departure = false
+	_turn_heading = NAN
+	_turn_speed = 0.0
+	_phase = Phase.CRUISE
+	var offset := _route[_leg + 1] - global_position
+	offset.y = 0.0
+	var distance := offset.length()
+	if distance == 0.0:
+		return
+	var error := absf(angle_difference(rotation.y, atan2(-offset.x, -offset.z)))
+	if _route.size() == 2 and distance <= profile.thruster_range and 2.0 * sqrt(distance / profile.thruster_accel) <= profile.translate_preference * _turn_and_burn_time(error, distance):
+		_phase = Phase.TRANSLATE
+	elif error > deg_to_rad(profile.heading_tolerance):
+		_enter_turn(0.0, NAN, true)
 
-	# Progress: the nearest point on the segments starting within lookahead of it; never backward.
-	var best_distance := INF
-	var best_progress := _route_progress
-	var best_segment := _route_segment
-	var arc := segment_start
-	for i in range(_route_segment, _route.size() - 1):
-		if arc > _route_progress + lookahead:
+
+func _enter_turn(speed: float, heading: float, departure: bool) -> void:
+	_phase = Phase.TURN
+	_turn_speed = speed
+	_turn_heading = heading
+	_departure = departure
+
+
+## TURN → CRUISE. After a departure the thrusters' forward part along the bow becomes main-engine
+## speed (world velocity unchanged); any sideways or sternward part stays and fades at thruster_accel.
+func _enter_cruise() -> void:
+	if _departure:
+		var forward := maxf(_motion.thrust_velocity.dot(_motion.bow()), 0.0)
+		_motion.speed += forward
+		_motion.thrust_velocity -= _motion.bow() * forward
+	_departure = false
+	_turn_heading = NAN
+	_phase = Phase.CRUISE
+
+
+## Estimated time to turn by error (rad) with the yaw profile, then cover distance from rest with accel,
+## max_speed and decel.
+func _turn_and_burn_time(error: float, distance: float) -> float:
+	var rate := deg_to_rad(profile.yaw_rate)
+	var yaw_accel := deg_to_rad(profile.yaw_accel)
+	var turn := error / rate + rate / yaw_accel if error >= rate * rate / yaw_accel else 2.0 * sqrt(error / yaw_accel)
+	var a := profile.accel
+	var b := profile.decel
+	var peak := sqrt(2.0 * distance * a * b / (a + b))
+	if peak <= profile.max_speed:
+		return turn + peak / a + peak / b
+	var v := profile.max_speed
+	return turn + v / a + v / b + (distance - v * v / (2.0 * a) - v * v / (2.0 * b)) / v
+
+
+## Speed whose turn radius (v / yaw_rate) fits the circle through the aim point tangent to the bow.
+func _fit_speed(direction: Vector3, distance: float) -> float:
+	var sine := absf(sin(_motion.bow().angle_to(direction)))
+	if sine < 0.001:
+		return INF
+	return deg_to_rad(profile.yaw_rate) * distance / (2.0 * sine)
+
+
+## CRUISE speed: max_speed, limited so the ship can brake with decel to each planned corner's speed at
+## its turn start, and to rest at the final point or the next stop-and-turn (or unchecked) corner.
+## Returns (speed, 1 when the limit is a rest point, else 0).
+func _route_speed_cap(distance: float) -> Vector2:
+	var cap := profile.max_speed
+	var rest := 0.0
+	var along := distance
+	for index in range(_leg + 1, _route.size()):
+		var limit := INF
+		var stops := index == _route.size() - 1 or _plan.speeds[index] <= 0.0
+		if stops:
+			limit = sqrt(2.0 * profile.decel * along)
+		elif _plan.speeds[index] != ManeuverPlan.NO_TURN:
+			var corner := _plan.speeds[index]
+			limit = sqrt(corner * corner + 2.0 * profile.decel * maxf(along - _plan.trims[index], 0.0))
+		if limit < cap:
+			cap = limit
+			rest = 1.0 if stops else 0.0
+		if stops:
 			break
-		var closest := Geometry3D.get_closest_point_to_segment(global_position, _route[i], _route[i + 1])
-		var closest_distance := global_position.distance_to(closest)
-		if closest_distance < best_distance:
-			best_distance = closest_distance
-			best_segment = i
-			best_progress = arc + _route[i].distance_to(closest)
-		arc += _route[i].distance_to(_route[i + 1])
-	if best_progress > _route_progress:
-		for i in range(_route_segment, best_segment):
-			segment_start += _route[i].distance_to(_route[i + 1])
-		_route_progress = best_progress
-		_route_segment = best_segment
-
-	# Guidance point; zero-length segments are passed over.
-	var target_arc := _limit_detour_chord(_route_progress + _lookahead(_route_progress), segment_start)
-	var guidance := _route[-1]
-	var guidance_segment := _route.size() - 2
-	var remaining := 0.0
-	arc = segment_start
-	for i in range(_route_segment, _route.size() - 1):
-		var length := _route[i].distance_to(_route[i + 1])
-		if arc + length > target_arc:
-			guidance = _route[i].lerp(_route[i + 1], (target_arc - arc) / length)
-			guidance_segment = i
-			remaining = arc + length - target_arc
-			for j in range(i + 1, _route.size() - 1):
-				remaining += _route[j].distance_to(_route[j + 1])
-			break
-		arc += length
-
-	# A bend: guidance crossed onto a later leg, so its deflection replaces the previous one.
-	if guidance_segment > _guidance_segment:
-		var leg := _route[guidance_segment + 1] - _route[guidance_segment]
-		leg.y = 0.0
-		if not leg.is_zero_approx() and not direction.is_zero_approx():
-			_turn_deflection = rad_to_deg(direction.signed_angle_to(leg, Vector3.UP))
-		_guidance_segment = guidance_segment
-	_guidance_target = guidance
-	return remaining
+		along += _route[index].distance_to(_route[index + 1])
+	return Vector2(cap, rest)
 
 
-## Multi-point routes: the highest speed at which lateral_acceleration can hold the route's bends
-## ahead. The stretch steered through is the lookahead window ahead of progress; its radius is the
-## lookahead over the summed absolute deflections inside it, and its limit sqrt(a · R). The window
-## ending at each bend ahead applies from the progress where that bend enters guidance, reached with
-## the existing braking beforehand. Zero-length legs are skipped. Finite and positive, or INF without bends.
-func _bend_speed_limit() -> float:
-	var lookahead := _lookahead(_route_progress)
-	var reach := _route_progress + lookahead + profile.max_speed * profile.max_speed / (2.0 * profile.braking)
-	# Bends ahead of progress: arc position and absolute deflection between legs with length.
-	var bend_arcs := PackedFloat64Array()
-	var bend_angles := PackedFloat64Array()
-	var arc := 0.0
-	var previous := Vector3.ZERO
-	for i in _route.size() - 1:
-		if arc > reach:
-			break
-		var leg := _route[i + 1] - _route[i]
-		if not leg.is_zero_approx():
-			if not previous.is_zero_approx() and arc > _route_progress:
-				bend_arcs.append(arc)
-				bend_angles.append(previous.angle_to(leg))
-			previous = leg
-		arc += leg.length()
-
-	var limit := INF
-	for k in bend_arcs.size():
-		var turn := 0.0
-		for j in range(k, -1, -1):
-			if bend_arcs[j] <= bend_arcs[k] - lookahead:
-				break
-			turn += bend_angles[j]
-		if turn > 0.0:
-			var bend_speed := sqrt(profile.lateral_acceleration * lookahead / turn)
-			var run_up := maxf(bend_arcs[k] - lookahead - _route_progress, 0.0)
-			limit = minf(limit, sqrt(bend_speed * bend_speed + 2.0 * profile.braking * run_up))
-	return limit
+## Shortest time to the arrival trigger along the rest of the route (braking-limited profile with the
+## stronger of decel and thruster_accel), so the yaw velocity can be wound down before arrival.
+func _time_to_arrival(distance: float) -> float:
+	var along := distance
+	for index in range(_leg + 1, _route.size() - 1):
+		along += _route[index].distance_to(_route[index + 1])
+	var a := maxf(profile.decel, profile.thruster_accel)
+	return maxf(sqrt(2.0 * a * along) - sqrt(2.0 * a * profile.arrival_tolerance), 0.0) / a
 
 
-## Corner tracking on generated detours: pulls the guidance arc back so the straight chord from the
-## ship to the guidance point passes within detour_corner_tolerance of every interior detour point it
-## skips. Guidance always may reach the next route point. Advances point by point, stopping at the
-## first point whose chord fails, then extends into the following segment by bisection; every accepted
-## arc has been checked, so the result always meets the tolerance. Manual points are never checked.
-func _limit_detour_chord(target_arc: float, segment_start: float) -> float:
-	var next := _route_segment + 1
-	var next_arc := segment_start + _route[_route_segment].distance_to(_route[next])
-	if next >= _detour_end or next_arc >= target_arc or _chord_fits(_point_at_arc(target_arc, segment_start), next, _detour_end - 1, target_arc, next_arc):
-		return target_arc
-	var last := next
-	var last_arc := next_arc
-	while last + 1 < _route.size():
-		var arc := last_arc + _route[last].distance_to(_route[last + 1])
-		if arc >= target_arc or not _chord_fits(_route[last + 1], next, last, arc, next_arc):
-			break
-		last += 1
-		last_arc = arc
-	if last + 1 >= _route.size():
-		return last_arc
-	var low := last_arc
-	var high := minf(target_arc, last_arc + _route[last].distance_to(_route[last + 1]))
-	for i in 10: # Bisection steps: resolves the segment to 1/1024 of its length.
-		var mid := (low + high) / 2.0
-		if _chord_fits(_point_at_arc(mid, segment_start), next, last, mid, next_arc):
-			low = mid
+## Advances the current leg: past a no-turn vertex once it is within arrival_tolerance (or passed),
+## and into a corner's TURN at its turn-start point once the corner has passed the clearance gate.
+## Stop-and-turn and unchecked corners advance only after resting at the vertex.
+func _update_leg() -> void:
+	while _leg < _route.size() - 2 and _phase != Phase.TRANSLATE and not _awaiting_rest:
+		var index := _leg + 1
+		var corner := _plan.speeds[index]
+		var remaining := _remaining_on_leg()
+		if corner == ManeuverPlan.NO_TURN:
+			if remaining > profile.arrival_tolerance:
+				return
+			_leg += 1
+		elif corner > 0.0:
+			if remaining > _plan.trims[index]:
+				return
+			_leg += 1
+			var next := _route[_leg + 1] - _route[_leg]
+			next.y = 0.0
+			var travel := _motion.velocity()
+			if not travel.is_zero_approx() and not next.is_zero_approx():
+				_turn_deflection = rad_to_deg(travel.signed_angle_to(next, Vector3.UP))
+			_enter_turn(corner, atan2(-next.x, -next.z), false)
 		else:
-			high = mid
-	return low
+			return
 
 
-## Whether every interior detour point from index first to last that lies before chord_arc along the
-## route is within detour_corner_tolerance of the chord from the ship to end.
-func _chord_fits(end: Vector3, first: int, last: int, chord_arc: float, first_arc: float) -> bool:
-	var arc := first_arc
-	for i in range(first, mini(last, _detour_end - 1) + 1):
-		if i > first:
-			arc += _route[i - 1].distance_to(_route[i])
-		if arc >= chord_arc:
-			break
-		if _route[i].distance_to(Geometry3D.get_closest_point_to_segment(_route[i], global_position, end)) > profile.detour_corner_tolerance:
-			return false
-	return true
+## Distance left along the current leg to its end, measured on the leg's line.
+func _remaining_on_leg() -> float:
+	var leg := _route[_leg + 1] - _route[_leg]
+	leg.y = 0.0
+	var length := leg.length()
+	if length == 0.0:
+		return 0.0
+	var along := (global_position - _route[_leg]).dot(leg / length)
+	return length - along
 
 
-## The route point at the given arc length, searching from the current segment (whose start is at
-## segment_start); clamped to the final destination.
-func _point_at_arc(target_arc: float, segment_start: float) -> Vector3:
-	var arc := segment_start
-	for i in range(_route_segment, _route.size() - 1):
-		var length := _route[i].distance_to(_route[i + 1])
-		if arc + length > target_arc:
-			return _route[i].lerp(_route[i + 1], (target_arc - arc) / length)
-		arc += length
-	return _route[-1]
+## A corner just resolved by the clearance gate. If the ship is already past its turn-start point on
+## the leg leading to it, the checked turn no longer applies, so that corner stays stop-and-turn.
+func _apply_corner_result(index: int) -> void:
+	if not _has_destination or index != _leg + 1:
+		return
+	var corner := _plan.speeds[index]
+	if corner > 0.0 and corner != ManeuverPlan.NO_TURN and _remaining_on_leg() < _plan.trims[index]:
+		_plan.force_stop(index)
 
 
-## Lookahead at the given route progress. Manual routes use route_lookahead_distance. A generated
-## detour uses detour_lookahead_distance, blending linearly to route_lookahead_distance over the last
-## detour_lookahead_distance of progress before its final point, so manually appended legs use the
-## manual value without the guidance point jumping.
-func _lookahead(progress: float) -> float:
-	if _detour_end == 0:
-		return profile.route_lookahead_distance
-	var detour_length := 0.0
-	for i in _detour_end:
-		detour_length += _route[i].distance_to(_route[i + 1])
-	var blend := clampf((progress - detour_length) / profile.detour_lookahead_distance + 1.0, 0.0, 1.0)
-	return lerpf(profile.detour_lookahead_distance, profile.route_lookahead_distance, blend)
+func _new_plan(route: PackedVector3Array) -> ManeuverPlan:
+	return ManeuverPlan.new(route, profile, _hull_box, _hull_local, _hull_bound.radius, collision_mask, get_rid())
 
 
-## Ends the order: keeps only the last final point, so the route and its getters stay defined.
+## Ends the order: keeps only the last final point, so the route and its getters stay defined. The
+## heading freezes on this tick (arrival and stop() end commanded rotation); the ship brakes to rest.
 func _end_route() -> void:
 	_route = PackedVector3Array([_route[-1]])
-	_route_progress = 0.0
-	_route_segment = 0
-	_guidance_target = _route[0]
-	_guidance_segment = 0
-	_detour_end = 0
+	_leg = 0
+	_plan = null
 	_has_destination = false
 	_awaiting_rest = false
 	_turn_deflection = 0.0
+	_departure = false
+	_turn_heading = NAN
+	_phase = Phase.IDLE
+	_motion.yaw_velocity = 0.0

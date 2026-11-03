@@ -4,18 +4,22 @@
 
 [resource]
 script = ExtResource("1_profile")
-max_speed = 8.0
-acceleration = 1.3333333333333333
-braking = 6.0
-turn_rate = 20.0
+max_speed = 5.0
+accel = 1.0
+decel = 0.75
+yaw_rate = 10.0
+yaw_accel = 10.0
+turn_speed_factor = 0.6
+slip_decay = 0.25
+slip_gain = 0.5
+thruster_accel = 0.35
+thruster_range = 15.0
+heading_tolerance = 5.0
+translate_preference = 1.2
 arrival_tolerance = 2.0
-lateral_acceleration = 0.4
-precision_lateral_acceleration = 4.0
-precision_fade_speed = 4.0
 near_opposite_angle = 150.0
-route_lookahead_distance = 25.0
-detour_lookahead_distance = 20.0
-detour_corner_tolerance = 1.0
 path_simplify_epsilon = 0.1
 destination_search_spacing = 1.0
 destination_search_budget = 32
+clearance_check_budget = 64
+rollout_step_budget = 240
