@@ -12,3 +12,5 @@ arrival_tolerance = 2.0
 travel_turn_rate = 12.0
 near_opposite_angle = 150.0
 route_lookahead_distance = 25.0
+detour_lookahead_distance = 20.0
+path_simplify_epsilon = 0.1

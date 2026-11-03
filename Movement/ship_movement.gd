@@ -3,10 +3,12 @@ extends CharacterBody3D
 ## Authoritative planar movement for a ship. The only writer of its XZ position,
 ## planar velocity and yaw. Callers request movement through move_to(), append_waypoint() and stop().
 
+enum _Navigation { SYNCING, UNAVAILABLE, READY }
+
 @export var profile: MovementProfile
 
-## The route: the anchor (ship position when the route was set), then the requested points; the last
-## entry is the final destination. Never empty: while idle it holds only the last final point.
+## The route: the anchor (ship position when the route was set), then the route points (generated
+## detour points and/or requested points); the last entry is the final destination. Never empty: while idle it holds only the last final point.
 var _route := PackedVector3Array([Vector3.ZERO])
 var _has_destination := false
 ## Multi-point routes only: monotonic arc length of the ship's progress and the segment it lies on.
@@ -21,38 +23,34 @@ var _awaiting_rest := false
 ## Signed degrees from travel direction to goal at order receipt, or to the next leg when guidance
 ## crosses a route vertex (positive = left turn); 0 unless a moving turn.
 var _turn_deflection := 0.0
+## Latest normal order received before navigation was ready; started once it is.
+var _pending_order := Vector3.ZERO
+var _has_pending_order := false
+## Route index of a generated detour's final point (the requested destination); 0 for manual routes.
+var _detour_end := 0
 
 
-## Replaces any route with a single destination. Y is ignored; movement stays on the ship's plane.
-## Classified once against the actual travel velocity: near-opposite orders brake to rest first.
-## Orders inside arrival tolerance count as arrivals, never as reversals.
+## Replaces any route with an order to the requested point. Y is ignored; movement stays on the
+## ship's plane. Navigation plans a detour around static obstacles when one is needed; otherwise the
+## order aims directly at the point. Before navigation is ready the latest order waits, replacing any
+## earlier waiting order, and starts on the first tick it is. Classified once against the actual travel
+## velocity: near-opposite orders brake to rest first. Orders inside arrival tolerance count as
+## arrivals, never as reversals.
 func move_to(world_position: Vector3) -> void:
-	var destination := Vector3(world_position.x, global_position.y, world_position.z)
-	_route = PackedVector3Array([global_position, destination])
-	_route_progress = 0.0
-	_route_segment = 0
-	_guidance_target = destination
-	_guidance_segment = 0
-	_has_destination = true
-	_awaiting_rest = false
-	_turn_deflection = 0.0
-	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
-	var offset := destination - global_position
-	offset.y = 0.0
-	if not planar_velocity.is_zero_approx() and offset.length() > profile.arrival_tolerance:
-		var angle := rad_to_deg(planar_velocity.angle_to(offset))
-		_awaiting_rest = angle >= profile.near_opposite_angle or is_equal_approx(angle, profile.near_opposite_angle)
-		if not _awaiting_rest:
-			_turn_deflection = rad_to_deg(planar_velocity.signed_angle_to(offset, Vector3.UP))
+	_pending_order = Vector3(world_position.x, global_position.y, world_position.z)
+	_has_pending_order = true
+	_start_pending_order()
 
 
 ## Appends a point to the end of the active route; the previous final point becomes intermediate.
-## Never re-classifies, restarts or brakes the journey. Without an active order it acts as move_to().
+## Never navigates, re-classifies, restarts or brakes the journey. Without an active order, or while
+## a normal order waits for navigation, it replaces that with a direct order to the point.
 func append_waypoint(world_position: Vector3) -> void:
-	if not _has_destination:
-		move_to(world_position)
-		return
 	var point := Vector3(world_position.x, global_position.y, world_position.z)
+	if not _has_destination or _has_pending_order:
+		_has_pending_order = false
+		_start_order(PackedVector3Array([global_position, point]), 0)
+		return
 	if _route.size() == 2:
 		# Re-anchor at the ship so the aim at the old final point stays continuous.
 		_route = PackedVector3Array([global_position, _route[1], point])
@@ -63,8 +61,10 @@ func append_waypoint(world_position: Vector3) -> void:
 		_route.append(point)
 
 
-## Clears the route, including pending points. The ship brakes to rest and stops turning.
+## Clears the route, including pending points and any order waiting for navigation. The ship brakes
+## to rest and stops turning.
 func stop() -> void:
+	_has_pending_order = false
 	_end_route()
 
 
@@ -91,6 +91,8 @@ func get_turn_deflection() -> float:
 
 
 func _physics_process(delta: float) -> void:
+	if _has_pending_order:
+		_start_pending_order()
 	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
 	var speed := planar_velocity.length()
 	var direction := planar_velocity / speed if speed > 0.0 else Vector3.ZERO
@@ -153,11 +155,90 @@ func _physics_process(delta: float) -> void:
 				break
 
 
-## Multi-point routes: advances progress and places the guidance point route_lookahead_distance
+## Starts the waiting normal order once navigation is ready. A detour is used only when the path
+## bends and ends at the requested point; otherwise, or without usable navigation data, the order
+## aims directly at the point and the static-contact hard stop remains the fallback.
+func _start_pending_order() -> void:
+	var navigation := _navigation_state()
+	if navigation == _Navigation.SYNCING:
+		return
+	_has_pending_order = false
+	var destination := _pending_order
+	var route := PackedVector3Array([global_position, destination])
+	if navigation == _Navigation.READY:
+		var query := NavigationPathQueryParameters3D.new()
+		query.map = get_world_3d().navigation_map
+		query.start_position = global_position
+		query.target_position = destination
+		query.simplify_path = true
+		query.simplify_epsilon = profile.path_simplify_epsilon
+		var result := NavigationPathQueryResult3D.new()
+		NavigationServer3D.query_path(query, result)
+		var path := result.path
+		var end_offset := destination - (path[-1] if not path.is_empty() else global_position)
+		end_offset.y = 0.0
+		if path.size() > 2 and end_offset.length() <= profile.arrival_tolerance:
+			# Interior points flattened onto the ship's plane; zero-length legs are dropped.
+			route = PackedVector3Array([global_position])
+			for i in range(1, path.size() - 1):
+				var point := Vector3(path[i].x, global_position.y, path[i].z)
+				if not point.is_equal_approx(route[-1]) and not point.is_equal_approx(destination):
+					route.append(point)
+			route.append(destination)
+	_start_order(route, route.size() - 1 if route.size() > 2 else 0)
+
+
+## Navigation readiness for this ship's map. Syncing until the map and every region on it have
+## synchronized and a region with data has been merged into the map; unavailable once synchronized
+## without any enabled region holding navigation data.
+func _navigation_state() -> _Navigation:
+	var map := get_world_3d().navigation_map
+	if NavigationServer3D.map_get_iteration_id(map) == 0:
+		return _Navigation.SYNCING
+	var has_data := false
+	for region in NavigationServer3D.map_get_regions(map):
+		if NavigationServer3D.region_get_iteration_id(region) == 0:
+			return _Navigation.SYNCING
+		if NavigationServer3D.region_get_enabled(region) and NavigationServer3D.region_get_bounds(region).has_surface():
+			has_data = true
+	if not has_data:
+		return _Navigation.UNAVAILABLE
+	if not NavigationServer3D.map_get_closest_point_owner(map, global_position).is_valid():
+		return _Navigation.SYNCING
+	return _Navigation.READY
+
+
+## Replaces any route with the given one (anchor first, destination last) and classifies the order
+## once against the actual travel velocity, using the initial guidance point as the goal.
+func _start_order(route: PackedVector3Array, detour_end: int) -> void:
+	_route = route
+	_route_progress = 0.0
+	_route_segment = 0
+	_guidance_target = route[-1]
+	_guidance_segment = 0
+	_detour_end = detour_end
+	_has_destination = true
+	_awaiting_rest = false
+	_turn_deflection = 0.0
+	if route.size() > 2:
+		_update_route_guidance(Vector3.ZERO)
+	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	var to_destination := route[-1] - global_position
+	to_destination.y = 0.0
+	var offset := _guidance_target - global_position
+	offset.y = 0.0
+	if not planar_velocity.is_zero_approx() and to_destination.length() > profile.arrival_tolerance:
+		var angle := rad_to_deg(planar_velocity.angle_to(offset))
+		_awaiting_rest = angle >= profile.near_opposite_angle or is_equal_approx(angle, profile.near_opposite_angle)
+		if not _awaiting_rest:
+			_turn_deflection = rad_to_deg(planar_velocity.signed_angle_to(offset, Vector3.UP))
+
+
+## Multi-point routes: advances progress and places the guidance point the lookahead distance
 ## further along the route, clamped to the final destination. Returns the route length left beyond
 ## the guidance point. Intermediate points are never arrival targets.
 func _update_route_guidance(direction: Vector3) -> float:
-	var lookahead := profile.route_lookahead_distance
+	var lookahead := _lookahead(_route_progress)
 	var segment_start := 0.0
 	for i in _route_segment:
 		segment_start += _route[i].distance_to(_route[i + 1])
@@ -184,7 +265,7 @@ func _update_route_guidance(direction: Vector3) -> float:
 		_route_segment = best_segment
 
 	# Guidance point; zero-length segments are passed over.
-	var target_arc := _route_progress + lookahead
+	var target_arc := _route_progress + _lookahead(_route_progress)
 	var guidance := _route[-1]
 	var guidance_segment := _route.size() - 2
 	var remaining := 0.0
@@ -211,6 +292,20 @@ func _update_route_guidance(direction: Vector3) -> float:
 	return remaining
 
 
+## Lookahead at the given route progress. Manual routes use route_lookahead_distance. A generated
+## detour uses detour_lookahead_distance, blending linearly to route_lookahead_distance over the last
+## detour_lookahead_distance of progress before its final point, so manually appended legs use the
+## manual value without the guidance point jumping.
+func _lookahead(progress: float) -> float:
+	if _detour_end == 0:
+		return profile.route_lookahead_distance
+	var detour_length := 0.0
+	for i in _detour_end:
+		detour_length += _route[i].distance_to(_route[i + 1])
+	var blend := clampf((progress - detour_length) / profile.detour_lookahead_distance + 1.0, 0.0, 1.0)
+	return lerpf(profile.detour_lookahead_distance, profile.route_lookahead_distance, blend)
+
+
 ## Ends the order: keeps only the last final point, so the route and its getters stay defined.
 func _end_route() -> void:
 	_route = PackedVector3Array([_route[-1]])
@@ -218,6 +313,7 @@ func _end_route() -> void:
 	_route_segment = 0
 	_guidance_target = _route[0]
 	_guidance_segment = 0
+	_detour_end = 0
 	_has_destination = false
 	_awaiting_rest = false
 	_turn_deflection = 0.0

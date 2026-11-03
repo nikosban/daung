@@ -14,3 +14,8 @@ extends Resource
 ## How far ahead along a multi-point route the ship aims, so it anticipates bends.
 ## Not a stopping radius; intermediate points need not be passed exactly.
 @export_range(2.0, 100.0, 0.1, "suffix:m") var route_lookahead_distance: float = 25.0
+## Lookahead while following an automatically generated detour around static obstacles (provisional).
+## Manual legs appended after the detour's final point return to route_lookahead_distance.
+@export_range(2.0, 100.0, 0.1, "suffix:m") var detour_lookahead_distance: float = 20.0
+## Tolerance when simplifying navigation paths into route points; unobstructed paths reduce to the click.
+@export_range(0.01, 1.0, 0.01, "suffix:m") var path_simplify_epsilon: float = 0.1

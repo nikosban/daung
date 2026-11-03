@@ -2,21 +2,25 @@
 
 ## Current state
 
-Daung has open-space ship movement with moving turns, near-opposite reversals, model-only banking, player-defined routes and a hard stop on static obstacles (Tasks #3, #5, #7, #9 and #11). Running the project opens `Main/main.tscn`: a fixed camera, one frigate at the origin facing −Z, 2 m ring markers at (100, 0, 0), at the start location (0, 0, 0) and at the route test points (60, 0, 0), (60, 0, −40) and (20, 0, −40), and a grey 6 m radius test sphere at (83, 0, 0) that blocks the straight path to (100, 0, 0). Right-clicking the Y = 0 plane orders the ship there; Shift + right-click appends a waypoint.
+Daung has open-space ship movement with moving turns, near-opposite reversals, model-only banking, player-defined routes, a hard stop on static obstacles and automatic detours around them for normal right-clicks (Tasks #3, #5, #7, #9, #11 and #13). Running the project opens `Main/main.tscn`: a fixed camera, one frigate at the origin facing −Z, 2 m ring markers at (100, 0, 0), at the start location (0, 0, 0) and at the route test points (60, 0, 0), (60, 0, −40) and (20, 0, −40), and a grey 6 m radius test sphere at (83, 0, 0) that blocks the straight path to (100, 0, 0). Right-clicking the Y = 0 plane orders the ship there, around the sphere if needed; Shift + right-click appends a manual waypoint.
 
-- `Movement/`: the `MovementProfile` Resource (eight provisional tunables), the shared `frigate_movement_profile.tres`, and `ShipMovement` (`CharacterBody3D`), the single writer of planar position, velocity and yaw, with `move_to()`, `append_waypoint()` and `stop()`.
+- `Movement/`: the `MovementProfile` Resource (ten provisional tunables), the shared `frigate_movement_profile.tres`, and `ShipMovement` (`CharacterBody3D`), the single writer of planar position, velocity and yaw, with `move_to()`, `append_waypoint()` and `stop()`.
 - **Each new order (`move_to`) is classified once, from the actual travel velocity:**
   - at rest: translate and turn together;
   - 150° or more from travel: brake to rest, then start from rest;
   - anything else: a moving turn at up to 12 °/s of travel direction, slowing for near goals (pure-pursuit cap).
 - **Routes:** each ship keeps its own route (the anchor, then the requested points; never empty).
-  - A plain right-click replaces the whole route with one destination, aimed at directly, exactly as before routes existed.
-  - Shift + right-click appends a point without re-classifying, restarting or braking. With no active order it starts one like a plain right-click.
-  - On multi-point routes the ship steers at a point 25 m further along the route (`route_lookahead_distance`), so it rounds bends early and may cut corners. Progress never goes backward. Intermediate points are guidance, never arrival targets.
+  - A plain right-click replaces the whole route. Godot navigation is queried once: if the path bends and ends at the click, its points become a detour route to the original click; otherwise the click is aimed at directly, exactly as before.
+  - Shift + right-click appends a manual point without navigating, re-classifying, restarting or braking. With no active order it starts a direct order (no detour).
+  - On manual multi-point routes the ship steers at a point 25 m further along the route (`route_lookahead_distance`), so it rounds bends early and may cut corners. Detours use 20 m (`detour_lookahead_distance`), blending to 25 m over the last 20 m before the detour's final point when manual points follow. Progress never goes backward. Intermediate points are guidance, never arrival targets.
+  - For a detour, the 150° reversal check uses the initial guidance point (20 m along the detour), not the first leg or the click.
   - When guidance crosses a bend, the turn deflection is reset from the actual travel direction to the new leg, so banking follows the current bend.
   - `stop()` clears the whole route.
 - Entering the 2 m tolerance of the final point completes an order. The ship brakes to rest along its travel and may coast past without turning back. A click inside 2 m is an arrival, never a reversal.
-- **Static obstacles (B: stop when blocked):** moving into a `StaticBody3D` (not an `AnimatableBody3D`) ends the whole order, pending points included, with an immediate stop at the contact. The ship does not slide, retry or steer around it; the player orders it elsewhere. A ship resting against an obstacle can be ordered away from it. Other body types keep the engine's default sliding; their behavior is undecided. Automatic routing around obstacles (A) comes later.
+- **Static obstacles:** moving into a `StaticBody3D` (not an `AnimatableBody3D`) ends the whole order, pending points included, with an immediate stop at the contact; it stays the safety fallback for direct orders and manual legs. A ship resting against an obstacle can be ordered away from it. Other body types keep the engine's default sliding; their behavior is undecided.
+- **Navigation:** `Main/main.tscn` has a `NavigationRegion3D` with the baked `Main/navigation_mesh.tres` (10.75 m clearance, 7 m agent height), baked from the colliders in group `navigation_source`: `TestObstacle` and an invisible 400 × 400 m `NavigationFloor` on layer 2 that the ship never touches. Rebake (select `NavigationRegion3D`, Bake NavigationMesh) after changing them.
+- **Startup readiness:** Godot's asynchronous navigation is usable from about physics frame 4–5 (≈ 70–83 ms). A normal click before then is held (only the latest), then planned on the first ready tick; a Shift-click drops it and starts a direct order; `stop()` drops it. If navigation settles with no usable data (no region, an empty or missing mesh), the click becomes a direct order.
+- **Fallback:** a click off the navigation mesh, inside the obstacle's clearance, or with no usable navigation becomes a direct order and hard-stops on contact. No failure is reported.
 - `get_destination()` returns the final point; `get_guidance_target()` returns the point currently steered at. Both are always defined, including at startup and after `stop()`, arrival or a blocked stop.
 - `Ships/ship.tscn`: the reusable ship. It has the movement root, a provisional box collision shape with no collision rules, and the protected GLB as a `Visual` child at identity.
 - **Banking:** `Visual` runs `ShipVisualBank`, which reads Movement's `get_turn_deflection()` and its course error to `get_guidance_target()`, and rolls only the visual wrapper.
@@ -25,7 +29,7 @@ Daung has open-space ship movement with moving turns, near-opposite reversals, m
   - The roll changes at up to 7 °/s and returns to level when the course is within 3°, on stop or arrival, during reversal braking, and on starts from rest.
   - Values live in `Ships/Profiles/frigate_bank_profile.tres`.
 - `Main/right_click_move_input.gd`: temporary scene input glue.
-- `Main/main.tscn` `TestObstacle`: a temporary `StaticBody3D` collision test fixture (sphere shape and plain grey mesh, radius 6 m), not asteroid art.
+- `Main/main.tscn` `TestObstacle`: a temporary `StaticBody3D` collision and navigation test fixture (sphere shape and plain grey mesh, radius 6 m), not asteroid art.
 - `project.godot` sets the main scene, opens the window maximized with `canvas_items`/`expand` stretch, and enables physics interpolation.
 
 The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidecar are unchanged. Do not edit, relocate, rename, rescale or repivot them.
@@ -41,14 +45,18 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 - Model-only presentation heels outward in broad maneuvers and banks inward in sharper ones. Visual tilt never affects the authoritative root or collision.
 - Ship differences use shared reusable definitions and Resource configuration, with per-instance runtime state. Work happens in the one developing game scene.
 - Right-click to move, with the ship already controlled (no selection). No stop key. The fixed camera looks 45° down.
-- Obstacles: B (stop when blocked) first, automatic route planning around obstacles (A) later. The immediate hard stop on contact, including grazing contacts, and the grey 6 m test sphere at (83, 0, 0) are provisional.
+- Obstacles: the immediate hard stop on contact, including grazing contacts, and the grey 6 m test sphere at (83, 0, 0) are provisional. Normal right-clicks detour around static obstacles with Godot navigation (`NavigationRegion3D` + baked mesh, one `query_path` per order, original click kept as the destination); Shift-built legs stay manual until the next slice, which must reuse the same path query and clearance method.
+- Navigation stays asynchronous (engine defaults); no `map_force_update()`.
 - Provisional movement defaults:
   - 8 m/s max speed;
   - 6 m/s² acceleration and 10 m/s² braking;
   - 20 °/s hull yaw and 12 °/s travel turn rate (slowed by the owner after playtest);
   - 150° near-opposite angle;
   - 2 m arrival tolerance;
-  - 25 m route lookahead (range 2–100 m).
+  - 25 m route lookahead for manual routes (range 2–100 m);
+  - 20 m detour lookahead (range 2–100 m), provisional;
+  - 0.1 m path simplify epsilon (range 0.01–1 m);
+  - navigation clearance `agent_radius` 10.75 m and `agent_height` 7 m in `Main/navigation_mesh.tres`.
 
   Final balance comes from owner playtests.
 
@@ -63,9 +71,19 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 - **Abrupt stop:** a blocked ship goes from up to 8 m/s to 0 in one physics tick at the contact (head-on: root X ≈ 66.97, about 1 mm from the sphere). There is no pre-brake or impact feedback.
 - **Grazing contacts stop the ship:** any motion into the obstacle's surface counts, however shallow. Within the impact tick the engine may slide the ship by at most one tick of motion (≈ 0.13 m at 8 m/s; 0 head-on) before the stop.
 - **Pure sideways order from contact stays blocked:** when the ship rests against an obstacle and is ordered exactly sideways, the hull's yaw swings its corner into the surface, which counts as a grazing contact and stops it again. Orders with any away component (e.g. back to (0, 0, 0)) escape.
+- **Detour clearance is measured, not guaranteed:** the test detour from (0, 0, 0) to (100, 0, 0) keeps the hull 2.39 m from the sphere at its closest. Other obstacle shapes, approach angles, speeds or hull sizes are not validated, and there is no universal collision-safe radius. Raising `agent_radius` above about 11 m makes the test ring unreachable (fallback).
+- **Detour progress snaps at short legs:** the navigation path rounds the sphere with short legs (about 3 m), and the follower's progress projection can jump about 1.9 m in one tick there. Travel direction, yaw and roll stay rate-limited.
+- **Pending order is invisible:** while a click waits for navigation (≈ 70–83 ms after start), `has_destination()` and the other getters still show the previous state.
+- **Single region:** readiness waits for every region on the map to sync and is ready once any region with data is merged; partial readiness across several regions is not handled.
+- **Static navigation data:** one finite author-time surface; moving or editing obstacles needs a rebake. No live replanning.
 - **Bank visibility:** at the fixed camera distance and current lighting, a 4–9° lean is subtle. Its readability is the owner's playtest call.
-- **Deferred QA:** hairpin, U-turn and dense zigzag routes, rapid route editing during braking, complex chained retargets (including rapid retargets while banked), extreme movement or visual tunings, other hull proportions and multi-ship scale are not validated. Grazing-contact feel, dense obstacle fields, high-speed tunneling at extreme tunings, moving/dynamic obstacles and ship–ship contact are not validated. There is no obstacle routing, avoidance, route display, pitch, selection or UI.
+- **Deferred QA:** hairpin, U-turn and dense zigzag routes, rapid route editing during braking, complex chained retargets (including rapid retargets while banked), extreme movement or visual tunings, other hull proportions and multi-ship scale are not validated. Grazing-contact feel, dense obstacle fields, high-speed tunneling at extreme tunings, moving/dynamic obstacles and ship–ship contact are not validated. Multiple or overlapping obstacles, narrow passages and detours entered mid-motion or with sharp path entries are not validated. There are no Shift-leg detours, avoidance, route display, pitch, selection or UI.
 
 ## Remaining work
 
-Final banking values, the route lookahead feel and the hard-stop feel await owner playtest. Automatic obstacle route planning (A), route-failure notifications, impact feedback, collisions with other body types and obstacle appearance remain undecided. There is no measured performance target.
+Final banking values, the route lookahead feel and the hard-stop feel await owner playtest. The next planned slice is automatic detours for Shift-built legs. Route-failure notifications, impact feedback, collisions with other body types and obstacle appearance remain undecided. There is no measured performance target.
+
+**Refinement notes (owner, Task #13):**
+- The 20 m detour / 25 m manual lookahead split is provisional. Revisit the detour's clearance, rounding, speed and turning feel with more obstacle shapes, approaches and hull sizes. Do not silently merge these tunings or declare a universal collision-safe radius.
+- The pending-order startup handling is a provisional startup policy. Revisit it once navigation becomes larger or dynamic and more command types need coordination; measure readiness latency and verify latest-order replacement before any generalized orchestration.
+- Reversal classification against the initial guidance point is the current technical rule. Verify it on mid-motion retargets and sharp path entries; refine only if later evidence or owner feel requires it.
