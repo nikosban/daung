@@ -73,6 +73,7 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
   - **150° or more from actual travel:** brake to rest first (kept provisionally; powered reverse deferred).
   - **Stop-and-turn:** only at a corner that fails the clearance gate, or one still unchecked when reached (owner-approved Option A).
   - **Arrival and `stop()`:** both end rotation on that tick.
+  - **Close-range moving turns:** a single continuous loop-back before arrival is accepted for this trial (owner, Task #25).
 - **Routes:** Shift + right-click appends, a plain right-click replaces. Intermediate points are never arrival targets. A Shift-click after the final point's 2 m arrival trigger has completed the order starts a new order, which may brake to rest first if near-opposite.
 - **Banking:** model-only presentation heels outward in broad maneuvers and banks inward in sharper ones. Visual tilt never affects the authoritative root or collision. Banking keeps reading `get_turn_deflection()` (unchanged contract).
 - Ship differences use shared reusable definitions and Resource configuration, with per-instance runtime state. Work happens in the one developing game scene.
@@ -109,10 +110,10 @@ All values are measured with deterministic 60 Hz headless traces of the shipped 
   - **Afterwards:** a 0.25 m/s sideways thruster remainder fades at 0.35 m/s².
 - **Moving turns are slower and tighter-tracking (measured):** while cruising at 5 m/s toward −Z, a 90° order to a point 100 m to the side turns for 10.6 s, peaking at 0.23 m/s of slip. The hull stays within 4.4° of the travel direction (75° before). The ship arrives 28.6 s after the order (22.5 s before).
   - **Decisive test:** (0, 0, −100), then (60, 0, −60) at z ≈ −30. It turns for 8.0 s with no snap, slips at most 0.20 m/s, stays within 3.8° of travel, brakes for 4.35 s and arrives 19.1 s after the second order, resting 0.04 m from the click.
-- **Close-range moving turns loop back once (measured; owner F5 call):**
+- **Close-range moving turns loop back once (measured; accepted by the owner for this trial, Task #25):**
   - **The cases:** at 5 m/s, 90° orders to points 10, 20 and 40 m to the side overshoot by up to 16.7 / 22.0 / 40.2 m from the click. The ship comes round in one continuous turn (192° / 187° / 154° of total yaw) and arrives after 23.3 / 21.2 / 20.1 s, resting 0.02–0.04 m from the click.
   - **Why:** the latched TURN speed needs about 2.7 s at 0.75 m/s² to be reached.
-  - **What it isn't:** there is no stop, no repeated orbit and no failed arrival.
+  - **What it isn't:** there is no stop, no repeated orbit and no failed arrival. A repeated orbit or failed arrival would still be a defect.
 - **Reversals stop:** a 180° or 155° order at 5 m/s brakes to rest for 6.7 s (about 16.7 m) before the start from rest (the existing rule). The ship arrives after 33.2 / 28.2 s.
 - **Stopping is long:** `stop()`, declined orders and arrival brake at 0.75 m/s². From 5 m/s that is about 16.7 m and 6.7 s (measured: 16.6 m for a declined order; 5.3 m before). The heading freezes on the same tick, even at the full 10 °/s turn rate: this is the owner's `stop()` contract, a visible abrupt end of rotation.
 - **End of a turn:** on the last tick of a turn, a remaining yaw rate of at most 0.36 °/s is dropped to zero (one-tick discretization). Otherwise yaw acceleration stays within 10 °/s².
@@ -157,7 +158,6 @@ All values are measured with deterministic 60 Hz headless traces of the shipped 
 
 Owner F5 playtest of the Task #25 trial. The open questions it should answer:
 - **Feel:** slip, turn speed and corner speed.
-- **Close turns:** whether the single loop-back of close-range moving turns is acceptable.
 - **Stopping:** the 16.7 m stop distance.
 - **Departures:** the stern-first rearward departures.
 - **Camera:** the camera limits.
