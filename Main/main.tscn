@@ -1,7 +1,8 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="1_ship"]
 [ext_resource type="Script" path="res://Main/right_click_move_input.gd" id="2_input"]
+[ext_resource type="NavigationMesh" path="res://Main/navigation_mesh.tres" id="3_navmesh"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -27,6 +28,9 @@ height = 12.0
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_obstacle"]
 albedo_color = Color(0.5, 0.5, 0.5, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_navigation_floor"]
+size = Vector3(400, 1, 400)
 
 [node name="Main" type="Node3D"]
 
@@ -66,7 +70,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -40)
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
-[node name="TestObstacle" type="StaticBody3D" parent="."]
+[node name="TestObstacle" type="StaticBody3D" parent="." groups=["navigation_source"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 83, 0, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="TestObstacle"]
@@ -75,6 +79,17 @@ shape = SubResource("SphereShape3D_obstacle")
 [node name="MeshInstance3D" type="MeshInstance3D" parent="TestObstacle"]
 mesh = SubResource("SphereMesh_obstacle")
 surface_material_override/0 = SubResource("StandardMaterial3D_obstacle")
+
+[node name="NavigationFloor" type="StaticBody3D" parent="." groups=["navigation_source"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -0.5, 0)
+collision_layer = 2
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationFloor"]
+shape = SubResource("BoxShape3D_navigation_floor")
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
+navigation_mesh = ExtResource("3_navmesh")
 
 [node name="RightClickMoveInput" type="Node" parent="." node_paths=PackedStringArray("camera", "ship")]
 script = ExtResource("2_input")

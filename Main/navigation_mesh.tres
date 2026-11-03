@@ -1,0 +1,11 @@
+[gd_resource type="NavigationMesh" format=3]
+
+[resource]
+vertices = PackedVector3Array(80.25, 0.5, -16.5, 83, 0.5, -16.75, 83, 0.5, -189.25, 72.75, 0.5, -12.75, 70.25, 0.5, -10.25, 66.5, 0.5, -2.75, 66.25, 0.5, 0, -139.25, 0.5, -189.25, -139.25, 0.5, 0, 99.5, 0.5, -2.75, 99.75, 0.5, 0, 239.25, 0.5, 0, 95.75, 0.5, -10.25, 93.25, 0.5, -12.75, 85.75, 0.5, -16.5, 239.25, 0.5, -189.25, 83, 0.5, 189.25, 83, 0.5, 16.75, 80.25, 0.5, 16.5, 72.75, 0.5, 12.75, 70.25, 0.5, 10.25, 66.5, 0.5, 2.75, -139.25, 0.5, 189.25, 99.5, 0.5, 2.75, 95.75, 0.5, 10.25, 93.25, 0.5, 12.75, 85.75, 0.5, 16.5, 239.25, 0.5, 189.25)
+polygons = [PackedInt32Array(0, 2, 1), PackedInt32Array(2, 0, 3), PackedInt32Array(2, 3, 4), PackedInt32Array(2, 4, 5), PackedInt32Array(5, 6, 2), PackedInt32Array(2, 6, 8), PackedInt32Array(2, 8, 7), PackedInt32Array(11, 10, 9), PackedInt32Array(11, 9, 12), PackedInt32Array(11, 12, 13), PackedInt32Array(13, 14, 11), PackedInt32Array(11, 14, 2), PackedInt32Array(11, 2, 15), PackedInt32Array(14, 1, 2), PackedInt32Array(18, 17, 16), PackedInt32Array(19, 18, 16), PackedInt32Array(16, 20, 19), PackedInt32Array(21, 20, 16), PackedInt32Array(21, 16, 6), PackedInt32Array(6, 16, 8), PackedInt32Array(8, 16, 22), PackedInt32Array(23, 10, 11), PackedInt32Array(24, 23, 11), PackedInt32Array(25, 24, 11), PackedInt32Array(25, 11, 26), PackedInt32Array(26, 11, 16), PackedInt32Array(16, 11, 27), PackedInt32Array(26, 16, 17)]
+geometry_parsed_geometry_type = 1
+geometry_collision_mask = 3
+geometry_source_geometry_mode = 1
+geometry_source_group_name = &"navigation_source"
+agent_height = 7.0
+agent_radius = 10.75
