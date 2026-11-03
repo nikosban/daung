@@ -5,11 +5,11 @@
 [resource]
 script = ExtResource("1_profile")
 max_speed = 8.0
-acceleration = 6.0
-braking = 10.0
+acceleration = 1.3333333333333333
+braking = 6.0
 turn_rate = 20.0
 arrival_tolerance = 2.0
-lateral_acceleration = 1.7
+lateral_acceleration = 1.4
 precision_lateral_acceleration = 4.0
 precision_fade_speed = 4.0
 near_opposite_angle = 150.0
