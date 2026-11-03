@@ -97,8 +97,10 @@ func _physics_process(delta: float) -> void:
 	var speed := planar_velocity.length()
 	var direction := planar_velocity / speed if speed > 0.0 else Vector3.ZERO
 	var remaining := 0.0
+	var bend_limit := INF
 	if _has_destination and not _awaiting_rest and _route.size() > 2:
 		remaining = _update_route_guidance(direction)
+		bend_limit = _bend_speed_limit()
 	var offset := _guidance_target - global_position
 	offset.y = 0.0
 	var distance := offset.length()
@@ -120,7 +122,7 @@ func _physics_process(delta: float) -> void:
 			var max_turn := profile.lateral_acceleration / speed * delta
 			direction = direction.rotated(Vector3.UP, clampf(direction.signed_angle_to(goal_direction, Vector3.UP), -max_turn, max_turn))
 		# Cap speed so the ship can still brake to rest at the final destination.
-		desired_speed = minf(profile.max_speed, sqrt(2.0 * profile.braking * (distance + remaining)))
+		desired_speed = minf(minf(profile.max_speed, bend_limit), sqrt(2.0 * profile.braking * (distance + remaining)))
 		# Pure pursuit: keep the turn radius v² / a inside the circle through the goal
 		# tangent to travel, R = d / (2 sin θ), so near goals are reached instead of orbited.
 		var sin_theta := absf(sin(direction.angle_to(goal_direction)))
@@ -291,6 +293,44 @@ func _update_route_guidance(direction: Vector3) -> float:
 		_guidance_segment = guidance_segment
 	_guidance_target = guidance
 	return remaining
+
+
+## Multi-point routes: the highest speed at which lateral_acceleration can hold the route's bends
+## ahead. The stretch steered through is the lookahead window ahead of progress; its radius is the
+## lookahead over the summed absolute deflections inside it, and its limit sqrt(a · R). The window
+## ending at each bend ahead applies from the progress where that bend enters guidance, reached with
+## the existing braking beforehand. Zero-length legs are skipped. Finite and positive, or INF without bends.
+func _bend_speed_limit() -> float:
+	var lookahead := _lookahead(_route_progress)
+	var reach := _route_progress + lookahead + profile.max_speed * profile.max_speed / (2.0 * profile.braking)
+	# Bends ahead of progress: arc position and absolute deflection between legs with length.
+	var bend_arcs := PackedFloat64Array()
+	var bend_angles := PackedFloat64Array()
+	var arc := 0.0
+	var previous := Vector3.ZERO
+	for i in _route.size() - 1:
+		if arc > reach:
+			break
+		var leg := _route[i + 1] - _route[i]
+		if not leg.is_zero_approx():
+			if not previous.is_zero_approx() and arc > _route_progress:
+				bend_arcs.append(arc)
+				bend_angles.append(previous.angle_to(leg))
+			previous = leg
+		arc += leg.length()
+
+	var limit := INF
+	for k in bend_arcs.size():
+		var turn := 0.0
+		for j in range(k, -1, -1):
+			if bend_arcs[j] <= bend_arcs[k] - lookahead:
+				break
+			turn += bend_angles[j]
+		if turn > 0.0:
+			var bend_speed := sqrt(profile.lateral_acceleration * lookahead / turn)
+			var run_up := maxf(bend_arcs[k] - lookahead - _route_progress, 0.0)
+			limit = minf(limit, sqrt(bend_speed * bend_speed + 2.0 * profile.braking * run_up))
+	return limit
 
 
 ## Corner tracking on generated detours: pulls the guidance arc back so the straight chord from the
