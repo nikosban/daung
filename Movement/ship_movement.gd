@@ -155,8 +155,11 @@ func _physics_process(delta: float) -> void:
 		if planar_velocity.is_zero_approx():
 			direction = goal_direction
 		else:
-			# Bounded lateral acceleration a = v · ω: the travel direction turns at up to a / v.
-			var max_turn := profile.lateral_acceleration / speed * delta
+			# Bounded lateral acceleration a = v · ω: the travel direction turns at up to a / v. Below
+			# precision_fade_speed the steering thrust rises smoothly toward precision_lateral_acceleration.
+			var cruise := profile.lateral_acceleration
+			var thrust := lerpf(maxf(profile.precision_lateral_acceleration, cruise), cruise, smoothstep(0.0, profile.precision_fade_speed, speed))
+			var max_turn := thrust / speed * delta
 			direction = direction.rotated(Vector3.UP, clampf(direction.signed_angle_to(goal_direction, Vector3.UP), -max_turn, max_turn))
 		# Cap speed so the ship can still brake to rest at the final destination.
 		desired_speed = minf(minf(profile.max_speed, bend_limit), sqrt(2.0 * profile.braking * (distance + remaining)))
