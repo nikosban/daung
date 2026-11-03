@@ -116,15 +116,16 @@ func _physics_process(delta: float) -> void:
 		if planar_velocity.is_zero_approx():
 			direction = goal_direction
 		else:
-			var max_turn := deg_to_rad(profile.travel_turn_rate) * delta
+			# Bounded lateral acceleration a = v · ω: the travel direction turns at up to a / v.
+			var max_turn := profile.lateral_acceleration / speed * delta
 			direction = direction.rotated(Vector3.UP, clampf(direction.signed_angle_to(goal_direction, Vector3.UP), -max_turn, max_turn))
 		# Cap speed so the ship can still brake to rest at the final destination.
 		desired_speed = minf(profile.max_speed, sqrt(2.0 * profile.braking * (distance + remaining)))
-		# Pure pursuit: keep the turn radius v / ω inside the circle through the goal
+		# Pure pursuit: keep the turn radius v² / a inside the circle through the goal
 		# tangent to travel, R = d / (2 sin θ), so near goals are reached instead of orbited.
 		var sin_theta := absf(sin(direction.angle_to(goal_direction)))
 		if sin_theta > 0.001:
-			desired_speed = minf(desired_speed, deg_to_rad(profile.travel_turn_rate) * distance / (2.0 * sin_theta))
+			desired_speed = minf(desired_speed, sqrt(profile.lateral_acceleration * distance / (2.0 * sin_theta)))
 
 	var rate := profile.acceleration if desired_speed > speed else profile.braking
 	speed = move_toward(speed, desired_speed, rate * delta)
@@ -265,7 +266,7 @@ func _update_route_guidance(direction: Vector3) -> float:
 		_route_segment = best_segment
 
 	# Guidance point; zero-length segments are passed over.
-	var target_arc := _route_progress + _lookahead(_route_progress)
+	var target_arc := _limit_detour_chord(_route_progress + _lookahead(_route_progress), segment_start)
 	var guidance := _route[-1]
 	var guidance_segment := _route.size() - 2
 	var remaining := 0.0
@@ -290,6 +291,63 @@ func _update_route_guidance(direction: Vector3) -> float:
 		_guidance_segment = guidance_segment
 	_guidance_target = guidance
 	return remaining
+
+
+## Corner tracking on generated detours: pulls the guidance arc back so the straight chord from the
+## ship to the guidance point passes within detour_corner_tolerance of every interior detour point it
+## skips. Guidance always may reach the next route point. Advances point by point, stopping at the
+## first point whose chord fails, then extends into the following segment by bisection; every accepted
+## arc has been checked, so the result always meets the tolerance. Manual points are never checked.
+func _limit_detour_chord(target_arc: float, segment_start: float) -> float:
+	var next := _route_segment + 1
+	var next_arc := segment_start + _route[_route_segment].distance_to(_route[next])
+	if next >= _detour_end or next_arc >= target_arc or _chord_fits(_point_at_arc(target_arc, segment_start), next, _detour_end - 1, target_arc, next_arc):
+		return target_arc
+	var last := next
+	var last_arc := next_arc
+	while last + 1 < _route.size():
+		var arc := last_arc + _route[last].distance_to(_route[last + 1])
+		if arc >= target_arc or not _chord_fits(_route[last + 1], next, last, arc, next_arc):
+			break
+		last += 1
+		last_arc = arc
+	if last + 1 >= _route.size():
+		return last_arc
+	var low := last_arc
+	var high := minf(target_arc, last_arc + _route[last].distance_to(_route[last + 1]))
+	for i in 10: # Bisection steps: resolves the segment to 1/1024 of its length.
+		var mid := (low + high) / 2.0
+		if _chord_fits(_point_at_arc(mid, segment_start), next, last, mid, next_arc):
+			low = mid
+		else:
+			high = mid
+	return low
+
+
+## Whether every interior detour point from index first to last that lies before chord_arc along the
+## route is within detour_corner_tolerance of the chord from the ship to end.
+func _chord_fits(end: Vector3, first: int, last: int, chord_arc: float, first_arc: float) -> bool:
+	var arc := first_arc
+	for i in range(first, mini(last, _detour_end - 1) + 1):
+		if i > first:
+			arc += _route[i - 1].distance_to(_route[i])
+		if arc >= chord_arc:
+			break
+		if _route[i].distance_to(Geometry3D.get_closest_point_to_segment(_route[i], global_position, end)) > profile.detour_corner_tolerance:
+			return false
+	return true
+
+
+## The route point at the given arc length, searching from the current segment (whose start is at
+## segment_start); clamped to the final destination.
+func _point_at_arc(target_arc: float, segment_start: float) -> Vector3:
+	var arc := segment_start
+	for i in range(_route_segment, _route.size() - 1):
+		var length := _route[i].distance_to(_route[i + 1])
+		if arc + length > target_arc:
+			return _route[i].lerp(_route[i + 1], (target_arc - arc) / length)
+		arc += length
+	return _route[-1]
 
 
 ## Lookahead at the given route progress. Manual routes use route_lookahead_distance. A generated

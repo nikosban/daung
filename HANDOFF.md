@@ -8,7 +8,7 @@ Daung has open-space ship movement with moving turns, near-opposite reversals, m
 - **Each new order (`move_to`) is classified once, from the actual travel velocity:**
   - at rest: translate and turn together;
   - 150° or more from travel: brake to rest, then start from rest;
-  - anything else: a moving turn at up to 12 °/s of travel direction, slowing for near goals (pure-pursuit cap).
+  - anything else: a moving turn limited by 1.7 m/s² of directional thrust (`lateral_acceleration`: about 12 °/s of travel direction at 8 m/s, tighter at lower speeds), slowing for near goals (pure-pursuit cap).
 - **Routes:** each ship keeps its own route (the anchor, then the requested points; never empty).
   - A plain right-click replaces the whole route. Godot navigation is queried once: if the path bends and ends at the click, its points become a detour route to the original click; otherwise the click is aimed at directly, exactly as before.
   - Shift + right-click appends a manual point without navigating, re-classifying, restarting or braking. With no active order it starts a direct order (no detour).
@@ -40,7 +40,7 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 
 - 1 world unit = 1 metre; authoritative gameplay movement uses X/Z.
 - Movement is the only top-level gameplay module and may use Godot APIs only. It alone owns authoritative movement; guidance (including route guidance) and locomotion stay internal.
-- Translate and turn together from rest. Moving turns are continuous and broad: about 90° of travel direction in 7.5 s at cruise. Orders 150°–180° from actual travel brake fully to rest before restarting. Arrival ends commanded rotation.
+- Translate and turn together from rest. Moving turns are continuous and broad: about 90° of travel direction in 7.4 s at cruise; the travel turn comes from bounded directional thrust, so slower ships turn tighter (owner-approved trial, Task #13). Orders 150°–180° from actual travel brake fully to rest before restarting. Arrival ends commanded rotation.
 - Routes: Shift + right-click appends, a plain right-click replaces. The ship moves continuously through intermediate points and brakes only for the final one. A Shift-click after the final point's 2 m arrival trigger has completed the order starts a new order, which may brake to rest first if near-opposite.
 - Model-only presentation heels outward in broad maneuvers and banks inward in sharper ones. Visual tilt never affects the authoritative root or collision.
 - Ship differences use shared reusable definitions and Resource configuration, with per-instance runtime state. Work happens in the one developing game scene.
@@ -50,11 +50,13 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 - Provisional movement defaults:
   - 8 m/s max speed;
   - 6 m/s² acceleration and 10 m/s² braking;
-  - 20 °/s hull yaw and 12 °/s travel turn rate (slowed by the owner after playtest);
+  - 20 °/s hull yaw;
+  - 1.7 m/s² lateral acceleration (directional thrust, range 0.1–20), replacing the former fixed 12 °/s travel turn rate; provisional trial value;
   - 150° near-opposite angle;
   - 2 m arrival tolerance;
   - 25 m route lookahead for manual routes (range 2–100 m);
   - 20 m detour lookahead (range 2–100 m), provisional;
+  - 1 m detour corner tolerance (range 0.1–10 m), provisional trial value;
   - 0.1 m path simplify epsilon (range 0.01–1 m);
   - navigation clearance `agent_radius` 10.75 m and `agent_height` 7 m in `Main/navigation_mesh.tres`.
 
@@ -63,16 +65,16 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 ## Known limitations
 
 - **Short clicks at speed (accepted by the owner):** a click within 2 m of a ship at 8 m/s finishes where braking ends, up to about 3.2 m past the click (8² ÷ (2 × 10)). The 2 m tolerance triggers arrival braking; it does not guarantee the final rest distance.
-- **Slow-but-moving ships:** a ship that is moving slowly but not stopped, given an order 90°–149° away, swings wider as it speeds up during the turn, because the travel turn rate is fixed in °/s.
+- **Slow-speed turns are tight:** the travel direction turns at `lateral_acceleration / speed`, so below cruise it turns much faster than at 8 m/s (about 24 °/s at 4 m/s, 49 °/s at 2 m/s) and almost freely below 1 m/s. The hull still yaws at 20 °/s. A 90° order at about 4 m/s arrived 4.1 s sooner than with the former 12 °/s limit.
 - **Hull yaw versus travel:** the hull turns toward the guidance point at 20 °/s, so during turns it leads the travel direction.
-- **Route bends slow the ship:** at the current tunings a 90° bend drops the speed to about 3.4 m/s (measured on the test route) before it recovers. The second bend of the test route is rounded about 2 m outside the corner.
+- **Route bends slow the ship:** at the current tunings a 90° bend drops the speed to about 5.2 m/s (measured on the test route; 3.4 m/s with the former 12 °/s limit) before it recovers. The route's path is unchanged within 0.06 m, and it finishes 3.2 s sooner. The second bend of the test route is rounded about 2 m outside the corner.
 - **Cut corners:** progress can jump forward when the ship's nearest route point moves onto the next leg (about 11 m at the first test corner). Travel direction, yaw and roll stay rate-limited.
 - **Bends right after a start from rest:** if the first leg is shorter than the lookahead, guidance can cross its bend while the ship is still at rest, so that bend keeps a 0 deflection and does not bank.
 - **Abrupt stop:** a blocked ship goes from up to 8 m/s to 0 in one physics tick at the contact (head-on: root X ≈ 66.97, about 1 mm from the sphere). There is no pre-brake or impact feedback.
 - **Grazing contacts stop the ship:** any motion into the obstacle's surface counts, however shallow. Within the impact tick the engine may slide the ship by at most one tick of motion (≈ 0.13 m at 8 m/s; 0 head-on) before the stop.
 - **Pure sideways order from contact stays blocked:** when the ship rests against an obstacle and is ordered exactly sideways, the hull's yaw swings its corner into the surface, which counts as a grazing contact and stops it again. Orders with any away component (e.g. back to (0, 0, 0)) escape.
-- **Detour clearance is measured, not guaranteed:** the test detour from (0, 0, 0) to (100, 0, 0) keeps the hull 2.39 m from the sphere at its closest. Other obstacle shapes, approach angles, speeds or hull sizes are not validated, and there is no universal collision-safe radius. Raising `agent_radius` above about 11 m makes the test ring unreachable (fallback).
-- **Detour progress snaps at short legs:** the navigation path rounds the sphere with short legs (about 3 m), and the follower's progress projection can jump about 1.9 m in one tick there. Travel direction, yaw and roll stay rate-limited.
+- **Detour clearance is measured, not guaranteed:** the test detour from (0, 0, 0) to (100, 0, 0) keeps the hull 6.77 m from the sphere at its closest, and the return journey from rest at (100, 0, 0) to (0, 0, 0) keeps 6.04 m (it previously hard-stopped). Other obstacle shapes, approach angles, speeds or hull sizes are not validated, and there is no universal collision-safe radius. Raising `agent_radius` above about 11 m makes the test ring unreachable (fallback).
+- **Detour guidance pins and jumps at corners (trial result, under review):** with bounded directional thrust the ship runs about 1–1.8 m outside the detour. Once it is more than `detour_corner_tolerance` from the route, no chord past the next detour point fits, so guidance pins to that point and jumps forward when the ship passes it. On the return journey this jumped 14.9 m and 18.7 m in one tick, and the near-goal cap dipped the speed to 3.3–4.4 m/s; the forward detour dips to 4.7 m/s. The ship never stops, and travel direction, yaw and roll stay rate-limited.
 - **Pending order is invisible:** while a click waits for navigation (≈ 70–83 ms after start), `has_destination()` and the other getters still show the previous state.
 - **Single region:** readiness waits for every region on the map to sync and is ready once any region with data is merged; partial readiness across several regions is not handled.
 - **Static navigation data:** one finite author-time surface; moving or editing obstacles needs a rebake. No live replanning.
