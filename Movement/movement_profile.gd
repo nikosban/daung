@@ -10,6 +10,13 @@ extends Resource
 ## Directional (sideways) thrust: how strongly a moving ship can turn its travel direction (not its
 ## hull). The travel turn rate is this divided by speed, so slower ships turn tighter.
 @export_range(0.1, 20.0, 0.1, "suffix:m/s²") var lateral_acceleration: float = 1.7
+## Stronger directional thrust for steering at low speed (provisional). It applies in full at rest and
+## fades smoothly (smoothstep) to lateral_acceleration at precision_fade_speed. Steering only; the
+## near-goal and route-bend speed limits keep lateral_acceleration. At or below lateral_acceleration it
+## has no effect.
+@export_range(1.7, 12.0, 0.1, "suffix:m/s²") var precision_lateral_acceleration: float = 4.0
+## Speed at and above which steering uses lateral_acceleration alone (provisional).
+@export_range(1.0, 8.0, 0.1, "suffix:m/s") var precision_fade_speed: float = 4.0
 ## Orders at least this far from the current travel direction brake to rest before starting.
 @export_range(90.0, 180.0, 0.1, "suffix:°") var near_opposite_angle: float = 150.0
 ## How far ahead along a multi-point route the ship aims, so it anticipates bends.
