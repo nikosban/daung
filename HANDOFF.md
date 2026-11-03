@@ -2,7 +2,7 @@
 
 ## Current state
 
-Daung has open-space ship movement with moving turns, near-opposite reversals, model-only banking and player-defined routes (Tasks #3, #5, #7 and #9). Running the project opens `Main/main.tscn`: a fixed camera, one frigate at the origin facing −Z, and 2 m ring markers at (100, 0, 0), at the start location (0, 0, 0) and at the route test points (60, 0, 0), (60, 0, −40) and (20, 0, −40). Right-clicking the Y = 0 plane orders the ship there; Shift + right-click appends a waypoint.
+Daung has open-space ship movement with moving turns, near-opposite reversals, model-only banking, player-defined routes and a hard stop on static obstacles (Tasks #3, #5, #7, #9 and #11). Running the project opens `Main/main.tscn`: a fixed camera, one frigate at the origin facing −Z, 2 m ring markers at (100, 0, 0), at the start location (0, 0, 0) and at the route test points (60, 0, 0), (60, 0, −40) and (20, 0, −40), and a grey 6 m radius test sphere at (83, 0, 0) that blocks the straight path to (100, 0, 0). Right-clicking the Y = 0 plane orders the ship there; Shift + right-click appends a waypoint.
 
 - `Movement/`: the `MovementProfile` Resource (eight provisional tunables), the shared `frigate_movement_profile.tres`, and `ShipMovement` (`CharacterBody3D`), the single writer of planar position, velocity and yaw, with `move_to()`, `append_waypoint()` and `stop()`.
 - **Each new order (`move_to`) is classified once, from the actual travel velocity:**
@@ -16,7 +16,8 @@ Daung has open-space ship movement with moving turns, near-opposite reversals, m
   - When guidance crosses a bend, the turn deflection is reset from the actual travel direction to the new leg, so banking follows the current bend.
   - `stop()` clears the whole route.
 - Entering the 2 m tolerance of the final point completes an order. The ship brakes to rest along its travel and may coast past without turning back. A click inside 2 m is an arrival, never a reversal.
-- `get_destination()` returns the final point; `get_guidance_target()` returns the point currently steered at. Both are always defined, including at startup and after `stop()` or arrival.
+- **Static obstacles (B: stop when blocked):** moving into a `StaticBody3D` (not an `AnimatableBody3D`) ends the whole order, pending points included, with an immediate stop at the contact. The ship does not slide, retry or steer around it; the player orders it elsewhere. A ship resting against an obstacle can be ordered away from it. Other body types keep the engine's default sliding; their behavior is undecided. Automatic routing around obstacles (A) comes later.
+- `get_destination()` returns the final point; `get_guidance_target()` returns the point currently steered at. Both are always defined, including at startup and after `stop()`, arrival or a blocked stop.
 - `Ships/ship.tscn`: the reusable ship. It has the movement root, a provisional box collision shape with no collision rules, and the protected GLB as a `Visual` child at identity.
 - **Banking:** `Visual` runs `ShipVisualBank`, which reads Movement's `get_turn_deflection()` and its course error to `get_guidance_target()`, and rolls only the visual wrapper.
   - A turn under 70° heels outward 4°; 70° or more banks inward 9°.
@@ -24,6 +25,7 @@ Daung has open-space ship movement with moving turns, near-opposite reversals, m
   - The roll changes at up to 7 °/s and returns to level when the course is within 3°, on stop or arrival, during reversal braking, and on starts from rest.
   - Values live in `Ships/Profiles/frigate_bank_profile.tres`.
 - `Main/right_click_move_input.gd`: temporary scene input glue.
+- `Main/main.tscn` `TestObstacle`: a temporary `StaticBody3D` collision test fixture (sphere shape and plain grey mesh, radius 6 m), not asteroid art.
 - `project.godot` sets the main scene, opens the window maximized with `canvas_items`/`expand` stretch, and enables physics interpolation.
 
 The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidecar are unchanged. Do not edit, relocate, rename, rescale or repivot them.
@@ -39,6 +41,7 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 - Model-only presentation heels outward in broad maneuvers and banks inward in sharper ones. Visual tilt never affects the authoritative root or collision.
 - Ship differences use shared reusable definitions and Resource configuration, with per-instance runtime state. Work happens in the one developing game scene.
 - Right-click to move, with the ship already controlled (no selection). No stop key. The fixed camera looks 45° down.
+- Obstacles: B (stop when blocked) first, automatic route planning around obstacles (A) later. The immediate hard stop on contact, including grazing contacts, and the grey 6 m test sphere at (83, 0, 0) are provisional.
 - Provisional movement defaults:
   - 8 m/s max speed;
   - 6 m/s² acceleration and 10 m/s² braking;
@@ -57,9 +60,12 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 - **Route bends slow the ship:** at the current tunings a 90° bend drops the speed to about 3.4 m/s (measured on the test route) before it recovers. The second bend of the test route is rounded about 2 m outside the corner.
 - **Cut corners:** progress can jump forward when the ship's nearest route point moves onto the next leg (about 11 m at the first test corner). Travel direction, yaw and roll stay rate-limited.
 - **Bends right after a start from rest:** if the first leg is shorter than the lookahead, guidance can cross its bend while the ship is still at rest, so that bend keeps a 0 deflection and does not bank.
+- **Abrupt stop:** a blocked ship goes from up to 8 m/s to 0 in one physics tick at the contact (head-on: root X ≈ 66.97, about 1 mm from the sphere). There is no pre-brake or impact feedback.
+- **Grazing contacts stop the ship:** any motion into the obstacle's surface counts, however shallow. Within the impact tick the engine may slide the ship by at most one tick of motion (≈ 0.13 m at 8 m/s; 0 head-on) before the stop.
+- **Pure sideways order from contact stays blocked:** when the ship rests against an obstacle and is ordered exactly sideways, the hull's yaw swings its corner into the surface, which counts as a grazing contact and stops it again. Orders with any away component (e.g. back to (0, 0, 0)) escape.
 - **Bank visibility:** at the fixed camera distance and current lighting, a 4–9° lean is subtle. Its readability is the owner's playtest call.
-- **Deferred QA:** hairpin, U-turn and dense zigzag routes, rapid route editing during braking, complex chained retargets (including rapid retargets while banked), extreme movement or visual tunings, other hull proportions and multi-ship scale are not validated. There is no obstacle routing, obstacles, collision response, route display, pitch, selection or UI.
+- **Deferred QA:** hairpin, U-turn and dense zigzag routes, rapid route editing during braking, complex chained retargets (including rapid retargets while banked), extreme movement or visual tunings, other hull proportions and multi-ship scale are not validated. Grazing-contact feel, dense obstacle fields, high-speed tunneling at extreme tunings, moving/dynamic obstacles and ship–ship contact are not validated. There is no obstacle routing, avoidance, route display, pitch, selection or UI.
 
 ## Remaining work
 
-Final banking values and the route lookahead feel await owner playtest. Obstacle/collision/avoidance behavior remains undecided. There is no measured performance target.
+Final banking values, the route lookahead feel and the hard-stop feel await owner playtest. Automatic obstacle route planning (A), route-failure notifications, impact feedback, collisions with other body types and obstacle appearance remain undecided. There is no measured performance target.

@@ -137,7 +137,20 @@ func _physics_process(delta: float) -> void:
 		var target_yaw := atan2(-offset.x, -offset.z)
 		rotation.y = rotate_toward(rotation.y, target_yaw, deg_to_rad(profile.turn_rate) * delta)
 
+	var commanded := velocity
 	move_and_slide()
+
+	# Blocked: moving into a static obstacle ends the whole order with a hard stop. A resting contact
+	# does not block an order away from it. Other bodies, including moving AnimatableBody3D, keep the
+	# engine's default sliding; their collision behavior is undecided.
+	if _has_destination:
+		for i in get_slide_collision_count():
+			var collision := get_slide_collision(i)
+			var collider := collision.get_collider()
+			if collider is StaticBody3D and not collider is AnimatableBody3D and commanded.dot(collision.get_normal()) < 0.0:
+				_end_route()
+				velocity = Vector3.ZERO
+				break
 
 
 ## Multi-point routes: advances progress and places the guidance point route_lookahead_distance
