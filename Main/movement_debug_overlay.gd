@@ -1,6 +1,6 @@
 extends CanvasLayer
 ## Temporary F3 movement readout of one ship: speed, velocity, heading, turning (course heading, rate and its limit,
-## applied angular acceleration, rudder multiplier, shared-capacity scale), main-engine and thruster
+## applied angular acceleration, rudder multiplier, shared-capacity scale), desired speed, planned braking, main-engine and thruster
 ## commands, destination and order state. Reads Movement only; Movement never calls it. Hidden until F3.
 
 @export var ship: ShipMovement
@@ -32,6 +32,7 @@ func _process(_delta: float) -> void:
 		velocity.length(), velocity.x, velocity.z,
 		ship.get_heading(), ship.get_target_heading(),
 		ship.get_turn_rate(), ship.get_turn_rate_limit(), ship.get_turn_acceleration(), ship.get_rudder_multiplier(), ship.get_shared_scale(),
+		ship.get_desired_speed(), ship.get_planned_braking(),
 		ship.get_main_command(),
 		thruster.length(), thruster.x, thruster.z,
 		destination.x, destination.z,

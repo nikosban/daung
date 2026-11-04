@@ -7,7 +7,8 @@ extends CharacterBody3D
 ## Each physics tick the pilot computes a desired velocity toward the destination that falls with the
 ## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
 ## velocity within pilot_response_time. The main engine supplies the useful part along the bow; the
-## directional thrusters supply the rest. The pilot also steers the hull toward the order's course heading
+## directional thrusters supply the rest. Turning demand is computed first, so the approach speed is planned
+## with the braking that sharing will leave. The pilot also steers the hull toward the order's course heading
 ## (set once by move_to(), toward the destination) with bounded angular acceleration whose authority grows
 ## with actual speed (zero at rest), and a turn-rate limit that also follows speed (zero at rest). Planar
 ## and turning demand share the directional thrusters' capacity proportionally. Only applied acceleration
@@ -22,6 +23,10 @@ var _course_yaw := 0.0
 var _has_course := false
 ## Turn rate in rad/s (per ship); zero whenever powered turning is not requested.
 var _turn_rate := 0.0
+## Previous tick's planar demand fraction on the directional thrusters (0–1). It measures last tick's actual
+## thruster demand, so it carries over order replacement and stop(); it starts at 0 (no demand before the
+## first tick). Used only to plan the yaw braking authority.
+var _planar_fraction_prev := 0.0
 ## Last tick's values (read-only debug getters).
 var _main_command := 0.0
 var _thruster_command := Vector3.ZERO
@@ -30,6 +35,8 @@ var _turn_acceleration := 0.0
 var _rudder_multiplier := 0.0
 var _turn_rate_limit := 0.0
 var _shared_scale := 1.0
+var _desired_speed := 0.0
+var _planned_braking := 0.0
 
 
 func _ready() -> void:
@@ -97,6 +104,16 @@ func get_shared_scale() -> float:
 	return _shared_scale
 
 
+## Last desired approach speed in m/s.
+func get_desired_speed() -> float:
+	return _desired_speed
+
+
+## Last planar braking acceleration the pilot planned its approach with, a_t / (1 + turn fraction), in m/s².
+func get_planned_braking() -> float:
+	return _planned_braking
+
+
 ## Last main-engine acceleration along the bow, 0 to main_acceleration, in m/s².
 func get_main_command() -> float:
 	return _main_command
@@ -118,10 +135,36 @@ func _physics_process(delta: float) -> void:
 	if _has_order and distance <= profile.arrival_tolerance and speed <= profile.arrival_speed_tolerance:
 		_has_order = false
 
-	# Desired velocity: toward the destination at the speed the thrusters can still stop from, capped.
+	# Turning demand: bounded angular acceleration toward the order's course heading, as a fraction of the
+	# rated authority at the actual speed. The turn-rate limit follows the same rudder curve, normalized
+	# to its full-speed value, so it is zero at rest.
+	_rudder_multiplier = profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
+	var turn_limit := deg_to_rad(profile.turn_authority / profile.mass) * _rudder_multiplier
+	_turn_rate_limit = deg_to_rad(profile.max_turn_rate_at_max_speed) * _rudder_multiplier / profile.rudder_curve.sample(1.0)
+	_target_yaw = _course_yaw
+	var turn_request := 0.0
+	var turn_fraction := 0.0
+	if _has_order and _has_course and turn_limit > 0.0:
+		var error := wrapf(_target_yaw - rotation.y, -PI, PI)
+		# Braking-distance rule: the fastest rate that can still stop at the target, within the turn-rate
+		# limit. It plans with the share the turn would get if planar demand stays at last tick's level
+		# (proportional sharing). The |error| / delta term only keeps the wanted rate from stepping past
+		# the target in one tick.
+		var planned_turn_limit := turn_limit / (1.0 + _planar_fraction_prev)
+		var wanted_rate := signf(error) * minf(minf(sqrt(2.0 * planned_turn_limit * absf(error)), absf(error) / delta), _turn_rate_limit)
+		turn_request = (wanted_rate - _turn_rate) / delta
+		turn_fraction = minf(absf(turn_request) / turn_limit, 1.0)
+	else:
+		_turn_rate = 0.0
+
+	# Desired velocity: toward the destination at the speed the thrusters can still stop from, capped. The
+	# braking it plans with is what proportional sharing leaves a saturated planar demand beside this
+	# tick's turning demand: a_t / (1 + turn fraction).
+	_planned_braking = thruster_limit / (1.0 + turn_fraction)
 	var desired := Vector3.ZERO
 	if _has_order and distance > 0.0:
-		desired = to_destination / distance * minf(profile.max_speed, sqrt(2.0 * thruster_limit * distance))
+		desired = to_destination / distance * minf(profile.max_speed, sqrt(2.0 * _planned_braking * distance))
+	_desired_speed = desired.length()
 
 	var requested := (desired - planar_velocity) / profile.pilot_response_time
 	var bow := -global_basis.z
@@ -137,26 +180,6 @@ func _physics_process(delta: float) -> void:
 	var thruster_request := requested - bow * _main_command
 	var planar_fraction := minf(thruster_request.length() / thruster_limit, 1.0)
 
-	# Turning demand: bounded angular acceleration toward the order's course heading, as a fraction of the
-	# rated authority at the actual speed. The turn-rate limit follows the same rudder curve, normalized
-	# to its full-speed value, so it is zero at rest.
-	_rudder_multiplier = profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
-	var turn_limit := deg_to_rad(profile.turn_authority / profile.mass) * _rudder_multiplier
-	_turn_rate_limit = deg_to_rad(profile.max_turn_rate_at_max_speed) * _rudder_multiplier / profile.rudder_curve.sample(1.0)
-	_target_yaw = _course_yaw
-	var turn_request := 0.0
-	var turn_fraction := 0.0
-	if _has_order and _has_course and turn_limit > 0.0:
-		var error := wrapf(_target_yaw - rotation.y, -PI, PI)
-		# Braking-distance rule: the fastest rate that can still stop at the target with this authority,
-		# within the turn-rate limit. The |error| / delta term only keeps the wanted rate from stepping
-		# past the target in one tick.
-		var wanted_rate := signf(error) * minf(minf(sqrt(2.0 * turn_limit * absf(error)), absf(error) / delta), _turn_rate_limit)
-		turn_request = (wanted_rate - _turn_rate) / delta
-		turn_fraction = minf(absf(turn_request) / turn_limit, 1.0)
-	else:
-		_turn_rate = 0.0
-
 	# One shared capacity: when the two fractions exceed it, both are scaled down proportionally.
 	_shared_scale = 1.0
 	if planar_fraction + turn_fraction > 1.0:
@@ -166,6 +189,7 @@ func _physics_process(delta: float) -> void:
 
 	# The limit can contract faster than the authority can slow the turn; the rate is then clamped to it.
 	_turn_rate = clampf(_turn_rate + _turn_acceleration * delta, -_turn_rate_limit, _turn_rate_limit)
+	_planar_fraction_prev = planar_fraction
 	planar_velocity += (bow * _main_command + _thruster_command) * delta
 	velocity = planar_velocity.limit_length(profile.max_speed)
 	rotation.y += _turn_rate * delta
