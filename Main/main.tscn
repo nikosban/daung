@@ -1,11 +1,11 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene format=3 uid="uid://c4o17ea3lltlq"]
 
 [ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="1_ship"]
-[ext_resource type="Script" path="res://Main/right_click_move_input.gd" id="2_input"]
+[ext_resource type="Script" uid="uid://hdxxfgxlaidt" path="res://Main/right_click_move_input.gd" id="2_input"]
 [ext_resource type="NavigationMesh" path="res://Main/navigation_mesh.tres" id="3_navmesh"]
-[ext_resource type="Script" path="res://Main/camera_pan_zoom.gd" id="4_camera"]
-[ext_resource type="Script" path="res://Main/movement_debug_overlay.gd" id="5_overlay"]
-[ext_resource type="Script" path="res://Main/movement_trail.gd" id="6_trail"]
+[ext_resource type="Script" uid="uid://k6oxd20ems7v" path="res://Main/camera_pan_zoom.gd" id="4_camera"]
+[ext_resource type="Script" uid="uid://2frr3jy3edpm" path="res://Main/movement_debug_overlay.gd" id="5_overlay"]
+[ext_resource type="Script" uid="uid://bw82flnn8gbww" path="res://Main/movement_trail.gd" id="6_trail"]
 [ext_resource type="Resource" path="res://Main/movement_trail_settings.tres" id="7_trail_settings"]
 
 [sub_resource type="Environment" id="Environment_main"]
@@ -36,78 +36,78 @@ albedo_color = Color(0.5, 0.5, 0.5, 1)
 [sub_resource type="BoxShape3D" id="BoxShape3D_navigation_floor"]
 size = Vector3(800, 1, 800)
 
-[node name="Main" type="Node3D"]
+[node name="Main" type="Node3D" unique_id=2048189383]
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=808636791]
 environment = SubResource("Environment_main")
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1158902442]
 transform = Transform3D(0.866025, 0.25, -0.433013, 0, 0.866025, 0.5, 0.5, -0.433013, 0.75, 0, 50, 0)
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="Camera3D" type="Camera3D" parent="." unique_id=15245028]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 50, 55, 60)
 far = 1000.0
 script = ExtResource("4_camera")
 
-[node name="Ship" parent="." instance=ExtResource("1_ship")]
+[node name="Ship" parent="." unique_id=2125529357 instance=ExtResource("1_ship")]
 collision_mask = 0
 
-[node name="TestDestinationMarker" type="MeshInstance3D" parent="."]
+[node name="TestDestinationMarker" type="MeshInstance3D" parent="." unique_id=22172087]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100, 0, 0)
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
-[node name="StartLocationMarker" type="MeshInstance3D" parent="."]
+[node name="StartLocationMarker" type="MeshInstance3D" parent="." unique_id=1978266779]
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
-[node name="RouteTestMarker1" type="MeshInstance3D" parent="."]
+[node name="RouteTestMarker1" type="MeshInstance3D" parent="." unique_id=1901905064]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, 0)
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
-[node name="RouteTestMarker2" type="MeshInstance3D" parent="."]
+[node name="RouteTestMarker2" type="MeshInstance3D" parent="." unique_id=1584326393]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, -40)
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
-[node name="RouteTestMarker3" type="MeshInstance3D" parent="."]
+[node name="RouteTestMarker3" type="MeshInstance3D" parent="." unique_id=1642017513]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -40)
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
-[node name="TestObstacle" type="StaticBody3D" parent="." groups=["navigation_source"]]
+[node name="TestObstacle" type="StaticBody3D" parent="." unique_id=222604826 groups=["navigation_source"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 83, 0, 0)
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="TestObstacle"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TestObstacle" unique_id=1429772171]
 shape = SubResource("SphereShape3D_obstacle")
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="TestObstacle"]
+[node name="MeshInstance3D" type="MeshInstance3D" parent="TestObstacle" unique_id=1650572131]
 mesh = SubResource("SphereMesh_obstacle")
 surface_material_override/0 = SubResource("StandardMaterial3D_obstacle")
 
-[node name="NavigationFloor" type="StaticBody3D" parent="." groups=["navigation_source"]]
+[node name="NavigationFloor" type="StaticBody3D" parent="." unique_id=1048801733 groups=["navigation_source"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -0.5, 0)
 collision_layer = 2
 collision_mask = 0
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationFloor"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="NavigationFloor" unique_id=763552043]
 shape = SubResource("BoxShape3D_navigation_floor")
 
-[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=1193409923]
 navigation_mesh = ExtResource("3_navmesh")
 
-[node name="RightClickMoveInput" type="Node" parent="." node_paths=PackedStringArray("camera", "ship")]
+[node name="RightClickMoveInput" type="Node" parent="." unique_id=2024739329 node_paths=PackedStringArray("camera", "ship")]
 script = ExtResource("2_input")
 camera = NodePath("../Camera3D")
 ship = NodePath("../Ship")
 
-[node name="MovementTrail" type="MeshInstance3D" parent="." node_paths=PackedStringArray("ship")]
+[node name="MovementTrail" type="MeshInstance3D" parent="." unique_id=1703737801 node_paths=PackedStringArray("ship")]
 script = ExtResource("6_trail")
 ship = NodePath("../Ship")
 settings = ExtResource("7_trail_settings")
 
-[node name="MovementDebugOverlay" type="CanvasLayer" parent="." node_paths=PackedStringArray("ship", "trail")]
+[node name="MovementDebugOverlay" type="CanvasLayer" parent="." unique_id=1163721375 node_paths=PackedStringArray("ship", "trail")]
 script = ExtResource("5_overlay")
 ship = NodePath("../Ship")
 trail = NodePath("../MovementTrail")
