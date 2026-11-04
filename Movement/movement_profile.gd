@@ -26,3 +26,9 @@ extends Resource
 ## Rudder multiplier (output, 0–2) against actual planar speed as a fraction of max_speed (input, 0–1).
 ## Zero at rest means no turning in place.
 @export var rudder_curve: Curve
+## Equipment: does this hull have thrusters pointing forward, so it can brake along its own axis? If not, the
+## directional thrusters' acceleration toward the stern is limited (see no_retro_braking_effectiveness).
+@export var retro_thrusters: bool = true
+## Without retro thrusters: the largest sternward thruster acceleration, as a fraction of
+## thruster_strength / mass. Lateral and bow-forward thrust are not limited by it.
+@export_range(0.1, 1.0, 0.01) var no_retro_braking_effectiveness: float = 0.45
