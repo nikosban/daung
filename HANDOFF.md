@@ -87,11 +87,11 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 
 ## Known limitations
 
-Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn` (Tasks #28 and #29). The movement numbers below are from the click with no reaction delay; with the 0.3 s default every order starts 0.3 s later (forward 100 m arrives 9.13 s after the click). With `reaction_delay = 0` the Task #30 traces reproduce them exactly (forward 100 m 8.85 s, sideways 10 m 2.75 s, sideways 100 m 9.75 s).
+Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn` (Tasks #28 and #29). The movement numbers below are from the click with no reaction delay; with the 0.3 s default every order starts 0.3 s later (forward 100 m arrives 9.13 s after the click). With `reaction_delay = 0` the Task #30 traces reproduce them exactly (forward 100 m 8.85 s, sideways 10 m 2.75 s, sideways 100 m 9.75 s). With retro thrusters on, all seven Task #29 traces are identical to `main` before Task #29. Task #28's numbers are in PR #32; Task #27's fixed-heading numbers are in PR #31. Owner F5 playtest after Task #28: "Playtested, none of the issues are there." Task #30's traces are in PR #35. Owner F5 playtest of PR #35 (3.0 s two-click check): "Done, again after playtest it behaces as intended."
 
 - **Reaction-delay decisive check (Task #30, 3.0 s, headless):** A to (100, 0, 0) received at 0.000 s activates at 3.017 s; B to (0, 0, −100) received at 1.000 s activates at 4.017 s. A is active for 1.0 s in between (ship 3.15 m toward A, 6.1 m/s), then B takes over and arrives at 13.00 s. Before 3.017 s the ship stays at rest with two pending.
 - **Reaction-delay edge cases (headless):** stop then move received at 8.0 / 8.5 s while cruising at 15 m/s activate at 11.0 / 11.5 s; the stop brakes from 14.8 m/s (no speed reset). Move then stop: both act, 0.5 s apart. Two moves on the same tick both activate on one tick in order (the second decides). Delay 0: activation on the next tick. An order that arrives while the next command waits ends normally (4.97 s), and the waiting command activates on time (7.02 s).
-- **Tick quantization:** activation lands 0 or 1 physics tick (≤ 16.7 ms) after the due time, depending on float summation of the clock (3.017 s or 3.000 s for 3.0 s). Not smoothed. With retro thrusters on, all seven Task #29 traces are identical to `main` before Task #29. Task #28's numbers are in PR #32; Task #27's fixed-heading numbers are in PR #31. Owner F5 playtest after Task #28: "Playtested, none of the issues are there."
+- **Tick quantization:** activation lands 0 or 1 physics tick (≤ 16.7 ms) after the due time, depending on float summation of the clock (3.017 s or 3.000 s for 3.0 s). Not smoothed.
 
 - **Retro decisive check (F4 at ≥ 14.5 m/s, moving forward):** with retro 9.01 m to rest (8.90 m to 0.5 m/s, 1.40 s); without retro 19.55 m (19.43 m, 2.68 s), about 2.2×; peak sternward thrust 12 vs 5.40 m/s². Ideal references 8.76 m and 19.47 m from 14.5 m/s.
 - **Without retro, ordinary orders (arrival, overshoot):** forward 100 m: braking starts 20.5 m before the click instead of 9.0 m, 2.94 m overshoot and one return as with retro (2.52 m), arrival 9.97 s instead of 8.85 s. Sideways 100 m 10.87 s, rearward 100 m 11.02 s (weaker stern-first pickup), diagonal 45° 10.28 s, all 2.9 m and one return. 10 m sideways is unchanged (2.75 s), because the hull only reaches −24.8° and the sternward share stays under the cap. Moving 180° retarget from 15 m/s: planned 5.40 m/s² and applied sternward 5.40 m/s² while the forward motion is slowed; arrival 14.87 s instead of 13.53 s, two crossings and the same number of slow-downs as with retro (no added settle–move–settle).
@@ -111,12 +111,12 @@ Values were measured with deterministic 60 Hz headless traces of the shipped pro
 - **No world bounds:** the ship can be ordered anywhere on the Y = 0 plane.
 - **Camera far plane:** 1000 m; at maximum zoom the far part of the area can fall beyond it. Not checked in F5.
 - **No pending-order indicator:** a pending command shows only in F3 and the Output log; nothing on screen marks it.
-- **Not verified:** the F5 run with the on-screen F3 readout (only headless traces were run); the right-click receipt timing in F5; the profile guard for a 0 effectiveness value (range 0.1–1.0 prevents it in the inspector).
+- **Not verified:** the profile guard for a 0 effectiveness value (range 0.1–1.0 prevents it in the inspector).
 - **Deferred QA:** unusual yaw while braking without retro, close overshoot recoveries, future hull profiles, equipment failure or damage, high-speed tight loops, corners, obstacles, routes, negative or inverted tuning, pathological fast retargets, extreme rudder-curve shapes and multi-ship performance.
 
 ## Remaining work
 
-**Next:** review and owner F5 playtest of the Task 17 PR (#30, reaction delay). It completes the four Movement v3 tickets.
+**Next:** none queued. The four Movement v3 tickets (#27–#30) are merged; the next task arrives as a new ticket.
 
 **Open owner decisions:** long-term command feedback and whether crew changes may modify the reaction delay; whether the no-retro stern-first weakening feels right (provisional); keep the speed-linked turn-rate clamp as a game rule or replace it with powered counter-turn braking; later, a weaker-directional-thrust trial.
 
