@@ -17,4 +17,5 @@ pilot_response_time = 0.25
 arrival_tolerance = 2.0
 arrival_speed_tolerance = 0.5
 turn_authority = 120.0
+max_turn_rate_at_max_speed = 60.0
 rudder_curve = SubResource("Curve_rudder")

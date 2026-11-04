@@ -20,6 +20,9 @@ extends Resource
 ## Turning rating in turn-authority units (°/s² × mass): turn_authority / mass is the angular acceleration
 ## at a rudder multiplier of 1. Shared proportionally with planar thrust from the directional thrusters.
 @export_range(1.0, 1000.0, 1.0) var turn_authority: float = 120.0
+## Turn-rate limit at max_speed. At lower speeds it scales with the rudder curve (normalized to its
+## full-speed value), so it is zero at rest.
+@export_range(1.0, 180.0, 1.0, "suffix:°/s") var max_turn_rate_at_max_speed: float = 60.0
 ## Rudder multiplier (output, 0–2) against actual planar speed as a fraction of max_speed (input, 0–1).
 ## Zero at rest means no turning in place.
 @export var rudder_curve: Curve
