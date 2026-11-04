@@ -13,6 +13,12 @@ extends CharacterBody3D
 ## with actual speed (zero at rest), and a turn-rate limit that also follows speed (zero at rest). Planar
 ## and turning demand share the directional thrusters' capacity proportionally. Only applied acceleration
 ## is integrated; yaw never rotates the velocity, and rotation does not persist without powered turning.
+##
+## Retro rule (profile.retro_thrusters false): the directional thrusters' acceleration toward the stern (the
+## component along -bow) never exceeds no_retro_braking_effectiveness x thruster_strength / mass. It is applied
+## after proportional sharing by removing only the excess sternward part (lateral and bow-forward parts are
+## untouched, nothing is scaled up). The pilot plans its approach braking with the same limit, projected onto
+## the direction of the velocity it must slow (the direction to the destination only at a standstill).
 
 @export var profile: MovementProfile
 
@@ -109,7 +115,8 @@ func get_desired_speed() -> float:
 	return _desired_speed
 
 
-## Last planar braking acceleration the pilot planned its approach with, a_t / (1 + turn fraction), in m/s².
+## Last planar braking acceleration the pilot planned its approach with, in m/s²: a_t / (1 + turn fraction),
+## further limited by the retro rule when the hull has no retro thrusters.
 func get_planned_braking() -> float:
 	return _planned_braking
 
@@ -131,6 +138,10 @@ func _physics_process(delta: float) -> void:
 	to_destination.y = 0.0
 	var distance := to_destination.length()
 	var thruster_limit := profile.thruster_strength / profile.mass
+	var sternward_limit := _sternward_limit(thruster_limit)
+	var bow := -global_basis.z
+	bow.y = 0.0
+	bow = bow.normalized()
 
 	if _has_order and distance <= profile.arrival_tolerance and speed <= profile.arrival_speed_tolerance:
 		_has_order = false
@@ -160,16 +171,24 @@ func _physics_process(delta: float) -> void:
 	# Desired velocity: toward the destination at the speed the thrusters can still stop from, capped. The
 	# braking it plans with is what proportional sharing leaves a saturated planar demand beside this
 	# tick's turning demand: a_t / (1 + turn fraction).
+	# Without retro thrusters, stopping the velocity takes acceleration along its reverse, whose sternward share
+	# is (travel direction · bow); the retro rule then allows at most sternward_limit / share. At a standstill
+	# the travel direction is the direction to the destination.
 	_planned_braking = thruster_limit / (1.0 + turn_fraction)
+	var travel := Vector3.ZERO
+	if speed > 0.0:
+		travel = planar_velocity / speed
+	elif distance > 0.0:
+		travel = to_destination / distance
+	var sternward_share := travel.dot(bow)
+	if sternward_share > 0.0:
+		_planned_braking = minf(_planned_braking, sternward_limit / sternward_share)
 	var desired := Vector3.ZERO
 	if _has_order and distance > 0.0:
 		desired = to_destination / distance * minf(profile.max_speed, sqrt(2.0 * _planned_braking * distance))
 	_desired_speed = desired.length()
 
 	var requested := (desired - planar_velocity) / profile.pilot_response_time
-	var bow := -global_basis.z
-	bow.y = 0.0
-	bow = bow.normalized()
 	# The main engine pushes along the bow only, and only when that cannot reduce the current speed
 	# (no stern-first component), so it never brakes. It is outside the shared thruster capacity.
 	_main_command = 0.0
@@ -186,6 +205,10 @@ func _physics_process(delta: float) -> void:
 		_shared_scale = 1.0 / (planar_fraction + turn_fraction)
 	_thruster_command = thruster_request.normalized() * planar_fraction * _shared_scale * thruster_limit
 	_turn_acceleration = signf(turn_request) * turn_fraction * _shared_scale * turn_limit
+	# Retro rule on the applied thrust: remove only the sternward excess; the removed capacity is not reallocated.
+	var sternward := -_thruster_command.dot(bow)
+	if sternward > sternward_limit:
+		_thruster_command += bow * (sternward - sternward_limit)
 
 	# The limit can contract faster than the authority can slow the turn; the rate is then clamped to it.
 	_turn_rate = clampf(_turn_rate + _turn_acceleration * delta, -_turn_rate_limit, _turn_rate_limit)
@@ -200,4 +223,12 @@ func _profile_valid() -> bool:
 	return profile != null and profile.mass > 0.0 and profile.main_acceleration > 0.0 \
 		and profile.thruster_strength > 0.0 and profile.max_speed > 0.0 and profile.pilot_response_time > 0.0 \
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
-		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 		and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0
+		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 \
+		and profile.no_retro_braking_effectiveness > 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0
+
+
+## Largest sternward directional-thruster acceleration (m/s²): unlimited with retro thrusters.
+func _sternward_limit(thruster_limit: float) -> float:
+	if profile.retro_thrusters:
+		return INF
+	return profile.no_retro_braking_effectiveness * thruster_limit
