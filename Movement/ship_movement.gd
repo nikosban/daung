@@ -13,6 +13,7 @@ extends CharacterBody3D
 ## with actual speed (zero at rest), and a turn-rate limit that also follows speed (zero at rest). Planar
 ## and turning demand share the directional thrusters' capacity proportionally. Only applied acceleration
 ## is integrated; yaw never rotates the velocity, and rotation does not persist without powered turning.
+## The desired speed is lowered by the pilot's response lag so braking starts in time (Task #41).
 ##
 ## Retro rule (profile.retro_thrusters false): the directional thrusters' acceleration toward the stern (the
 ## component along -bow) never exceeds no_retro_braking_effectiveness x thruster_strength / mass. It is applied
@@ -214,6 +215,10 @@ func _physics_process(delta: float) -> void:
 	# Without retro thrusters, stopping the velocity takes acceleration along its reverse, whose sternward share
 	# is (travel direction · bow); the retro rule then allows at most sternward_limit / share. At a standstill
 	# the travel direction is the direction to the destination.
+	# The pilot closes the gap to the desired speed through pilot_response_time, so it would trail the ideal
+	# braking curve sqrt(2 a d) by a·response time. Subtracting that lag makes the request exactly the planned
+	# braking while the ship is on the curve, so braking starts in time to stop at the destination (clamped at
+	# zero within a·response time² / 2 of it).
 	_planned_braking = thruster_limit / (1.0 + turn_fraction)
 	var travel := Vector3.ZERO
 	if speed > 0.0:
@@ -225,7 +230,7 @@ func _physics_process(delta: float) -> void:
 		_planned_braking = minf(_planned_braking, sternward_limit / sternward_share)
 	var desired := Vector3.ZERO
 	if _has_order and distance > 0.0:
-		desired = to_destination / distance * minf(profile.max_speed, sqrt(2.0 * _planned_braking * distance))
+		desired = to_destination / distance * clampf(sqrt(2.0 * _planned_braking * distance) - _planned_braking * profile.pilot_response_time, 0.0, profile.max_speed)
 	_desired_speed = desired.length()
 
 	var requested := (desired - planar_velocity) / profile.pilot_response_time
