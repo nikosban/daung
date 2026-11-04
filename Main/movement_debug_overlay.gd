@@ -3,8 +3,10 @@ extends CanvasLayer
 ## applied angular acceleration, rudder multiplier, shared-capacity scale), desired speed, planned braking, main-engine and thruster
 ## commands, active destination and order state, and the reaction-delay queue (physics clock, pending count, next
 ## pending command and its due time, last receipt and activation times). Reads Movement only; Movement never calls it. Hidden until F3.
+## F3 also turns the world-space movement trail on and off with it (a fresh trace each time it turns on).
 
 @export var ship: ShipMovement
+@export var trail: MovementTrail
 
 var _label := Label.new()
 
@@ -21,6 +23,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key != null and key.pressed and not key.echo and key.keycode == KEY_F3:
 		visible = not visible
+		trail.set_active(visible)
 
 
 func _process(_delta: float) -> void:

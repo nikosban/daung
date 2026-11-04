@@ -1,10 +1,12 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="1_ship"]
 [ext_resource type="Script" path="res://Main/right_click_move_input.gd" id="2_input"]
 [ext_resource type="NavigationMesh" path="res://Main/navigation_mesh.tres" id="3_navmesh"]
 [ext_resource type="Script" path="res://Main/camera_pan_zoom.gd" id="4_camera"]
 [ext_resource type="Script" path="res://Main/movement_debug_overlay.gd" id="5_overlay"]
+[ext_resource type="Script" path="res://Main/movement_trail.gd" id="6_trail"]
+[ext_resource type="Resource" path="res://Main/movement_trail_settings.tres" id="7_trail_settings"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -100,6 +102,12 @@ script = ExtResource("2_input")
 camera = NodePath("../Camera3D")
 ship = NodePath("../Ship")
 
-[node name="MovementDebugOverlay" type="CanvasLayer" parent="." node_paths=PackedStringArray("ship")]
+[node name="MovementTrail" type="MeshInstance3D" parent="." node_paths=PackedStringArray("ship")]
+script = ExtResource("6_trail")
+ship = NodePath("../Ship")
+settings = ExtResource("7_trail_settings")
+
+[node name="MovementDebugOverlay" type="CanvasLayer" parent="." node_paths=PackedStringArray("ship", "trail")]
 script = ExtResource("5_overlay")
 ship = NodePath("../Ship")
+trail = NodePath("../MovementTrail")

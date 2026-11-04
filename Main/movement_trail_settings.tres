@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="MovementTrailSettings" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Main/movement_trail_settings.gd" id="1_settings"]
+
+[resource]
+script = ExtResource("1_settings")
+max_trail_points = 4096
+min_sample_distance = 0.1
