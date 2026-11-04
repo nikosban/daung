@@ -28,7 +28,7 @@ func _process(_delta: float) -> void:
 	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
 	var thruster := ship.get_thruster_command()
 	var destination := ship.get_destination()
-	_label.text = "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°  course %7.1f°\nturn rate %7.1f / %5.1f °/s  turn accel %7.1f °/s²  rudder %4.2f×  shared %4.2f\nmain %6.2f m/s²\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)\ndestination (%.1f, %.1f)  %s" % [
+	_label.text = "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°  course %7.1f°\nturn rate %7.1f / %5.1f °/s  turn accel %7.1f °/s²  rudder %4.2f×  shared %4.2f\ndesired %6.2f m/s  planned braking %5.2f m/s²\nmain %6.2f m/s²\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)\ndestination (%.1f, %.1f)  %s" % [
 		velocity.length(), velocity.x, velocity.z,
 		ship.get_heading(), ship.get_target_heading(),
 		ship.get_turn_rate(), ship.get_turn_rate_limit(), ship.get_turn_acceleration(), ship.get_rudder_multiplier(), ship.get_shared_scale(),
