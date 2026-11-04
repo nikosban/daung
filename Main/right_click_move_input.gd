@@ -2,6 +2,7 @@ extends Node
 ## Temporary scene input for the world XZ plane point under the cursor: right-click orders the ship there.
 ## Shift + right-click does nothing until routes are rebuilt.
 ## F4 calls stop(): a temporary test-only diagnostic for the Task #29 stopping comparison, not a game control.
+## Both are received by Movement and act after the profile's reaction delay (Task #30).
 
 @export var camera: Camera3D
 @export var ship: ShipMovement

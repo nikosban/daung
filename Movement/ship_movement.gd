@@ -19,9 +19,20 @@ extends CharacterBody3D
 ## after proportional sharing by removing only the excess sternward part (lateral and bow-forward parts are
 ## untouched, nothing is scaled up). The pilot plans its approach braking with the same limit, projected onto
 ## the direction of the velocity it must slow (the direction to the destination only at a standstill).
+##
+## Reaction delay: move_to() and stop() only receive a command. Each waits its own profile.reaction_delay on
+## the physics clock in one FIFO queue and is then activated at the start of a physics tick, in receipt order;
+## nothing is cancelled or skipped. Until then the active order stands.
 
 @export var profile: MovementProfile
 
+## Physics clock in seconds: the sum of physics ticks so far.
+var _clock := 0.0
+## Received commands waiting for activation, in receipt order: {kind: "move" | "stop", position, received, due}.
+var _pending: Array[Dictionary] = []
+## Physics clock of the last receipt and the last activation (-1 = none yet).
+var _last_received := -1.0
+var _last_activated := -1.0
 var _destination := Vector3.ZERO
 var _has_order := false
 ## Course heading of the current order (yaw in radians), set by move_to(); no course for a zero-length order.
@@ -47,32 +58,57 @@ var _planned_braking := 0.0
 
 func _ready() -> void:
 	if not _profile_valid():
-		push_error("ShipMovement needs a MovementProfile with every value above 0 and a rudder curve above 0 at full speed; the ship will not move.")
+		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0) and a rudder curve above 0 at full speed; the ship will not move.")
 		set_physics_process(false)
 
 
-## Orders the ship to the point, replacing any earlier order. Y is ignored. The current velocity carries over.
+## Receives an order to the point. After the reaction delay it replaces the active order; the course is
+## taken from the ship's position then. Y is ignored. The current velocity carries over.
 func move_to(world_position: Vector3) -> void:
-	_destination = Vector3(world_position.x, global_position.y, world_position.z)
-	_has_order = true
-	var course := _destination - global_position
-	course.y = 0.0
-	_has_course = course != Vector3.ZERO
-	if _has_course:
-		_course_yaw = atan2(-course.x, -course.z)
+	_receive("move", world_position)
 
 
-## Ends the order. The ship brakes toward zero velocity with its thrusters; it does not hold position.
+## Receives a stop. After the reaction delay it ends the active order; the ship then brakes toward zero
+## velocity with its thrusters and does not hold position.
 func stop() -> void:
-	_has_order = false
+	_receive("stop", Vector3.ZERO)
 
 
+## Whether an order is active (activated and not yet arrived or stopped). Pending commands do not count.
 func has_order() -> bool:
 	return _has_order
 
 
+## Destination of the active order (or of the last one).
 func get_destination() -> Vector3:
 	return _destination
+
+
+## Physics clock in seconds.
+func get_clock() -> float:
+	return _clock
+
+
+## Number of received commands waiting for activation.
+func get_pending_count() -> int:
+	return _pending.size()
+
+
+## The next command to activate ({kind, position, received, due}), or an empty Dictionary if none is pending.
+func get_next_pending() -> Dictionary:
+	if _pending.is_empty():
+		return {}
+	return _pending[0].duplicate()
+
+
+## Physics clock of the last received command, or -1 if none.
+func get_last_received_time() -> float:
+	return _last_received
+
+
+## Physics clock of the last activated command, or -1 if none.
+func get_last_activated_time() -> float:
+	return _last_activated
 
 
 ## Heading in degrees of yaw (0 = bow toward −Z, positive = counter-clockwise seen from above).
@@ -132,6 +168,10 @@ func get_thruster_command() -> Vector3:
 
 
 func _physics_process(delta: float) -> void:
+	_clock += delta
+	while not _pending.is_empty() and _pending[0].due <= _clock:
+		_activate(_pending.pop_front())
+
 	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
 	var speed := planar_velocity.length()
 	var to_destination := _destination - global_position
@@ -219,12 +259,42 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 
 
+func _receive(kind: String, world_position: Vector3) -> void:
+	var delay := profile.reaction_delay if profile != null else 0.0
+	var command := {kind = kind, position = world_position, received = _clock, due = _clock + delay}
+	_pending.push_back(command)
+	_last_received = _clock
+	print("Movement: received %s at %.3f s, due %.3f s" % [_describe(command), command.received, command.due])
+
+
+func _activate(command: Dictionary) -> void:
+	if command.kind == "move":
+		var world_position: Vector3 = command.position
+		_destination = Vector3(world_position.x, global_position.y, world_position.z)
+		_has_order = true
+		var course := _destination - global_position
+		course.y = 0.0
+		_has_course = course != Vector3.ZERO
+		if _has_course:
+			_course_yaw = atan2(-course.x, -course.z)
+	else:
+		_has_order = false
+	_last_activated = _clock
+	print("Movement: activated %s at %.3f s (%.3f s after receipt)" % [_describe(command), _clock, _clock - command.received])
+
+
+func _describe(command: Dictionary) -> String:
+	if command.kind == "move":
+		return "move (%.1f, %.1f)" % [command.position.x, command.position.z]
+	return "stop"
+
+
 func _profile_valid() -> bool:
 	return profile != null and profile.mass > 0.0 and profile.main_acceleration > 0.0 \
 		and profile.thruster_strength > 0.0 and profile.max_speed > 0.0 and profile.pilot_response_time > 0.0 \
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
 		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 \
-		and profile.no_retro_braking_effectiveness > 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0
+		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0
 
 
 ## Largest sternward directional-thruster acceleration (m/s²): unlimited with retro thrusters.

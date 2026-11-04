@@ -21,3 +21,4 @@ max_turn_rate_at_max_speed = 60.0
 rudder_curve = SubResource("Curve_rudder")
 retro_thrusters = true
 no_retro_braking_effectiveness = 0.45
+reaction_delay = 0.3

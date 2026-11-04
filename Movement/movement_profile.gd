@@ -32,3 +32,6 @@ extends Resource
 ## Without retro thrusters: the largest sternward thruster acceleration, as a fraction of
 ## thruster_strength / mass. Lateral and bow-forward thrust are not limited by it.
 @export_range(0.1, 1.0, 0.01) var no_retro_braking_effectiveness: float = 0.45
+## Crew reaction delay: time between receiving a move or stop command and the pilot acting on it. Every
+## command waits its own delay; the active order stands until then. 0 acts on the next physics tick.
+@export_range(0.0, 5.0, 0.01, "suffix:s") var reaction_delay: float = 0.3
