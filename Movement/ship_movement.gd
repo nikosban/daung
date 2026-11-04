@@ -7,21 +7,29 @@ extends CharacterBody3D
 ## Each physics tick the pilot computes a desired velocity toward the destination that falls with the
 ## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
 ## velocity within pilot_response_time. The main engine supplies the useful part along the bow; the
-## directional thrusters supply the rest from one vector budget. Only applied acceleration is integrated.
-## The heading is held fixed in this slice (yaw is never written).
+## directional thrusters supply the rest. The pilot also steers the hull toward the desired velocity with
+## bounded angular acceleration whose authority grows with actual speed (zero at rest). Planar and turning
+## demand share the directional thrusters' capacity proportionally. Only applied acceleration is
+## integrated; yaw never rotates the velocity, and rotation does not persist without powered turning.
 
 @export var profile: MovementProfile
 
 var _destination := Vector3.ZERO
 var _has_order := false
-## Last tick's commands, in m/s² (read-only debug getters).
+## Turn rate in rad/s (per ship); zero whenever powered turning is not requested.
+var _turn_rate := 0.0
+## Last tick's values (read-only debug getters).
 var _main_command := 0.0
 var _thruster_command := Vector3.ZERO
+var _target_yaw := 0.0
+var _turn_acceleration := 0.0
+var _rudder_multiplier := 0.0
+var _shared_scale := 1.0
 
 
 func _ready() -> void:
 	if not _profile_valid():
-		push_error("ShipMovement needs a MovementProfile with every value above 0; the ship will not move.")
+		push_error("ShipMovement needs a MovementProfile with every value above 0 and a rudder curve; the ship will not move.")
 		set_physics_process(false)
 
 
@@ -49,6 +57,31 @@ func get_heading() -> float:
 	return rad_to_deg(rotation.y)
 
 
+## Last steering target heading in degrees (same convention as get_heading()).
+func get_target_heading() -> float:
+	return rad_to_deg(_target_yaw)
+
+
+## Current turn rate in °/s (positive = counter-clockwise).
+func get_turn_rate() -> float:
+	return rad_to_deg(_turn_rate)
+
+
+## Last applied angular acceleration in °/s², after shared-capacity scaling.
+func get_turn_acceleration() -> float:
+	return rad_to_deg(_turn_acceleration)
+
+
+## Last rudder multiplier sampled from the rudder curve at the actual speed.
+func get_rudder_multiplier() -> float:
+	return _rudder_multiplier
+
+
+## Last shared-capacity scale applied to both thruster and turning demand (1 = not saturated).
+func get_shared_scale() -> float:
+	return _shared_scale
+
+
 ## Last main-engine acceleration along the bow, 0 to main_acceleration, in m/s².
 func get_main_command() -> float:
 	return _main_command
@@ -61,12 +94,13 @@ func get_thruster_command() -> Vector3:
 
 func _physics_process(delta: float) -> void:
 	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
+	var speed := planar_velocity.length()
 	var to_destination := _destination - global_position
 	to_destination.y = 0.0
 	var distance := to_destination.length()
 	var thruster_limit := profile.thruster_strength / profile.mass
 
-	if _has_order and distance <= profile.arrival_tolerance and planar_velocity.length() <= profile.arrival_speed_tolerance:
+	if _has_order and distance <= profile.arrival_tolerance and speed <= profile.arrival_speed_tolerance:
 		_has_order = false
 
 	# Desired velocity: toward the destination at the speed the thrusters can still stop from, capped.
@@ -79,18 +113,48 @@ func _physics_process(delta: float) -> void:
 	bow.y = 0.0
 	bow = bow.normalized()
 	# The main engine pushes along the bow only, and only when that cannot reduce the current speed
-	# (no stern-first component), so it never brakes.
+	# (no stern-first component), so it never brakes. It is outside the shared thruster capacity.
 	_main_command = 0.0
 	if planar_velocity.dot(bow) >= 0.0:
 		_main_command = clampf(requested.dot(bow), 0.0, profile.main_acceleration)
-	_thruster_command = (requested - bow * _main_command).limit_length(thruster_limit)
 
+	# Planar demand on the directional thrusters, as a fraction of their rating.
+	var thruster_request := requested - bow * _main_command
+	var planar_fraction := minf(thruster_request.length() / thruster_limit, 1.0)
+
+	# Turning demand: bounded angular acceleration toward the desired velocity's heading, as a fraction
+	# of the rated authority at the actual speed.
+	_rudder_multiplier = profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
+	var turn_limit := deg_to_rad(profile.turn_authority / profile.mass) * _rudder_multiplier
+	var turn_request := 0.0
+	var turn_fraction := 0.0
+	if _has_order and desired != Vector3.ZERO and turn_limit > 0.0:
+		_target_yaw = atan2(-desired.x, -desired.z)
+		var error := wrapf(_target_yaw - rotation.y, -PI, PI)
+		# Braking-distance rule: the fastest rate that can still stop at the target with this authority.
+		# The |error| / delta term only keeps the wanted rate from stepping past the target in one tick.
+		var wanted_rate := signf(error) * minf(sqrt(2.0 * turn_limit * absf(error)), absf(error) / delta)
+		turn_request = (wanted_rate - _turn_rate) / delta
+		turn_fraction = minf(absf(turn_request) / turn_limit, 1.0)
+	else:
+		_turn_rate = 0.0
+
+	# One shared capacity: when the two fractions exceed it, both are scaled down proportionally.
+	_shared_scale = 1.0
+	if planar_fraction + turn_fraction > 1.0:
+		_shared_scale = 1.0 / (planar_fraction + turn_fraction)
+	_thruster_command = thruster_request.normalized() * planar_fraction * _shared_scale * thruster_limit
+	_turn_acceleration = signf(turn_request) * turn_fraction * _shared_scale * turn_limit
+
+	_turn_rate += _turn_acceleration * delta
 	planar_velocity += (bow * _main_command + _thruster_command) * delta
 	velocity = planar_velocity.limit_length(profile.max_speed)
+	rotation.y += _turn_rate * delta
 	move_and_slide()
 
 
 func _profile_valid() -> bool:
 	return profile != null and profile.mass > 0.0 and profile.main_acceleration > 0.0 \
 		and profile.thruster_strength > 0.0 and profile.max_speed > 0.0 and profile.pilot_response_time > 0.0 \
-		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0
+		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
+		and profile.turn_authority > 0.0 and profile.rudder_curve != null
