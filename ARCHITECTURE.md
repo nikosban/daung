@@ -81,8 +81,8 @@ The rejected upfront alternative is a global command/orchestration framework, an
     | `mass` | 5 | gameplay mass divisor | 1–20 |
     | `main_acceleration` | 12 | m/s² (not divided by mass) | 0.1–100 |
     | `thruster_strength` | 60 | thrust units (÷ mass = 12 m/s²) | 1–600 |
-    | `max_speed` | 50 | m/s | 1–150 |
-    | `pilot_response_time` | 0.5 | s | 0.1–3 |
+    | `max_speed` | 20 (owner trial, was 50) | m/s | 1–150 |
+    | `pilot_response_time` | 0.25 (owner trial, was 0.5) | s | 0.1–3 |
     | `arrival_tolerance` | 2 | m | 0.25–10 |
     | `arrival_speed_tolerance` | 0.5 | m/s | 0.05–5 |
 

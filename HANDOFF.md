@@ -14,11 +14,11 @@ Running the project opens `Main/main.tscn`:
 
 **How it moves** (`Movement/ship_movement.gd`, `ShipMovement`):
 - **One velocity:** one world planar velocity and one heading.
-- **Pilot:** each physics tick it wants to move toward the destination at `min(50, sqrt(2 · 12 · distance))` m/s. It requests the acceleration that closes the gap to the actual velocity in 0.5 s.
+- **Pilot:** each physics tick it wants to move toward the destination at `min(20, sqrt(2 · 12 · distance))` m/s. It requests the acceleration that closes the gap to the actual velocity in 0.25 s.
 - **Main engine:** supplies the forward part along the bow, up to 12 m/s². It never fires while the ship has any stern-first motion, so it never brakes.
 - **Thrusters:** supply the rest in any direction from one 60 / 5 = 12 m/s² budget.
 - **Forward together:** forward, engine and thrusters add up to 24 m/s² (owner-approved Option A).
-- **Integration:** only applied acceleration is integrated, and the speed is hard-capped at 50 m/s.
+- **Integration:** only applied acceleration is integrated, and the speed is hard-capped at 20 m/s.
 - **Heading:** held fixed (temporary, this slice only).
 - **Arrival:** within 2 m **and** at most 0.5 m/s. Afterwards, and after `stop()`, the thrusters brake toward zero velocity. There is no snap and no position hold, and overshoot can happen.
 - **Bad profile:** a missing profile or any value ≤ 0 logs an error and the ship does not move.
@@ -56,32 +56,30 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
   - mass 5;
   - main acceleration 12 m/s²;
   - thrusters 60 (12 m/s²);
-  - max speed 50 m/s;
-  - pilot response 0.5 s;
+  - max speed 20 m/s (first owner tuning trial, was 50);
+  - pilot response 0.25 s (first owner tuning trial, was 0.5);
   - arrival 2 m and 0.5 m/s.
+
+  The owner rejected the first feel (too fast, too much overshoot). The 20 m/s and 0.25 s values are approved for this trial only, not as final balance. If the pickup is still too sharp afterwards, the tech lead's next proposal is weaker main acceleration and thrusters together (for example 6 m/s² and 30). That is not applied.
 
 ## Known limitations
 
-Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn` (Task #27).
+Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn` (Task #27, trial values 20 m/s and 0.25 s). The first values (50 m/s, 0.5 s) gave 11.7 m sideways overshoot and a wide loop on retarget; the numbers are in PR #31.
 
 - **Decisive sideways check, (0, 0, 0) → (100, 0, 0):**
   - **First second:** X rises from the first tick (6.3 m at 1.0 s), the heading stays 0.000°, the main command stays 0 and the thrusters push +X at 12 m/s².
-  - **Peak and overshoot:** 33.5 m/s, overshooting to X = 111.7 (11.7 m), then back to about 98.4.
-  - **Arrival:** 9.53 s after the order; the ship rests at X = 100.89.
+  - **Peak and overshoot:** 20 m/s (19.6 at 1.92 s), overshooting to X = 103.6 (3.6 m), then back.
+  - **Arrival:** 8.08 s after the order; the ship rests at X = 99.15.
   - **No jumps:** the largest per-tick velocity change is 0.20 m/s (12 m/s²), and no step exceeds the speed cap.
-- **Forward 400 m:**
-  - engine + thrusters reach 24 m/s²;
-  - 49 m/s at 2.82 s and exactly 50 m/s at the cap;
-  - 18.9 m overshoot;
-  - arrival 15.65 s; rests 1.17 m past the click.
-- **Forward 100 m:** peak 37.5 m/s, 13.4 m overshoot, arrival 8.95 s, rests 0.95 m past the click.
-- **Stern-first stop (regression check):** from 20 m/s straight stern-first, `stop()` keeps the main command at 0 on every tick, while the thrusters brake at ≤ 12 m/s². The ship stops over 17.95 m.
-- **Retarget while moving, one loop:** a new click to (0, 0, −100) at 3 s, while moving at 33 m/s toward +X, curves through one wide loop (out to X ≈ 103, Z ≈ −118 and X ≈ −14.8) and arrives 16.7 s after the first order. The pilot steers toward the target without damping sideways speed separately; high-speed tight loops are deferred QA.
+- **Forward 100 m:** engine + thrusters reach 24 m/s²; 19.6 m/s at 1.25 s, capped at 20; 3.6 m overshoot; arrival 7.68 s; rests 0.85 m short of the click.
+- **Forward 400 m:** the same pickup and 3.6 m overshoot; arrival 22.68 s; rests 0.85 m short.
+- **Stern-first stop (regression check):** from 20 m/s straight stern-first, `stop()` keeps the main command at 0 on every tick, while the thrusters brake at ≤ 12 m/s². The ship stops over 16.85 m.
+- **Retarget while moving:** a new click to (0, 0, −100) at 3 s, while moving at 20 m/s toward +X, swings out to X ≈ 60 and then flies a straight diagonal. It overshoots once (to Z ≈ −102.7, X ≈ −2.3) and arrives 12.15 s after the first order, resting 0.8 m from the click. There is no loop or repeated orbit. The pilot does not damp sideways speed separately; high-speed tight loops are deferred QA.
 - **Small cases:**
   - A click at the ship's own position while stopped completes on the next tick, with no motion.
   - Passing within 2 m above 0.5 m/s keeps the order active.
   - A profile with mass 0 logs an error and the ship never moves.
-- **Overshoot is expected:** the 0.5 s response lets the speed run above the stopping profile. There is no arrival snap, so the ship rests up to about 1.2 m from the click after braking from 0.5 m/s.
+- **Overshoot is expected:** the 0.25 s response still lets the speed run a little above the stopping profile. There is no arrival snap, so the ship rests up to about 0.9 m from the click.
 - **Gone for now:** no rotation, routes, Shift-click waypoints, navigation, detours, destination resolution, obstacle stop, collision response or banking. The ship flies through the test sphere.
 - **No world bounds:** the ship can be ordered anywhere on the Y = 0 plane.
 - **Camera far plane:** 1000 m; at maximum zoom the far part of the area can fall beyond it. Not checked in F5.
