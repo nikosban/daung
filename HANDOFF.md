@@ -71,7 +71,7 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 
 ## Known limitations
 
-Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn` (Task #28). The numbers are in the Task #28 pull request; Task #27's fixed-heading numbers are in PR #31.
+Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn` (Task #28). The numbers are in PR #32 (merged); Task #27's fixed-heading numbers are in PR #31. Owner F5 playtest of the merged state: "Playtested, none of the issues are there."
 
 - **Owner decisive check, 10 m sideways from rest:** one crossing of the click, no return. Braking is planned at 6 m/s² while the turn holds its share; the ship passes the click at 2.05 s, stops 1.77 m past it and completes at 2.75 s (heading −24.8°; the turn continues toward the course while braking, 9.1° after the crossing, and stops at arrival from 3°/s). Before shared planning: 3.95 m overshoot, back through the click, 4.92 s, 26° of yaw after the crossing.
 - **Sideways 100 m:** unchanged. Tick 1 yaw 0.000° and thrusters 12 m/s²; aligned at −90° after 4.63 s (0.28° past); peak 52°/s; 2.52 m overshoot; arrival 9.75 s facing −90.0°; no yaw after the first crossing.
@@ -91,6 +91,8 @@ Values were measured with deterministic 60 Hz headless traces of the shipped pro
 
 ## Remaining work
 
-**Next:** technical re-review and owner F5 playtest of PR #32 (course heading, turn-rate limit and shared-capacity planning trial). Open owner decisions: keep the speed-linked rate clamp or replace it with powered counter-turn braking; later, a weaker-directional-thrust trial. After that come Task 16 (#29, retro-thruster braking) and Task 17 (#30, reaction delays), one at a time.
+**Next:** Task 16 (#29, retro-thruster braking), then Task 17 (#30, reaction delays), one at a time. Task 15 (#28) is merged (PR #32).
+
+**Open owner decisions:** keep the speed-linked turn-rate clamp as a game rule or replace it with powered counter-turn braking; later, a weaker-directional-thrust trial.
 
 Later: routes and navigation, destination resolution, collision response and banking, each through its own ticket. Route-failure notifications, impact feedback, collisions with other body types and obstacle appearance remain undecided. There is no measured performance target.
