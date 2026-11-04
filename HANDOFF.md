@@ -2,32 +2,33 @@
 
 ## Current state
 
-Daung has open-space ship movement on **Movement v3, slices 1–3** (Task #27 propulsion, Task #28 powered turning and Task #29 retro thrusters; Tasks 1–3 of 4 in the Movement v3 rewrite). It replaces the earlier heading-and-throttle locomotion, routes, navigation, destination resolution, the obstacle hard stop and banking entirely.
+Daung has open-space ship movement on **Movement v3, slices 1–4** (Task #27 propulsion, Task #28 powered turning, Task #29 retro thrusters and Task #30 reaction delay; all four tasks of the Movement v3 rewrite). It replaces the earlier heading-and-throttle locomotion, routes, navigation, destination resolution, the obstacle hard stop and banking entirely.
 
 Running the project opens `Main/main.tscn`:
 - **Scene:** one frigate at the origin facing −Z; 2 m ring markers at (100, 0, 0), (0, 0, 0), (60, 0, 0), (60, 0, −40) and (20, 0, −40); the grey 6 m test sphere at (83, 0, 0).
 - **Collision isolation:** the ship's collision mask is 0 in this scene, so it passes through the sphere.
 - **Test area:** the inert 800 × 800 m navigation floor; nothing bounds the ship.
 - **Camera:** starts at the 45° view. **Middle-drag** pans and the **wheel** zooms; the camera never follows the ship.
-- **Orders:** right-clicking the Y = 0 plane orders the ship straight there; a new click replaces the order at once. Shift + right-click does nothing.
-- **F4 (temporary, test-only):** calls `stop()` for the stopping comparison. It is diagnostic debt, not a game control; remove it when a better test method is approved.
-- **F3** toggles a readout of speed, velocity, heading, course heading, turn rate and its limit, applied angular acceleration, rudder multiplier, shared-capacity scale, desired speed, planned braking, main-engine command, thruster command (magnitude and XZ), destination and order state.
+- **Orders:** right-clicking the Y = 0 plane orders the ship straight there. Each order acts after the crew reaction delay (0.3 s) counted from its own click; until then the current order stands. A second click inside the delay does not cancel the first: both act at their own times, in click order. Shift + right-click does nothing.
+- **F4 (temporary, test-only):** calls `stop()` for the stopping comparison; it waits the same reaction delay. It is diagnostic debt, not a game control; remove it when a better test method is approved.
+- **F3** toggles a readout of speed, velocity, heading, course heading, turn rate and its limit, applied angular acceleration, rudder multiplier, shared-capacity scale, desired speed, planned braking, main-engine command, thruster command (magnitude and XZ), active destination or no active order, and the command queue (physics clock, pending count, next pending command and its due time, last receipt and activation times). The Output panel logs every receipt and activation with its time.
 
 **How it moves** (`Movement/ship_movement.gd`, `ShipMovement`):
+- **Reaction delay:** `move_to()` and `stop()` only receive a command into one first-in-first-out queue, due `reaction_delay` (0.3 s) later on Movement's physics clock. At the start of each physics tick every due command activates in receipt order: a move sets the destination and the course from where the ship is then; a stop ends the order (ordinary braking). Nothing is cancelled or skipped, and stop has no bypass. Delay 0 acts on the next tick.
 - **One velocity:** one world planar velocity and one heading.
 - **Pilot:** each physics tick it wants to move toward the destination at `min(15, sqrt(2 · a_plan · distance))` m/s, where `a_plan = 12 / (1 + turning demand fraction)`: 12 m/s² with no turn, 6 m/s² while turning takes its full share. Without retro thrusters it is further limited to `5.4 / s`, where `s` is the actual travel direction's share along the bow (when positive): 5.4 m/s² moving bow-first, 12 sideways or stern-first. It requests the acceleration that closes the gap to the actual velocity in 0.25 s.
 - **Main engine:** supplies the forward part along the bow, up to 12 m/s². It never fires while the ship has any stern-first motion, so it never brakes.
 - **Thrusters:** supply the rest in any direction from one 60 / 5 = 12 m/s² rating, shared with turning (below).
 - **Forward together:** forward, engine and thrusters add up to 24 m/s² (owner-approved Option A).
 - **Integration:** only applied acceleration is integrated, and the speed is hard-capped at 15 m/s.
-- **Turning:** the pilot steers the bow toward the order's **course heading**, set once by `move_to()` toward the click; overshoot corrections never change it, a new order replaces it. Authority is `120 / 5 = 24°/s²` × the rudder curve of **actual** speed: 0 at rest, 1× at 7.5 m/s, 1.5× at 15 m/s (linear). It winds up and counter-turns with bounded angular acceleration (braking-distance rule), planning the counter-turn on the share it gets beside last tick's thruster demand: `authority / (1 + last planar fraction)`. The turn rate is limited to 60°/s at 15 m/s, scaled down by the same curve (40°/s at 7.5 m/s, 0 at rest). Yaw never rotates the velocity. Without an order or at zero speed the turn rate is 0, so rotation never persists without powered turning, and a ship at rest never turns in place.
+- **Turning:** the pilot steers the bow toward the order's **course heading**, set once when the move activates, toward the click; overshoot corrections never change it, a new order replaces it. Authority is `120 / 5 = 24°/s²` × the rudder curve of **actual** speed: 0 at rest, 1× at 7.5 m/s, 1.5× at 15 m/s (linear). It winds up and counter-turns with bounded angular acceleration (braking-distance rule), planning the counter-turn on the share it gets beside last tick's thruster demand: `authority / (1 + last planar fraction)`. The turn rate is limited to 60°/s at 15 m/s, scaled down by the same curve (40°/s at 7.5 m/s, 0 at rest). Yaw never rotates the velocity. Without an order or at zero speed the turn rate is 0, so rotation never persists without powered turning, and a ship at rest never turns in place.
 - **Shared capacity:** thruster and turning demand are fractions of their ratings; when they sum above 1, both are scaled proportionally. At full demand on both, crabbing/braking gets 6 m/s² and turning half its authority. The main engine is outside this.
 - **Retro thrusters** (`retro_thrusters`, default true): without them, the thrusters' acceleration toward the stern is capped at `0.45 × 12 = 5.4 m/s²` after sharing; only the excess sternward part is removed (lateral and bow-forward thrust are unchanged, nothing is scaled up). This weakens braking from bow-first travel **and** stern-first acceleration (owner-provisional: "Yes I agree until I see it"). The pilot plans its approach with the same limit, so it starts braking earlier.
 - **Arrival:** within 2 m **and** at most 0.5 m/s. Afterwards, and after `stop()`, the thrusters brake toward zero velocity. There is no snap and no position hold, and overshoot can happen.
-- **Bad profile:** a missing profile, a missing rudder curve or any numeric value ≤ 0 logs an error and the ship does not move.
+- **Bad profile:** a missing profile, a missing rudder curve, any numeric value ≤ 0 or a negative `reaction_delay` logs an error and the ship does not move.
 
 **Files:**
-- `Movement/movement_profile.gd` (`MovementProfile`, eleven provisional values; script defaults now equal the frigate profile, the rudder curve lives in the `.tres`) and `Movement/Profiles/frigate_movement_profile.tres`. `ARCHITECTURE.md` lists the values, units and ranges.
+- `Movement/movement_profile.gd` (`MovementProfile`, twelve provisional values; script defaults now equal the frigate profile, the rudder curve lives in the `.tres`) and `Movement/Profiles/frigate_movement_profile.tres`. `ARCHITECTURE.md` lists the values, units and ranges.
 - `Ships/ship.tscn`: movement root, provisional box collision shape, `Visual` (plain `Node3D`) with the protected GLB at identity.
 - `Main/right_click_move_input.gd` (right-click and the test-only F4), `Main/camera_pan_zoom.gd` and `Main/movement_debug_overlay.gd`: temporary scene glue.
 - **Inert:** `TestObstacle`, `NavigationFloor`, `NavigationRegion3D` and `Main/navigation_mesh.tres` remain in the scene but nothing uses them.
@@ -56,6 +57,11 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
   - **No unpowered spin:** "Rotation should not persist without thrust." The turn rate drops to 0 in one tick when powered turning ends (heading continuous); no angular drag.
   - **Authority:** from actual speed through the rudder curve; zero at rest. One speed-linked turn-rate limit (owner-approved trial, PR #32); no phases, angle classes or reversal threshold. No final alignment.
 - **Banking:** deferred; the old bank files were deleted with owner approval (Task #27). Visual tilt must never affect the authoritative root or collision.
+- **Reaction delay (Task #30, approved ticket as corrected by the tech lead's audit, plan revision 1):**
+  - **Rule:** every command, move and stop, waits its own `reaction_delay` from receipt; the old order stands until then; a later command never cancels an earlier pending one; due commands apply in receipt order.
+  - **Stop:** delayed like moves, no emergency bypass (owner: "Yes").
+  - **Activation:** a move takes its course from the ship's position at activation; the pilot and propulsion are unchanged.
+  - **Default:** 0.3 s (owner's veteran-crew example) is a provisional trial; 3.0 s (green crew) is only the decisive-check override.
 - **Retro thrusters (Task #29, approved ticket as corrected, plan revision 2):**
   - **Capability:** one yes/no per hull. Without retro thrusters the sternward thruster component is capped at 45% of the thruster rating; same budget, no second braking strength, no braking optimism.
   - **Order:** shared capacity first, then the sternward cap; removed capacity is not reallocated.
@@ -74,13 +80,18 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
   - arrival 2 m and 0.5 m/s;
   - turn authority 120 (24°/s² at 7.5 m/s, 36°/s² at 15 m/s before sharing) and the linear rudder curve (0,0), (0.5,1), (1,1.5) (owner-approved trial, Task #28);
   - turn-rate limit 60°/s at max speed (owner-approved trial, PR #32);
-  - retro thrusters on, no-retro effectiveness 0.45 (Task #29).
+  - retro thrusters on, no-retro effectiveness 0.45 (Task #29);
+  - reaction delay 0.3 s (Task #30).
 
   The owner rejected the first feel (too fast, too much overshoot). After playtesting trial 1 (20 m/s, 0.25 s), the owner asked for 15 m/s. These values are approved as trials only, not as final balance. If the pickup is still too sharp afterwards, the tech lead's next proposal is weaker main acceleration and thrusters together (for example 6 m/s² and 30). That is not applied.
 
 ## Known limitations
 
-Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn` (Tasks #28 and #29). With retro thrusters on, all seven Task #29 traces are identical to `main` before Task #29. Task #28's numbers are in PR #32; Task #27's fixed-heading numbers are in PR #31. Owner F5 playtest after Task #28: "Playtested, none of the issues are there."
+Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn` (Tasks #28 and #29). The movement numbers below are from the click with no reaction delay; with the 0.3 s default every order starts 0.3 s later (forward 100 m arrives 9.13 s after the click). With `reaction_delay = 0` the Task #30 traces reproduce them exactly (forward 100 m 8.85 s, sideways 10 m 2.75 s, sideways 100 m 9.75 s).
+
+- **Reaction-delay decisive check (Task #30, 3.0 s, headless):** A to (100, 0, 0) received at 0.000 s activates at 3.017 s; B to (0, 0, −100) received at 1.000 s activates at 4.017 s. A is active for 1.0 s in between (ship 3.15 m toward A, 6.1 m/s), then B takes over and arrives at 13.00 s. Before 3.017 s the ship stays at rest with two pending.
+- **Reaction-delay edge cases (headless):** stop then move received at 8.0 / 8.5 s while cruising at 15 m/s activate at 11.0 / 11.5 s; the stop brakes from 14.8 m/s (no speed reset). Move then stop: both act, 0.5 s apart. Two moves on the same tick both activate on one tick in order (the second decides). Delay 0: activation on the next tick. An order that arrives while the next command waits ends normally (4.97 s), and the waiting command activates on time (7.02 s).
+- **Tick quantization:** activation lands 0 or 1 physics tick (≤ 16.7 ms) after the due time, depending on float summation of the clock (3.017 s or 3.000 s for 3.0 s). Not smoothed. With retro thrusters on, all seven Task #29 traces are identical to `main` before Task #29. Task #28's numbers are in PR #32; Task #27's fixed-heading numbers are in PR #31. Owner F5 playtest after Task #28: "Playtested, none of the issues are there."
 
 - **Retro decisive check (F4 at ≥ 14.5 m/s, moving forward):** with retro 9.01 m to rest (8.90 m to 0.5 m/s, 1.40 s); without retro 19.55 m (19.43 m, 2.68 s), about 2.2×; peak sternward thrust 12 vs 5.40 m/s². Ideal references 8.76 m and 19.47 m from 14.5 m/s.
 - **Without retro, ordinary orders (arrival, overshoot):** forward 100 m: braking starts 20.5 m before the click instead of 9.0 m, 2.94 m overshoot and one return as with retro (2.52 m), arrival 9.97 s instead of 8.85 s. Sideways 100 m 10.87 s, rearward 100 m 11.02 s (weaker stern-first pickup), diagonal 45° 10.28 s, all 2.9 m and one return. 10 m sideways is unchanged (2.75 s), because the hull only reaches −24.8° and the sternward share stays under the cap. Moving 180° retarget from 15 m/s: planned 5.40 m/s² and applied sternward 5.40 m/s² while the forward motion is slowed; arrival 14.87 s instead of 13.53 s, two crossings and the same number of slow-downs as with retro (no added settle–move–settle).
@@ -99,13 +110,14 @@ Values were measured with deterministic 60 Hz headless traces of the shipped pro
 - **Gone for now:** routes, Shift-click waypoints, navigation, detours, destination resolution, obstacle stop, collision response and banking. The ship flies through the test sphere.
 - **No world bounds:** the ship can be ordered anywhere on the Y = 0 plane.
 - **Camera far plane:** 1000 m; at maximum zoom the far part of the area can fall beyond it. Not checked in F5.
-- **Not verified:** the F5 run with the on-screen F3 readout (only headless traces were run); the profile guard for a 0 effectiveness value (range 0.1–1.0 prevents it in the inspector).
+- **No pending-order indicator:** a pending command shows only in F3 and the Output log; nothing on screen marks it.
+- **Not verified:** the F5 run with the on-screen F3 readout (only headless traces were run); the right-click receipt timing in F5; the profile guard for a 0 effectiveness value (range 0.1–1.0 prevents it in the inspector).
 - **Deferred QA:** unusual yaw while braking without retro, close overshoot recoveries, future hull profiles, equipment failure or damage, high-speed tight loops, corners, obstacles, routes, negative or inverted tuning, pathological fast retargets, extreme rudder-curve shapes and multi-ship performance.
 
 ## Remaining work
 
-**Next:** review and owner F5 playtest of the Task 16 PR (#29, retro thrusters), then Task 17 (#30, reaction delays).
+**Next:** review and owner F5 playtest of the Task 17 PR (#30, reaction delay). It completes the four Movement v3 tickets.
 
-**Open owner decisions:** whether the no-retro stern-first weakening feels right (provisional); keep the speed-linked turn-rate clamp as a game rule or replace it with powered counter-turn braking; later, a weaker-directional-thrust trial.
+**Open owner decisions:** long-term command feedback and whether crew changes may modify the reaction delay; whether the no-retro stern-first weakening feels right (provisional); keep the speed-linked turn-rate clamp as a game rule or replace it with powered counter-turn braking; later, a weaker-directional-thrust trial.
 
 Later: routes and navigation, destination resolution, collision response and banking, each through its own ticket. Route-failure notifications, impact feedback, collisions with other body types and obstacle appearance remain undecided. There is no measured performance target.
