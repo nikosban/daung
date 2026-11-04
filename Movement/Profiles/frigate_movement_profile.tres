@@ -1,6 +1,11 @@
-[gd_resource type="Resource" script_class="MovementProfile" format=3]
+[gd_resource type="Resource" script_class="MovementProfile" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://Movement/movement_profile.gd" id="1_profile"]
+
+[sub_resource type="Curve" id="Curve_rudder"]
+max_value = 2.0
+_data = [Vector2(0, 0), 0.0, 2.0, 0, 1, Vector2(0.5, 1), 2.0, 1.0, 1, 1, Vector2(1, 1.5), 1.0, 0.0, 1, 0]
+point_count = 3
 
 [resource]
 script = ExtResource("1_profile")
@@ -11,3 +16,6 @@ max_speed = 15.0
 pilot_response_time = 0.25
 arrival_tolerance = 2.0
 arrival_speed_tolerance = 0.5
+turn_authority = 120.0
+max_turn_rate_at_max_speed = 60.0
+rudder_curve = SubResource("Curve_rudder")
