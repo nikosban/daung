@@ -93,7 +93,7 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
 
 ## Known limitations
 
-Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn`. The **arrival numbers (Task #41)** are measured from the click, including the 0.3 s reaction delay; other numbers are from earlier tasks as labelled. Task #41's before/after traces are in its PR; Task #28's numbers are in PR #32; Task #27's in PR #31; Task #30's in PR #35. Owner F5 playtest after Task #28: "Playtested, none of the issues are there." Owner F5 playtest of PR #35 (3.0 s two-click check): "Done, again after playtest it behaces as intended." Task #41 awaits the owner's visual playtest, which is its acceptance gate.
+Values were measured with deterministic 60 Hz headless traces of the shipped profile in `Main/main.tscn`. The **arrival numbers (Task #41)** are measured from the click, including the 0.3 s reaction delay; other numbers are from earlier tasks as labelled. Task #41's before/after traces are in its PR; Task #28's numbers are in PR #32; Task #27's in PR #31; Task #30's in PR #35. Owner F5 playtest after Task #28: "Playtested, none of the issues are there." Owner F5 playtest of PR #35 (3.0 s two-click check): "Done, again after playtest it behaces as intended." Owner F5/F3 visual playtest of PR #42 (Task #41 acceptance gate): "Playtested, looks right."
 
 - **Arrivals (Task #41, from the click, 0.3 s delay; before the fix in brackets):** every measured order crosses the click once below 0.5 m/s, completes and rests just past it, with no return.
   - **Sideways 100 m to the (100, 0, 0) marker:** arrival 9.07 s (10.03 s), rests 0.28 m past (2.52 m overshoot and a return). Braking starts about 13 m before the click (8.9 m); peak applied braking 11.37 of 12 m/s².
@@ -133,7 +133,7 @@ Values were measured with deterministic 60 Hz headless traces of the shipped pro
 
 ## Remaining work
 
-**Next:** the owner's F5/F3 visual playtest of Task #41 (arrival braking), its acceptance gate; then the next task arrives as a new ticket. The tech lead's retrospective on issue #41 suggests judging the 5–15 m pickup separately afterwards (not decided).
+**Next:** none queued after Task #41 (arrival braking, owner playtest passed); the next task arrives as a new ticket. The tech lead's retrospective on issue #41 suggests judging the 5–15 m pickup separately afterwards (not decided).
 
 **Open owner decisions:** long-term command feedback and whether crew changes may modify the reaction delay; whether the no-retro stern-first weakening feels right (provisional); keep the speed-linked turn-rate clamp as a game rule or replace it with powered counter-turn braking; later, a weaker-directional-thrust trial.
 
