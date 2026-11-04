@@ -1,6 +1,6 @@
 extends CanvasLayer
-## Temporary F3 movement readout: phase, commanded and actual heading and speed, and slip of one ship.
-## Reads Movement only; Movement never calls it. Hidden until F3 is pressed.
+## Temporary F3 movement readout of one ship: speed, velocity, heading, main-engine and thruster
+## commands, destination and order state. Reads Movement only; Movement never calls it. Hidden until F3.
 
 @export var ship: ShipMovement
 
@@ -24,12 +24,14 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if not visible:
 		return
-	var commanded := ship.get_commanded_heading()
-	_label.text = "phase %s\nheading %7.1f°  commanded %s\nspeed %6.2f m/s  commanded %.2f m/s\nslip %6.2f m/s" % [
-		ship.get_phase_name(),
+	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
+	var thruster := ship.get_thruster_command()
+	var destination := ship.get_destination()
+	_label.text = "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°\nmain %6.2f m/s²\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)\ndestination (%.1f, %.1f)  %s" % [
+		velocity.length(), velocity.x, velocity.z,
 		ship.get_heading(),
-		"—" if is_nan(commanded) else "%.1f°" % commanded,
-		ship.get_speed(),
-		ship.get_commanded_speed(),
-		ship.get_slip(),
+		ship.get_main_command(),
+		thruster.length(), thruster.x, thruster.z,
+		destination.x, destination.z,
+		"active" if ship.has_order() else "no order",
 	]
