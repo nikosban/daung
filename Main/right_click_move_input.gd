@@ -3,6 +3,9 @@ extends Node
 ## Shift + right-click does nothing until routes are rebuilt.
 ## F4 calls stop(): a temporary test-only diagnostic for the Task #29 stopping comparison, not a game control.
 ## Both are received by Movement and act after the profile's reaction delay (Task #30).
+## Each accepted right-click also emits move_requested with the same point, for the F3 destination marker (Task #38).
+
+signal move_requested(world_position: Vector3)
 
 @export var camera: Camera3D
 @export var ship: ShipMovement
@@ -21,3 +24,4 @@ func _unhandled_input(event: InputEvent) -> void:
 	var hit: Variant = _plane.intersects_ray(camera.project_ray_origin(click.position), camera.project_ray_normal(click.position))
 	if hit != null:
 		ship.move_to(hit)
+		move_requested.emit(hit)

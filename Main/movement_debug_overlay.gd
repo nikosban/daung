@@ -4,11 +4,19 @@ extends CanvasLayer
 ## commands, active destination and order state, and the reaction-delay queue (physics clock, pending count, next
 ## pending command and its due time, last receipt and activation times). Reads Movement only; Movement never calls it. Hidden until F3.
 ## F3 also turns the world-space movement trail on and off with it (a fresh trace each time it turns on).
+## F3 also shows the debug destination marker at the latest received right-click (Task #38): it represents receipt, not
+## activation, and is forgotten once the ship has no active order and no pending command. Never changes Movement's queue.
+
+## Display height of the destination marker above the clicked XZ (rendering detail, not motion data).
+const MARKER_DISPLAY_HEIGHT := 0.1
 
 @export var ship: ShipMovement
 @export var trail: MovementTrail
+@export var destination_marker: MeshInstance3D
 
 var _label := Label.new()
+var _has_request := false
+var _requested_position := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -24,9 +32,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key != null and key.pressed and not key.echo and key.keycode == KEY_F3:
 		visible = not visible
 		trail.set_active(visible)
+		_update_marker()
+
+
+## Connected to the input's move_requested: caches the latest received move target, also while F3 is hidden.
+func record_move_request(world_position: Vector3) -> void:
+	_has_request = true
+	_requested_position = world_position
+	_update_marker()
 
 
 func _process(_delta: float) -> void:
+	if _has_request and not ship.has_order() and ship.get_pending_count() == 0:
+		_has_request = false
+		_update_marker()
 	if not visible:
 		return
 	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
@@ -55,3 +74,9 @@ func _next_pending_text() -> String:
 
 func _time_text(time: float) -> String:
 	return "—" if time < 0.0 else "%.2f s" % time
+
+
+func _update_marker() -> void:
+	destination_marker.visible = visible and _has_request
+	if destination_marker.visible:
+		destination_marker.global_position = Vector3(_requested_position.x, MARKER_DISPLAY_HEIGHT, _requested_position.z)

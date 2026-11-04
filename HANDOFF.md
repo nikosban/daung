@@ -13,6 +13,7 @@ Running the project opens `Main/main.tscn`:
 - **F4 (temporary, test-only):** calls `stop()` for the stopping comparison; it waits the same reaction delay. It is diagnostic debt, not a game control; remove it when a better test method is approved.
 - **F3** toggles a readout of speed, velocity, heading, course heading, turn rate and its limit, applied angular acceleration, rudder multiplier, shared-capacity scale, desired speed, planned braking, main-engine command, thruster command (magnitude and XZ), active destination or no active order, and the command queue (physics clock, pending count, next pending command and its due time, last receipt and activation times). The Output panel logs every receipt and activation with its time.
 - **F3 trail (Task #37):** the same F3 press also shows a thin cyan line through the ship's actual recorded positions (sampled after each physics move, a point every 0.1 m or more, drawn 0.05 m above Y = 0): turns, drift, overshoot and corrections. It never draws to the click and predicts nothing. It stays when the ship rests; F3 off erases it; F3 on starts a fresh trail at the ship. At 4096 points (about 410 m of path) the oldest points are dropped and tracing continues. Nothing is recorded before the first F3 press.
+- **F3 destination marker (Task #38):** with F3 on, a magenta ring (slightly larger than the amber rings, drawn 0.1 m above the plane) appears at the latest right-click **the moment it is received**, while the order still waits its reaction delay. A newer right-click moves it at once; the queued orders still activate in click order. It disappears once the ship has no active order and nothing pending (last move completed, or a stop has taken effect). F3 off hides it without forgetting a still-relevant click; F3 on shows it again. Shift-click and F4 never create one.
 
 **How it moves** (`Movement/ship_movement.gd`, `ShipMovement`):
 - **Reaction delay:** `move_to()` and `stop()` only receive a command into one first-in-first-out queue, due `reaction_delay` (0.3 s) later on Movement's physics clock. At the start of each physics tick every due command activates in receipt order: a move sets the destination and the course from where the ship is then; a stop ends the order (ordinary braking). Nothing is cancelled or skipped, and stop has no bypass. Delay 0 acts on the next tick.
@@ -31,7 +32,7 @@ Running the project opens `Main/main.tscn`:
 **Files:**
 - `Movement/movement_profile.gd` (`MovementProfile`, twelve provisional values; script defaults now equal the frigate profile, the rudder curve lives in the `.tres`) and `Movement/Profiles/frigate_movement_profile.tres`. `ARCHITECTURE.md` lists the values, units and ranges.
 - `Ships/ship.tscn`: movement root, provisional box collision shape, `Visual` (plain `Node3D`) with the protected GLB at identity.
-- `Main/right_click_move_input.gd` (right-click and the test-only F4), `Main/camera_pan_zoom.gd`, `Main/movement_debug_overlay.gd` (F3, also toggles the trail) and `Main/movement_trail.gd` with `Main/movement_trail_settings.gd` / `.tres` (trail cap 4096 points, sample spacing 0.1 m): temporary scene glue.
+- `Main/right_click_move_input.gd` (right-click, its `move_requested` signal and the test-only F4), `Main/camera_pan_zoom.gd`, `Main/movement_debug_overlay.gd` (F3, also toggles the trail and drives the `DebugDestinationMarker` node in `Main/main.tscn`) and `Main/movement_trail.gd` with `Main/movement_trail_settings.gd` / `.tres` (trail cap 4096 points, sample spacing 0.1 m): temporary scene glue.
 - **Inert:** `TestObstacle`, `NavigationFloor`, `NavigationRegion3D` and `Main/navigation_mesh.tres` remain in the scene but nothing uses them.
 - **Deleted in Task #27** (Git history, `main` at a174d22): `Movement/maneuver_plan.gd`, `Ships/ship_visual_bank.gd`, `Ships/ship_bank_profile.gd` and `Ships/Profiles/frigate_bank_profile.tres`.
 
@@ -64,6 +65,7 @@ The protected model `Assets/Ships/Whitebox/Arrata_Frigate_001.glb` and its sidec
   - **Activation:** a move takes its course from the ship's position at activation; the pilot and propulsion are unchanged.
   - **Default:** 0.3 s (owner's veteran-crew example) is a provisional trial; 3.0 s (green crew) is only the decisive-check override.
 - **F3 trail (Task #37, approved ticket and plan revision 1):** debug-only; draws past observed positions only, never a destination line or prediction; one F3 toggle with the readout; starts hidden and inactive. **At capacity, discard the oldest points and continue tracing** (tech lead decision, issue #37). The cyan 1 px line is a provisional debug appearance, not an owner visual decision.
+- **F3 destination marker (Task #38, approved ticket as corrected, plan revision 2):** the marker shows the latest **received** right-click immediately, without bypassing the reaction delay (owner chose A). It must be visibly distinct from the fixture rings at the same point (tech lead decision, issue #38): shared torus geometry, its own magenta material, node scale 1.25. Magenta and the scale are a provisional debug appearance. Debug scene glue only; it is not a gameplay command-feedback system.
 - **Retro thrusters (Task #29, approved ticket as corrected, plan revision 2):**
   - **Capability:** one yes/no per hull. Without retro thrusters the sternward thruster component is capped at 45% of the thruster rating; same budget, no second braking strength, no braking optimism.
   - **Order:** shared capacity first, then the sternward cap; removed capacity is not reallocated.
@@ -112,14 +114,15 @@ Values were measured with deterministic 60 Hz headless traces of the shipped pro
 - **Gone for now:** routes, Shift-click waypoints, navigation, detours, destination resolution, obstacle stop, collision response and banking. The ship flies through the test sphere.
 - **No world bounds:** the ship can be ordered anywhere on the Y = 0 plane.
 - **Camera far plane:** 1000 m; at maximum zoom the far part of the area can fall beyond it. Not checked in F5.
-- **No pending-order indicator:** a pending command shows only in F3 and the Output log; nothing on screen marks it.
+- **No player-facing pending-order indicator:** outside F3 a pending command shows only in the Output log.
+- **F3 destination marker (Task #38, headless and windowed trace, reaction delay 3.0 s in memory):** clicks on (100, 0, 0) at 0.117 s and (60, 0, −40) at 1.133 s: the marker appears on receipt and jumps to the second click in the same input handling; the orders activate at 3.133 s and 4.150 s in click order, and the marker never leaves the latest click; it clears at 10.90 s when the last move completes. Move then F4: the marker stays while the stop is pending and clears on the frame after the stop activates. Not checked: the look in F5. Edge behavior by design: if a move completes while a later stop is pending, the marker stays until the stop activates; a click on the ship's own position shows it for about one frame. Headless runs print one dummy-renderer error (`material_get_instance_shader_parameters`, null material) for the new material; the Vulkan renderer prints none.
 - **F3 trail (headless, Task #37):** sideways 100 m order: 636 points, every segment ≤ 0.25 m (one tick at 15 m/s, no jump to the click), every sample within 0.1 m of the ship's post-move position, no growth at rest, nothing recorded before F3 or while off. A cap lowered to 256 held at 256 with no long segment. Not checked: legibility in F5 and at maximum zoom; the newest point can lead the interpolated drawn ship by up to one tick (≤ 0.25 m), inside the hull.
 - **Not verified:** the profile guard for a 0 effectiveness value (range 0.1–1.0 prevents it in the inspector).
 - **Deferred QA:** unusual yaw while braking without retro, close overshoot recoveries, future hull profiles, equipment failure or damage, high-speed tight loops, corners, obstacles, routes, negative or inverted tuning, pathological fast retargets, extreme rudder-curve shapes and multi-ship performance.
 
 ## Remaining work
 
-**Next:** none queued after Task #37 (F3 trail); the next task arrives as a new ticket.
+**Next:** none queued after Task #38 (F3 destination marker); the next task arrives as a new ticket.
 
 **Open owner decisions:** long-term command feedback and whether crew changes may modify the reaction delay; whether the no-retro stern-first weakening feels right (provisional); keep the speed-linked turn-rate clamp as a game rule or replace it with powered counter-turn braking; later, a weaker-directional-thrust trial.
 

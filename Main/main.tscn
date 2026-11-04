@@ -23,6 +23,10 @@ outer_radius = 2.0
 shading_mode = 0
 albedo_color = Color(1, 0.75, 0.2, 1)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_debug_destination"]
+shading_mode = 0
+albedo_color = Color(1, 0.2, 1, 1)
+
 [sub_resource type="SphereShape3D" id="SphereShape3D_obstacle"]
 radius = 6.0
 
@@ -107,7 +111,16 @@ script = ExtResource("6_trail")
 ship = NodePath("../Ship")
 settings = ExtResource("7_trail_settings")
 
-[node name="MovementDebugOverlay" type="CanvasLayer" parent="." unique_id=1163721375 node_paths=PackedStringArray("ship", "trail")]
+[node name="DebugDestinationMarker" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.25, 0, 0, 0, 1.25, 0, 0, 0, 1.25, 0, 0.1, 0)
+visible = false
+mesh = SubResource("TorusMesh_marker")
+surface_material_override/0 = SubResource("StandardMaterial3D_debug_destination")
+
+[node name="MovementDebugOverlay" type="CanvasLayer" parent="." unique_id=1163721375 node_paths=PackedStringArray("ship", "trail", "destination_marker")]
 script = ExtResource("5_overlay")
 ship = NodePath("../Ship")
 trail = NodePath("../MovementTrail")
+destination_marker = NodePath("../DebugDestinationMarker")
+
+[connection signal="move_requested" from="RightClickMoveInput" to="MovementDebugOverlay" method="record_move_request"]
