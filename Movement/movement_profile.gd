@@ -46,3 +46,7 @@ extends Resource
 ## departures lasting one, two, … steps of this length, up to departure_max_time, shortest first.
 @export_range(0.1, 2.0, 0.05, "suffix:s") var departure_step_time: float = 0.5
 @export_range(0.5, 10.0, 0.1, "suffix:s") var departure_max_time: float = 4.0
+## No-go tolerance (Task #48, provisional): a predicted maneuver is rejected when the predicted ship centre, once on
+## the navigation mesh, goes more than this far beyond the mesh edge (the static no-go zone around obstacles). Only
+## for maneuvers the navigator predicts; it is not a physical boundary, and the rotating hull may cross the edge.
+@export_range(0.0, 5.0, 0.01, "suffix:m") var no_go_tolerance: float = 0.5
