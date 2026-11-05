@@ -8,10 +8,20 @@ extends RefCounted
 ## spreads the work over ticks, and the per-order limit counts predicted flight time.
 ## Nothing here writes a transform or velocity; ShipMovement stays the single writer and follows the plan with
 ## RouteGuidance.guide() every tick. No job ever runs again for the same order.
+##
+## Handoff (Task #50): a plan validated with a predicted braking wait is held until its handoff frame and handed over
+## only if the ship's state then equals the predicted one (within HANDOFF_TOLERANCE); otherwise the search restarts
+## from the actual state. A holding job is checked every physics frame, outside the per-tick allowance, and does not
+## hold up the jobs behind it.
 
 const BUDGET: NavigationBudget = preload("res://Movement/Navigation/navigation_budget.tres")
 
 enum Status { PENDING, DONE, DECLINED, CANCELLED }
+
+## Largest summed difference (position m + velocity m/s + yaw rad + turn rate rad/s) between the ship's state and
+## the predicted handoff state for which a held plan is handed over. The no-order braking is predicted exactly (0 to
+## about 1e-7 measured); this only absorbs float noise.
+const HANDOFF_TOLERANCE := 1.0e-4
 
 static var _jobs: Array[Job] = []
 static var _frame := -1
@@ -27,18 +37,25 @@ static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3) -> J
 
 
 ## Advances queued jobs, oldest first, within this physics tick's shared allowance. Every ship calls it each tick; the
-## allowance is reset on the first call of a new physics frame. A job only waiting for navigation to sync does not
-## hold up the jobs behind it.
+## allowance is reset on the first call of a new physics frame. A job only waiting for navigation to sync, or holding a
+## plan, does not hold up the jobs behind it. Held plans are handed over in the first call of a frame, before any ship
+## has moved in it (every ship calls this before its own move), so each ship is in its start-of-tick state.
 static func service() -> void:
 	var frame := Engine.get_physics_frames()
 	if frame != _frame:
 		_frame = frame
 		_frame_used = 0
+		for job in _jobs:
+			if job.status == Status.PENDING and job.is_holding():
+				job.advance(null)
 	var i := 0
 	while i < _jobs.size():
 		var job := _jobs[i]
 		if job.status != Status.PENDING:
 			_jobs.remove_at(i)
+			continue
+		if job.is_holding():
+			i += 1
 			continue
 		var allowance := BUDGET.plan_time_per_tick - _frame_used
 		if allowance <= 0:
@@ -75,6 +92,8 @@ class Job:
 	var _route: RoutePlanner
 	var _maneuver: ManeuverPlanner
 	var _last_frame := -1
+	var _holding := false
+	var _held_frames := 0
 
 	func _init(ship: ShipMovement, probe: HullProbe, p_click: Vector3) -> void:
 		_ship = ship
@@ -88,9 +107,13 @@ class Job:
 		if status == Status.PENDING:
 			status = Status.CANCELLED
 
-	## Whether the job is only waiting for navigation to sync (it used no planning time).
+	## Whether the job is only waiting: for navigation to sync, or for a held plan's handoff frame (no planning work).
 	func is_waiting() -> bool:
-		return _maneuver == null and _route.waiting
+		return (_maneuver == null and _route.waiting) or _holding
+
+	## Whether the job holds a validated plan until its handoff frame.
+	func is_holding() -> bool:
+		return _holding
 
 	func advance(clock: PlanClock) -> void:
 		if not is_instance_valid(_ship):
@@ -114,16 +137,43 @@ class Job:
 						_maneuver = ManeuverPlanner.new(_route.route_plan, _route.primary_plan, _route.regions, _route.final_hazard, _profile, _probe, _ship.get_pilot_state, _ship.get_physics_process_delta_time(), Navigator.BUDGET.plan_prediction_per_order)
 					else:
 						_finish(_route.primary_plan, "no hazard regions")
+		if _holding:
+			_hand_over()
+			used_usec += Time.get_ticks_usec() - start
+			return
 		if status == Status.PENDING and _maneuver != null:
 			match _maneuver.run(clock):
+				ManeuverPlanner.PASS when _maneuver.hold_frame >= 0:
+					_holding = true
+					_held_frames = _maneuver.hold_frame - frame
+					_hand_over()
 				ManeuverPlanner.PASS:
-					_finish(_maneuver.chosen, "%s%s; %d rollouts, %d predicted ticks, %d skipped stretches, %d queries" % [_route.hazard_text, _maneuver.departure_text(), _maneuver.rollouts, _maneuver.predicted_ticks, _maneuver.skipped, _probe.queries])
+					_finish_maneuver()
 				ManeuverPlanner.FAIL:
 					if _maneuver.exhausted:
 						_decline("no safe maneuver found within %.0f s of predicted flight (route: %s)" % [Navigator.BUDGET.plan_prediction_per_order, _maneuver.failure])
 					else:
 						_decline("no safe maneuver found (route: %s)" % _maneuver.failure)
 		used_usec += Time.get_ticks_usec() - start
+
+	## A held plan: wait for its handoff frame, then hand it over if the ship is in the predicted state, or search
+	## again from the actual state.
+	func _hand_over() -> void:
+		if Engine.get_physics_frames() < _maneuver.hold_frame:
+			return
+		_holding = false
+		var now := _ship.get_pilot_state()
+		var expected := _maneuver.handoff_state
+		var difference := (now.position - expected.position).length() + (now.velocity - expected.velocity).length() + absf(wrapf(now.yaw - expected.yaw, -PI, PI)) + absf(now.turn_rate - expected.turn_rate)
+		if Engine.get_physics_frames() == _maneuver.hold_frame and difference <= HANDOFF_TOLERANCE:
+			_finish_maneuver()
+		else:
+			_held_frames = 0
+			_maneuver.restart()
+
+	func _finish_maneuver() -> void:
+		var held := "" if _held_frames == 0 else ", held %d ticks" % _held_frames
+		_finish(_maneuver.chosen, "%s%s; %d rollouts, %d predicted ticks, %d skipped stretches, %d queries%s" % [_route.hazard_text, _maneuver.departure_text(), _maneuver.rollouts, _maneuver.predicted_ticks, _maneuver.skipped, _probe.queries, held])
 
 	func _finish(p_plan: RouteGuidance.Plan, note: String) -> void:
 		plan = p_plan

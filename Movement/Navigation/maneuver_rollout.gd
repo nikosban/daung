@@ -9,7 +9,12 @@ extends RefCounted
 ## velocity and hull along it, no turn) and that is at least one stopping distance long is skipped: the next region
 ## then starts from the re-entry assumption (on the route, hull along it, the speed the speed law allows there). That
 ## assumption is not proof; the Task #44 stop remains the fallback there. Past the last region the prediction passes
-## once the predicted ship's drift corridor (CorridorScan) is empty.
+## once the predicted ship's drift corridor (CorridorScan) is empty; the corridor is only checked while the predicted
+## ship is within arrival_tolerance of the route, since it bounds drift off the route, not the way back to it (Task #50).
+##
+## Wait (Task #50): a rollout may first predict wait_ticks ticks of the braking the ship does while its job runs (no
+## order), then the plan from that state (handoff_state), which is where the real ship starts it. A direct plan's
+## course is taken from the position where the plan starts, as ShipMovement does at handoff.
 ##
 ## Clearance mode (find_clear): a departure is predicted only until the hull has room to turn, a cylinder of hull reach
 ## + clearance buffer around the root being empty (rotation is then safe at any yaw). It passes with clear_time, the
@@ -34,9 +39,9 @@ const SETTLE_TURN_RATE := deg_to_rad(0.5)
 var plan: RouteGuidance.Plan
 var follow := RouteGuidance.Follow.new()
 var state: ShipPilot.State
-## Validation mode: only the stretch from the actual state to the end of the first hazard region (or to the point
-## the ship settles before it) is checked.
-var first_stretch_only := false
+## Braking ticks predicted before the plan starts (see Wait above), and the predicted state when it starts.
+var wait_ticks := 0
+var handoff_state: ShipPilot.State
 var simulated_ticks := 0
 var skipped := 0
 var failure := ""
@@ -72,6 +77,8 @@ var _motions := PackedVector3Array()
 var _dyaws := PackedFloat32Array()
 var _sweeps := PackedFloat32Array()
 var _sweep := 0.0
+var _direct_has_course := false
+var _direct_course := 0.0
 
 
 func _init(p_plan: RouteGuidance.Plan, start: ShipPilot.State, profile: MovementProfile, probe: HullProbe, regions: Array[Vector2], final_hazard: bool, delta: float) -> void:
@@ -84,7 +91,7 @@ func _init(p_plan: RouteGuidance.Plan, start: ShipPilot.State, profile: Movement
 	_delta = delta
 	_stop_distance = RoutePlanner.stop_distance_of(profile)
 	_targets.has_order = true
-	RouteGuidance.track(plan, follow, state.position)
+	_start_plan()
 
 
 func run(clock: PlanClock) -> int:
@@ -102,7 +109,12 @@ func _tick() -> int:
 		exhausted = true
 		failure = "prediction limit reached"
 		return FAIL
+	if wait_ticks > 0:
+		return _wait_tick()
 	RouteGuidance.guide(plan, follow, state.position, state.yaw, _targets)
+	if plan.kind == RouteGuidance.Kind.DIRECT:
+		_targets.has_course = _direct_has_course
+		_targets.course_yaw = _direct_course
 	_targets.has_order = not _arrived
 	var position := state.position
 	var yaw := state.yaw
@@ -143,15 +155,16 @@ func _tick() -> int:
 		if not _flush():
 			return FAIL
 		_region += 1
-		if first_stretch_only:
-			return PASS
 	# Past the last hazard region, the rest of the flight cannot touch anything once its drift corridor is empty.
 	var in_region := _region < _regions.size() and follow.s >= _regions[_region].x
 	if _region >= _regions.size():
 		_drift_time += _delta
+		var off_route := RouteGuidance.planar(state.position - follow.point).length()
+		if _corridor == null and off_route > _profile.arrival_tolerance:
+			_drift_time = 0.0
 		if _corridor == null and _drift_time >= DRIFT_CHECK_INTERVAL - RouteGuidance.TIME_EPSILON:
 			_drift_time = 0.0
-			_corridor = CorridorScan.new(plan, _probe, _profile, state.position, state.velocity.length(), follow.s)
+			_corridor = CorridorScan.new(plan, _probe, _profile, state.position, state.velocity.length(), follow.s, off_route)
 		if _corridor != null:
 			for i in CORRIDOR_SAMPLES_PER_TICK:
 				var corridor := _corridor.step()
@@ -169,10 +182,39 @@ func _tick() -> int:
 		if _regions[_region].x - follow.s >= _stop_distance:
 			if not _flush():
 				return FAIL
-			if first_stretch_only:
-				return PASS
 			_reenter(_regions[_region].x)
 	return RUNNING
+
+
+## One predicted tick of the braking before the plan starts (no order: the pilot brakes, rotation stops), hull-checked
+## like any other tick. When the wait ends, the plan starts from the state reached.
+func _wait_tick() -> int:
+	var braking := ShipPilot.Targets.new()
+	var position := state.position
+	var yaw := state.yaw
+	ShipPilot.step(_profile, state, braking, _delta, _out)
+	var motion := Vector3(state.velocity.x, 0.0, state.velocity.z) * _delta
+	state.position = position + motion
+	state.bow = ShipPilot.bow_of(state.yaw)
+	simulated_ticks += 1
+	_buffer(position, yaw, motion, state.yaw - yaw)
+	if (_sweep >= _probe.half_width or _positions.size() >= SEGMENT_MAX_TICKS) and not _flush():
+		return FAIL
+	wait_ticks -= 1
+	if wait_ticks == 0:
+		handoff_state = state.copy()
+		_start_plan()
+	return RUNNING
+
+
+## Starts following the plan from the current predicted state, as ShipMovement does at handoff: fresh route
+## progress, and a direct plan's course from here to the destination.
+func _start_plan() -> void:
+	follow = RouteGuidance.Follow.new()
+	RouteGuidance.track(plan, follow, state.position)
+	var course := RouteGuidance.planar(plan.destination - state.position)
+	_direct_has_course = course != Vector3.ZERO
+	_direct_course = atan2(-course.x, -course.z) if _direct_has_course else 0.0
 
 
 ## Whether the predicted ship follows the route as the re-entry assumption describes: within the arrival tolerance
