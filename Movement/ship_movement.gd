@@ -62,8 +62,8 @@ var _pilot_out := ShipPilot.Output.new()
 ## follows (null for the direct order) with its progress.
 var _probe: HullProbe
 var _job: Navigator.Job
-var _plan: Navigator.Plan
-var _follow: Navigator.Follow
+var _plan: RouteGuidance.Plan
+var _follow: RouteGuidance.Follow
 
 
 func _ready() -> void:
@@ -222,7 +222,7 @@ func _physics_process(delta: float) -> void:
 	_pilot_state.planar_fraction_prev = _planar_fraction_prev
 	_pilot_targets.has_order = _has_order and _job == null
 	if _plan != null and _has_order:
-		Navigator.guide(_plan, _follow, global_position, rotation.y, _pilot_targets)
+		RouteGuidance.guide(_plan, _follow, global_position, rotation.y, _pilot_targets)
 	else:
 		_pilot_targets.destination = _destination
 		_pilot_targets.use_steer = false
@@ -232,7 +232,7 @@ func _physics_process(delta: float) -> void:
 		_pilot_targets.bend_radii = PackedFloat32Array()
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
 	if _follow != null:
-		_follow.ticks += 1
+		_follow.time += delta
 	if _pilot_out.arrived:
 		_has_order = false
 		_plan = null
@@ -306,7 +306,7 @@ func _take_plan() -> void:
 		return
 	if job.status != Navigator.Status.DONE:
 		return
-	if job.plan.kind == Navigator.Kind.DIRECT:
+	if job.plan.kind == RouteGuidance.Kind.DIRECT:
 		# The direct order keeps its course from the ship's position now (the activation tick when planning took one
 		# tick, as before Task #46).
 		var course := _destination - global_position
@@ -316,9 +316,9 @@ func _take_plan() -> void:
 			_course_yaw = atan2(-course.x, -course.z)
 	else:
 		_plan = job.plan
-		_follow = Navigator.Follow.new()
+		_follow = RouteGuidance.Follow.new()
 	var route := ""
-	if job.plan.kind != Navigator.Kind.DIRECT:
+	if job.plan.kind != RouteGuidance.Kind.DIRECT:
 		var points: Array[String] = []
 		for point in job.plan.route:
 			points.push_back("(%.2f, %.2f)" % [point.x, point.z])
