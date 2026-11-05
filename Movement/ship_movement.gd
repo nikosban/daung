@@ -27,6 +27,12 @@ extends CharacterBody3D
 ##
 ## Static contact (Task #44): driving into a stationary StaticBody3D ends the active order and zeroes planar
 ## velocity and turn rate; see _stop_on_static_contact().
+##
+## Navigation (Task #46): each activated move starts one planning job (Navigator). Until the job finishes the ship
+## brakes as it does without an order; the job's plan is then handed to the pilot once and followed every tick (the
+## unchanged direct order, a route around obstacles, or a departure that holds heading before following the route).
+## A declined plan ends the order. Nothing is re-planned without a new order; a later move or stop cancels the job.
+## The pilot itself is ShipPilot; this script stays the single writer of position, velocity and yaw.
 
 @export var profile: MovementProfile
 
@@ -48,22 +54,29 @@ var _turn_rate := 0.0
 ## thruster demand, so it carries over order replacement and stop(); it starts at 0 (no demand before the
 ## first tick). Used only to plan the yaw braking authority.
 var _planar_fraction_prev := 0.0
-## Last tick's values (read-only debug getters).
-var _main_command := 0.0
-var _thruster_command := Vector3.ZERO
-var _target_yaw := 0.0
-var _turn_acceleration := 0.0
-var _rudder_multiplier := 0.0
-var _turn_rate_limit := 0.0
-var _shared_scale := 1.0
-var _desired_speed := 0.0
-var _planned_braking := 0.0
+## Pilot state, targets and last tick's values (read-only debug getters), reused every tick.
+var _pilot_state := ShipPilot.State.new()
+var _pilot_targets := ShipPilot.Targets.new()
+var _pilot_out := ShipPilot.Output.new()
+## Navigation (Task #46): the hull probe, the active order's planning job (null when none) and the plan the pilot
+## follows (null for the direct order) with its progress.
+var _probe: HullProbe
+var _job: Navigator.Job
+var _plan: Navigator.Plan
+var _follow: Navigator.Follow
 
 
 func _ready() -> void:
 	if not _profile_valid():
 		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0) and a rudder curve above 0 at full speed; the ship will not move.")
 		set_physics_process(false)
+		return
+	var hull: CollisionShape3D = null
+	for child in get_children():
+		if child is CollisionShape3D:
+			hull = child
+			break
+	_probe = HullProbe.new(self, hull)
 
 
 ## Receives an order to the point. After the reaction delay it replaces the active order; the course is
@@ -78,7 +91,8 @@ func stop() -> void:
 	_receive("stop", Vector3.ZERO)
 
 
-## Whether an order is active (activated and not yet arrived or stopped). Pending commands do not count.
+## Whether an order is active (activated and not yet arrived or stopped; also while its plan is being made).
+## Pending commands do not count.
 func has_order() -> bool:
 	return _has_order
 
@@ -122,7 +136,7 @@ func get_heading() -> float:
 
 ## Course heading of the current order in degrees (same convention as get_heading()).
 func get_target_heading() -> float:
-	return rad_to_deg(_target_yaw)
+	return rad_to_deg(_pilot_out.target_yaw)
 
 
 ## Current turn rate in °/s (positive = counter-clockwise).
@@ -132,138 +146,102 @@ func get_turn_rate() -> float:
 
 ## Last turn-rate limit at the actual speed, in °/s.
 func get_turn_rate_limit() -> float:
-	return rad_to_deg(_turn_rate_limit)
+	return rad_to_deg(_pilot_out.turn_rate_limit)
 
 
 ## Last applied angular acceleration in °/s², after shared-capacity scaling.
 func get_turn_acceleration() -> float:
-	return rad_to_deg(_turn_acceleration)
+	return rad_to_deg(_pilot_out.turn_acceleration)
 
 
 ## Last rudder multiplier sampled from the rudder curve at the actual speed.
 func get_rudder_multiplier() -> float:
-	return _rudder_multiplier
+	return _pilot_out.rudder_multiplier
 
 
 ## Last shared-capacity scale applied to both thruster and turning demand (1 = not saturated).
 func get_shared_scale() -> float:
-	return _shared_scale
+	return _pilot_out.shared_scale
 
 
 ## Last desired approach speed in m/s.
 func get_desired_speed() -> float:
-	return _desired_speed
+	return _pilot_out.desired_speed
 
 
 ## Last planar braking acceleration the pilot planned its approach with, in m/s²: a_t / (1 + turn fraction),
 ## further limited by the retro rule when the hull has no retro thrusters.
 func get_planned_braking() -> float:
-	return _planned_braking
+	return _pilot_out.planned_braking
 
 
 ## Last main-engine acceleration along the bow, 0 to main_acceleration, in m/s².
 func get_main_command() -> float:
-	return _main_command
+	return _pilot_out.main_command
 
 
 ## Last directional thruster acceleration (world XZ), magnitude up to thruster_strength / mass, in m/s².
 func get_thruster_command() -> Vector3:
-	return _thruster_command
+	return _pilot_out.thruster_command
+
+
+## Whether the active order is still waiting for its navigation plan (the ship brakes meanwhile).
+func is_planning() -> bool:
+	return _job != null
+
+
+## The ship's planar pilot state now, as the pilot reads it at the start of a tick (navigation planning).
+func get_pilot_state() -> ShipPilot.State:
+	var state := ShipPilot.State.new()
+	var bow := -global_basis.z
+	bow.y = 0.0
+	state.position = global_position
+	state.velocity = velocity
+	state.yaw = rotation.y
+	state.bow = bow.normalized()
+	state.turn_rate = _turn_rate
+	state.planar_fraction_prev = _planar_fraction_prev
+	return state
 
 
 func _physics_process(delta: float) -> void:
 	_clock += delta
 	while not _pending.is_empty() and _pending[0].due <= _clock:
 		_activate(_pending.pop_front())
+	Navigator.service()
+	if _job != null and _job.status != Navigator.Status.PENDING:
+		_take_plan()
 
-	var planar_velocity := Vector3(velocity.x, 0.0, velocity.z)
-	var speed := planar_velocity.length()
-	var to_destination := _destination - global_position
-	to_destination.y = 0.0
-	var distance := to_destination.length()
-	var thruster_limit := profile.thruster_strength / profile.mass
-	var sternward_limit := _sternward_limit(thruster_limit)
 	var bow := -global_basis.z
 	bow.y = 0.0
-	bow = bow.normalized()
-
-	if _has_order and distance <= profile.arrival_tolerance and speed <= profile.arrival_speed_tolerance:
-		_has_order = false
-
-	# Turning demand: bounded angular acceleration toward the order's course heading, as a fraction of the
-	# rated authority at the actual speed. The turn-rate limit follows the same rudder curve, normalized
-	# to its full-speed value, so it is zero at rest.
-	_rudder_multiplier = profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
-	var turn_limit := deg_to_rad(profile.turn_authority / profile.mass) * _rudder_multiplier
-	_turn_rate_limit = deg_to_rad(profile.max_turn_rate_at_max_speed) * _rudder_multiplier / profile.rudder_curve.sample(1.0)
-	_target_yaw = _course_yaw
-	var turn_request := 0.0
-	var turn_fraction := 0.0
-	if _has_order and _has_course and turn_limit > 0.0:
-		var error := wrapf(_target_yaw - rotation.y, -PI, PI)
-		# Braking-distance rule: the fastest rate that can still stop at the target, within the turn-rate
-		# limit. It plans with the share the turn would get if planar demand stays at last tick's level
-		# (proportional sharing). The |error| / delta term only keeps the wanted rate from stepping past
-		# the target in one tick.
-		var planned_turn_limit := turn_limit / (1.0 + _planar_fraction_prev)
-		var wanted_rate := signf(error) * minf(minf(sqrt(2.0 * planned_turn_limit * absf(error)), absf(error) / delta), _turn_rate_limit)
-		turn_request = (wanted_rate - _turn_rate) / delta
-		turn_fraction = minf(absf(turn_request) / turn_limit, 1.0)
+	_pilot_state.position = global_position
+	_pilot_state.velocity = velocity
+	_pilot_state.yaw = rotation.y
+	_pilot_state.bow = bow.normalized()
+	_pilot_state.turn_rate = _turn_rate
+	_pilot_state.planar_fraction_prev = _planar_fraction_prev
+	_pilot_targets.has_order = _has_order and _job == null
+	if _plan != null and _has_order:
+		Navigator.guide(_plan, _follow, global_position, rotation.y, _pilot_targets)
 	else:
-		_turn_rate = 0.0
+		_pilot_targets.destination = _destination
+		_pilot_targets.use_steer = false
+		_pilot_targets.has_course = _has_course
+		_pilot_targets.course_yaw = _course_yaw
+		_pilot_targets.bend_from = 0
+		_pilot_targets.bend_radii = PackedFloat32Array()
+	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
+	if _follow != null:
+		_follow.ticks += 1
+	if _pilot_out.arrived:
+		_has_order = false
+		_plan = null
+		_follow = null
 
-	# Desired velocity: toward the destination at the speed the thrusters can still stop from, capped. The
-	# braking it plans with is what proportional sharing leaves a saturated planar demand beside this
-	# tick's turning demand: a_t / (1 + turn fraction).
-	# Without retro thrusters, stopping the velocity takes acceleration along its reverse, whose sternward share
-	# is (travel direction · bow); the retro rule then allows at most sternward_limit / share. At a standstill
-	# the travel direction is the direction to the destination.
-	# The pilot closes the gap to the desired speed through pilot_response_time, so it would trail the ideal
-	# braking curve sqrt(2 a d) by a·response time. Subtracting that lag makes the request exactly the planned
-	# braking while the ship is on the curve, so braking starts in time to stop at the destination (clamped at
-	# zero within a·response time² / 2 of it).
-	_planned_braking = thruster_limit / (1.0 + turn_fraction)
-	var travel := Vector3.ZERO
-	if speed > 0.0:
-		travel = planar_velocity / speed
-	elif distance > 0.0:
-		travel = to_destination / distance
-	var sternward_share := travel.dot(bow)
-	if sternward_share > 0.0:
-		_planned_braking = minf(_planned_braking, sternward_limit / sternward_share)
-	var desired := Vector3.ZERO
-	if _has_order and distance > 0.0:
-		desired = to_destination / distance * clampf(sqrt(2.0 * _planned_braking * distance) - _planned_braking * profile.pilot_response_time, 0.0, profile.max_speed)
-	_desired_speed = desired.length()
-
-	var requested := (desired - planar_velocity) / profile.pilot_response_time
-	# The main engine pushes along the bow only, and only when that cannot reduce the current speed
-	# (no stern-first component), so it never brakes. It is outside the shared thruster capacity.
-	_main_command = 0.0
-	if planar_velocity.dot(bow) >= 0.0:
-		_main_command = clampf(requested.dot(bow), 0.0, profile.main_acceleration)
-
-	# Planar demand on the directional thrusters, as a fraction of their rating.
-	var thruster_request := requested - bow * _main_command
-	var planar_fraction := minf(thruster_request.length() / thruster_limit, 1.0)
-
-	# One shared capacity: when the two fractions exceed it, both are scaled down proportionally.
-	_shared_scale = 1.0
-	if planar_fraction + turn_fraction > 1.0:
-		_shared_scale = 1.0 / (planar_fraction + turn_fraction)
-	_thruster_command = thruster_request.normalized() * planar_fraction * _shared_scale * thruster_limit
-	_turn_acceleration = signf(turn_request) * turn_fraction * _shared_scale * turn_limit
-	# Retro rule on the applied thrust: remove only the sternward excess; the removed capacity is not reallocated.
-	var sternward := -_thruster_command.dot(bow)
-	if sternward > sternward_limit:
-		_thruster_command += bow * (sternward - sternward_limit)
-
-	# The limit can contract faster than the authority can slow the turn; the rate is then clamped to it.
-	_turn_rate = clampf(_turn_rate + _turn_acceleration * delta, -_turn_rate_limit, _turn_rate_limit)
-	_planar_fraction_prev = planar_fraction
-	planar_velocity += (bow * _main_command + _thruster_command) * delta
-	velocity = planar_velocity.limit_length(profile.max_speed)
-	rotation.y += _turn_rate * delta
+	_turn_rate = _pilot_state.turn_rate
+	_planar_fraction_prev = _pilot_state.planar_fraction_prev
+	velocity = _pilot_state.velocity
+	rotation.y = _pilot_state.yaw
 	var attempted := Vector3(velocity.x, 0.0, velocity.z)
 	move_and_slide()
 	_stop_on_static_contact(attempted)
@@ -284,6 +262,7 @@ func _stop_on_static_contact(attempted: Vector3) -> void:
 		if attempted.dot(normal) >= 0.0:
 			continue
 		_has_order = false
+		_end_navigation()
 		velocity = Vector3.ZERO
 		_turn_rate = 0.0
 		print("Movement: static contact with %s at %.3f s, normal (%.2f, %.2f), speed %.2f m/s; order ended" % [collider.name, _clock, normal.x, normal.z, attempted.length()])
@@ -308,10 +287,52 @@ func _activate(command: Dictionary) -> void:
 		_has_course = course != Vector3.ZERO
 		if _has_course:
 			_course_yaw = atan2(-course.x, -course.z)
+		_end_navigation()
+		_job = Navigator.start_job(self, _probe, world_position)
 	else:
 		_has_order = false
+		_end_navigation()
 	_last_activated = _clock
 	print("Movement: activated %s at %.3f s (%.3f s after receipt)" % [_describe(command), _clock, _clock - command.received])
+
+
+## Hands the finished planning job's result to the pilot once (or ends a declined order).
+func _take_plan() -> void:
+	var job := _job
+	_job = null
+	if job.status == Navigator.Status.DECLINED:
+		_has_order = false
+		print("Movement: order to (%.1f, %.1f) declined at %.3f s: %s (%d µs over %d ticks)" % [job.click.x, job.click.z, _clock, job.reason, job.used_usec, job.ticks])
+		return
+	if job.status != Navigator.Status.DONE:
+		return
+	if job.plan.kind == Navigator.Kind.DIRECT:
+		# The direct order keeps its course from the ship's position now (the activation tick when planning took one
+		# tick, as before Task #46).
+		var course := _destination - global_position
+		course.y = 0.0
+		_has_course = course != Vector3.ZERO
+		if _has_course:
+			_course_yaw = atan2(-course.x, -course.z)
+	else:
+		_plan = job.plan
+		_follow = Navigator.Follow.new()
+	var route := ""
+	if job.plan.kind != Navigator.Kind.DIRECT:
+		var points: Array[String] = []
+		for point in job.plan.route:
+			points.push_back("(%.2f, %.2f)" % [point.x, point.z])
+		route = " via " + " ".join(points)
+	print("Movement: plan for (%.1f, %.1f) at %.3f s: %s%s; %s (%d µs over %d ticks)" % [job.click.x, job.click.z, _clock, ["direct", "route", "departure"][job.plan.kind], route, job.summary, job.used_usec, job.ticks])
+
+
+## Cancels the planning job and drops the plan (a new command activated, or the order ended).
+func _end_navigation() -> void:
+	if _job != null:
+		_job.cancel()
+	_job = null
+	_plan = null
+	_follow = null
 
 
 func _describe(command: Dictionary) -> String:
@@ -326,10 +347,3 @@ func _profile_valid() -> bool:
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
 		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 \
 		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0
-
-
-## Largest sternward directional-thruster acceleration (m/s²): unlimited with retro thrusters.
-func _sternward_limit(thruster_limit: float) -> float:
-	if profile.retro_thrusters:
-		return INF
-	return profile.no_retro_braking_effectiveness * thruster_limit

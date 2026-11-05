@@ -35,3 +35,10 @@ extends Resource
 ## Crew reaction delay: time between receiving a move or stop command and the pilot acting on it. Every
 ## command waits its own delay; the active order stands until then. 0 acts on the next physics tick.
 @export_range(0.0, 5.0, 0.01, "suffix:s") var reaction_delay: float = 0.3
+## Route guidance (Task #46): the pilot aims at the point this far ahead along the planned route, so it rounds bends
+## instead of chasing each route vertex. Only used for orders the navigator routes around obstacles.
+@export_range(2.0, 60.0, 0.1, "suffix:m") var detour_lookahead_distance: float = 10.0
+## Planning clearance (Task #46): the hull counts as clear of obstacles at any yaw where a cylinder this much wider
+## than its reach is empty (a cheap shortcut used to find the route sections that need a full hull check). Never
+## blocks a ship that is touching an obstacle from moving away.
+@export_range(0.05, 5.0, 0.01, "suffix:m") var plan_clearance_buffer: float = 0.5
