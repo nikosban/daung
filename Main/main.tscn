@@ -7,6 +7,7 @@
 [ext_resource type="Script" uid="uid://2frr3jy3edpm" path="res://Main/movement_debug_overlay.gd" id="5_overlay"]
 [ext_resource type="Script" uid="uid://bw82flnn8gbww" path="res://Main/movement_trail.gd" id="6_trail"]
 [ext_resource type="Resource" path="res://Main/movement_trail_settings.tres" id="7_trail_settings"]
+[ext_resource type="Script" path="res://Main/collision_shape_outline.gd" id="8_outline"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -54,7 +55,6 @@ far = 1000.0
 script = ExtResource("4_camera")
 
 [node name="Ship" parent="." unique_id=2125529357 instance=ExtResource("1_ship")]
-collision_mask = 0
 
 [node name="TestDestinationMarker" type="MeshInstance3D" parent="." unique_id=22172087]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100, 0, 0)
@@ -90,6 +90,12 @@ shape = SubResource("SphereShape3D_obstacle")
 mesh = SubResource("SphereMesh_obstacle")
 surface_material_override/0 = SubResource("StandardMaterial3D_obstacle")
 
+[node name="CollisionOutline" type="MeshInstance3D" parent="TestObstacle/CollisionShape3D"]
+script = ExtResource("8_outline")
+
+[node name="CollisionOutline" type="MeshInstance3D" parent="Ship/CollisionShape3D"]
+script = ExtResource("8_outline")
+
 [node name="NavigationFloor" type="StaticBody3D" parent="." unique_id=1048801733 groups=["navigation_source"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -0.5, 0)
 collision_layer = 2
@@ -117,10 +123,11 @@ visible = false
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_debug_destination")
 
-[node name="MovementDebugOverlay" type="CanvasLayer" parent="." unique_id=1163721375 node_paths=PackedStringArray("ship", "trail", "destination_marker")]
+[node name="MovementDebugOverlay" type="CanvasLayer" parent="." unique_id=1163721375 node_paths=PackedStringArray("ship", "trail", "destination_marker", "collision_outlines")]
 script = ExtResource("5_overlay")
 ship = NodePath("../Ship")
 trail = NodePath("../MovementTrail")
 destination_marker = NodePath("../DebugDestinationMarker")
+collision_outlines = [NodePath("../Ship/CollisionShape3D/CollisionOutline"), NodePath("../TestObstacle/CollisionShape3D/CollisionOutline")]
 
 [connection signal="move_requested" from="RightClickMoveInput" to="MovementDebugOverlay" method="record_move_request"]

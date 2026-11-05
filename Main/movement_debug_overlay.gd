@@ -6,6 +6,7 @@ extends CanvasLayer
 ## F3 also turns the world-space movement trail on and off with it (a fresh trace each time it turns on).
 ## F3 also shows the debug destination marker at the latest received right-click (Task #38): it represents receipt, not
 ## activation, and is forgotten once the ship has no active order and no pending command. Never changes Movement's queue.
+## F3 also shows and hides the red collision-shape outlines (Task #44).
 
 ## Display height of the destination marker above the clicked XZ (rendering detail, not motion data).
 const MARKER_DISPLAY_HEIGHT := 0.1
@@ -13,6 +14,8 @@ const MARKER_DISPLAY_HEIGHT := 0.1
 @export var ship: ShipMovement
 @export var trail: MovementTrail
 @export var destination_marker: MeshInstance3D
+## F3 red outlines of collision shapes (Task #44); shown and hidden with the readout.
+@export var collision_outlines: Array[CollisionShapeOutline] = []
 
 var _label := Label.new()
 var _has_request := false
@@ -32,6 +35,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key != null and key.pressed and not key.echo and key.keycode == KEY_F3:
 		visible = not visible
 		trail.set_active(visible)
+		for outline in collision_outlines:
+			outline.visible = visible
 		_update_marker()
 
 
