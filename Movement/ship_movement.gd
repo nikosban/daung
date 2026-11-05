@@ -24,6 +24,9 @@ extends CharacterBody3D
 ## Reaction delay: move_to() and stop() only receive a command. Each waits its own profile.reaction_delay on
 ## the physics clock in one FIFO queue and is then activated at the start of a physics tick, in receipt order;
 ## nothing is cancelled or skipped. Until then the active order stands.
+##
+## Static contact (Task #44): driving into a stationary StaticBody3D ends the active order and zeroes planar
+## velocity and turn rate; see _stop_on_static_contact().
 
 @export var profile: MovementProfile
 
@@ -261,7 +264,30 @@ func _physics_process(delta: float) -> void:
 	planar_velocity += (bow * _main_command + _thruster_command) * delta
 	velocity = planar_velocity.limit_length(profile.max_speed)
 	rotation.y += _turn_rate * delta
+	var attempted := Vector3(velocity.x, 0.0, velocity.z)
 	move_and_slide()
+	_stop_on_static_contact(attempted)
+
+
+## Static contact (Task #44): when this tick's slide hit a stationary StaticBody3D (not an AnimatableBody3D) while
+## the attempted planar motion drove into its surface, the active order ends (pending commands stay queued) and
+## planar velocity and turn rate become zero at the engine's contact-constrained position. Resting or outward
+## contact never qualifies, so a new order away from a touching obstacle is not stopped.
+func _stop_on_static_contact(attempted: Vector3) -> void:
+	for i in get_slide_collision_count():
+		var collision := get_slide_collision(i)
+		var collider := collision.get_collider()
+		if not collider is StaticBody3D or collider is AnimatableBody3D:
+			continue
+		var normal := collision.get_normal()
+		normal.y = 0.0
+		if attempted.dot(normal) >= 0.0:
+			continue
+		_has_order = false
+		velocity = Vector3.ZERO
+		_turn_rate = 0.0
+		print("Movement: static contact with %s at %.3f s, normal (%.2f, %.2f), speed %.2f m/s; order ended" % [collider.name, _clock, normal.x, normal.z, attempted.length()])
+		return
 
 
 func _receive(kind: String, world_position: Vector3) -> void:
