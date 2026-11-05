@@ -20,9 +20,12 @@ extends RefCounted
 ## flight; reaching it declines the order. That limit counts predicted time, so the outcome does not depend on how
 ## fast the machine runs the search.
 ##
-## The search predicts from a snapshot of the ship. If the ship has moved by the time a candidate passes (it brakes
-## while the job waits), the candidate's first stretch is predicted again from the actual state (validation); a
-## failure restarts the search from that state.
+## The search predicts from a snapshot of the ship (the anchor) taken at a known physics frame. If the ship has moved
+## by the time a candidate passes (it brakes while the job runs), the candidate is predicted again from the anchor with
+## a predicted braking wait of 2 x (frames the search took) + 1 ticks first (validation, Task #50); the plan is then
+## handed over exactly that many frames after the anchor (hold_frame), from the predicted state (handoff_state). If
+## validation itself ends after that frame, it is repeated with the wait doubled; a failure restarts the search from
+## the ship's state then. The braking while a job waits is the pilot without an order, so it is predicted exactly.
 
 enum { RUNNING, PASS, FAIL }
 enum Task { PRIMARY, CLEARANCE, DEPARTURE }
@@ -59,6 +62,13 @@ var _clearance: Array = []
 var _fixed_added := false
 var _validating := false
 var _rollout: ManeuverRollout
+## Physics frame of the anchor snapshot, and the braking wait (ticks) the validation predicts before handoff.
+var _anchor_frame := 0
+var _wait := 0
+## After PASS with validation: the physics frame on which the plan must be handed over and the state the ship must
+## have then; -1 when the plan applies at once (the ship had not moved).
+var hold_frame := -1
+var handoff_state: ShipPilot.State
 
 
 func _init(route_plan: RouteGuidance.Plan, primary: RouteGuidance.Plan, regions: Array[Vector2], final_hazard: bool, profile: MovementProfile, probe: HullProbe, live_state: Callable, delta: float, prediction_limit: float) -> void:
@@ -79,7 +89,7 @@ func run(clock: PlanClock) -> int:
 		if _rollout == null:
 			if _validating:
 				_rollout = _new_rollout(chosen)
-				_rollout.first_stretch_only = true
+				_rollout.wait_ticks = _wait
 			else:
 				if _tasks.is_empty() and not _fixed_added:
 					_add_fixed_departures()
@@ -102,7 +112,13 @@ func run(clock: PlanClock) -> int:
 			return FAIL
 		if _validating:
 			if result == ManeuverRollout.PASS:
-				return PASS
+				if Engine.get_physics_frames() <= _anchor_frame + _wait:
+					hold_frame = _anchor_frame + _wait
+					handoff_state = finished.handoff_state
+					return PASS
+				# Validation ended after the handoff frame it predicted: predict a longer wait.
+				_wait *= 2
+				continue
 			# The ship moved while the job ran and the chosen maneuver no longer holds: search again from now.
 			_start_search()
 			continue
@@ -120,7 +136,7 @@ func run(clock: PlanClock) -> int:
 			if _same_state(_snapshot, now):
 				return PASS
 			_validating = true
-			_snapshot = now
+			_wait = 2 * (Engine.get_physics_frames() - _anchor_frame) + 1
 			continue
 		if _task[0] == Task.PRIMARY:
 			failure = finished.failure
@@ -144,8 +160,16 @@ func departure_text() -> String:
 	return " departing %s for %.2f s" % [name, chosen.switch_time]
 
 
+## Searches again from the ship's state now (the ship was not in the predicted state at the handoff frame).
+func restart() -> void:
+	_rollout = null
+	hold_frame = -1
+	_start_search()
+
+
 func _start_search() -> void:
 	_snapshot = _live_state.call()
+	_anchor_frame = Engine.get_physics_frames()
 	_validating = false
 	_tasks = [[Task.PRIMARY, Vector3.ZERO, 0.0]]
 	var moving := RouteGuidance.planar(_snapshot.velocity).length() > _profile.arrival_speed_tolerance
