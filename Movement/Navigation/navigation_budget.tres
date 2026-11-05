@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="NavigationBudget" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Movement/Navigation/navigation_budget.gd" id="1_budget"]
+
+[resource]
+script = ExtResource("1_budget")
+plan_time_per_tick = 1500
+plan_prediction_per_order = 120.0

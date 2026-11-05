@@ -1,7 +1,8 @@
 extends CanvasLayer
 ## Temporary F3 movement readout of one ship: speed, velocity, heading, turning (course heading, rate and its limit,
 ## applied angular acceleration, rudder multiplier, shared-capacity scale), desired speed, planned braking, main-engine and thruster
-## commands, active destination and order state, and the reaction-delay queue (physics clock, pending count, next
+## commands, active destination and order state, the latest order's outcome (Task #46: planning, accepted, declined
+## with its reason, arrived, stopped or static-contact stop), and the reaction-delay queue (physics clock, pending count, next
 ## pending command and its due time, last receipt and activation times). Reads Movement only; Movement never calls it. Hidden until F3.
 ## F3 also turns the world-space movement trail on and off with it (a fresh trace each time it turns on).
 ## F3 also shows the debug destination marker at the latest received right-click (Task #38): it represents receipt, not
@@ -56,7 +57,7 @@ func _process(_delta: float) -> void:
 	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
 	var thruster := ship.get_thruster_command()
 	var destination := ship.get_destination()
-	_label.text = "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°  course %7.1f°\nturn rate %7.1f / %5.1f °/s  turn accel %7.1f °/s²  rudder %4.2f×  shared %4.2f\ndesired %6.2f m/s  planned braking %5.2f m/s²\nmain %6.2f m/s²\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)\n%s\nclock %7.2f s  pending %d%s  last received %s  last activated %s" % [
+	_label.text = "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°  course %7.1f°\nturn rate %7.1f / %5.1f °/s  turn accel %7.1f °/s²  rudder %4.2f×  shared %4.2f\ndesired %6.2f m/s  planned braking %5.2f m/s²\nmain %6.2f m/s²\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)\n%s\norder: %s\nclock %7.2f s  pending %d%s  last received %s  last activated %s" % [
 		velocity.length(), velocity.x, velocity.z,
 		ship.get_heading(), ship.get_target_heading(),
 		ship.get_turn_rate(), ship.get_turn_rate_limit(), ship.get_turn_acceleration(), ship.get_rudder_multiplier(), ship.get_shared_scale(),
@@ -64,6 +65,7 @@ func _process(_delta: float) -> void:
 		ship.get_main_command(),
 		thruster.length(), thruster.x, thruster.z,
 		"active destination (%.1f, %.1f)" % [destination.x, destination.z] if ship.has_order() else "no active order",
+		ship.get_order_status(),
 		ship.get_clock(), ship.get_pending_count(), _next_pending_text(), _time_text(ship.get_last_received_time()), _time_text(ship.get_last_activated_time()),
 	]
 
