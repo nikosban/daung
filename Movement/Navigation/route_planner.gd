@@ -116,8 +116,9 @@ func _enabled_regions() -> Array[RID]:
 	return enabled
 
 
-## Clicks outside every enabled region's bounds, or more than one cell off the mesh, keep the direct order (baseline
-## until destination resolution).
+## Clicks outside every enabled region's bounds keep the direct order (baseline). A click inside them but more than
+## one cell off the mesh lies in a static no-go zone (an obstacle's baked exclusion) and is declined (Task #48; no
+## substitute destination until destination resolution).
 func _classify() -> void:
 	var inside := false
 	for region in _enabled_regions():
@@ -130,7 +131,8 @@ func _classify() -> void:
 		return
 	var off_mesh := RouteGuidance.planar(NavigationServer3D.map_get_closest_point(_map, _click) - _click).length()
 	if off_mesh > _cell:
-		_baseline("unresolved destination %.2f m off the navigation mesh: direct (baseline until destination resolution)" % off_mesh)
+		result = UNREACHABLE
+		note = "destination inside a no-go zone (%.2f m off the navigation mesh)" % off_mesh
 		return
 	_step = Step.PATH
 

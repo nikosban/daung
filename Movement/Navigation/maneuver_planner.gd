@@ -62,6 +62,8 @@ var _clearance: Array = []
 var _fixed_added := false
 var _validating := false
 var _rollout: ManeuverRollout
+## Navigation map for the rollouts' no-go check (Task #48).
+var _map: RID
 ## Physics frame of the anchor snapshot, and the braking wait (ticks) the validation predicts before handoff.
 var _anchor_frame := 0
 var _wait := 0
@@ -71,7 +73,8 @@ var hold_frame := -1
 var handoff_state: ShipPilot.State
 
 
-func _init(route_plan: RouteGuidance.Plan, primary: RouteGuidance.Plan, regions: Array[Vector2], final_hazard: bool, profile: MovementProfile, probe: HullProbe, live_state: Callable, delta: float, prediction_limit: float) -> void:
+func _init(route_plan: RouteGuidance.Plan, primary: RouteGuidance.Plan, regions: Array[Vector2], final_hazard: bool, profile: MovementProfile, probe: HullProbe, live_state: Callable, delta: float, prediction_limit: float, map: RID) -> void:
+	_map = map
 	_route_plan = route_plan
 	_primary = primary
 	_regions = regions
@@ -216,7 +219,7 @@ func _departure(local_direction: Vector3, switch_time: float) -> RouteGuidance.P
 
 
 func _new_rollout(plan: RouteGuidance.Plan) -> ManeuverRollout:
-	return ManeuverRollout.new(plan, _snapshot, _profile, _probe, _regions, _final_hazard, _delta)
+	return ManeuverRollout.new(plan, _snapshot, _profile, _probe, _regions, _final_hazard, _delta, _map)
 
 
 func _same_state(a: ShipPilot.State, b: ShipPilot.State) -> bool:

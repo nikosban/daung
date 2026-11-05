@@ -134,7 +134,7 @@ class Job:
 					_decline(_route.note)
 				RoutePlanner.ROUTE:
 					if _route.needs_prediction:
-						_maneuver = ManeuverPlanner.new(_route.route_plan, _route.primary_plan, _route.regions, _route.final_hazard, _profile, _probe, _ship.get_pilot_state, _ship.get_physics_process_delta_time(), Navigator.BUDGET.plan_prediction_per_order)
+						_maneuver = ManeuverPlanner.new(_route.route_plan, _route.primary_plan, _route.regions, _route.final_hazard, _profile, _probe, _ship.get_pilot_state, _ship.get_physics_process_delta_time(), Navigator.BUDGET.plan_prediction_per_order, _ship.get_world_3d().navigation_map)
 					else:
 						_finish(_route.primary_plan, "no hazard regions")
 		if _holding:

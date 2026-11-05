@@ -16,6 +16,11 @@ extends RefCounted
 ## order), then the plan from that state (handoff_state), which is where the real ship starts it. A direct plan's
 ## course is taken from the position where the plan starts, as ShipMovement does at handoff.
 ##
+## No-go zone (Task #48): once the predicted centre has been on the navigation mesh (within one map cell), a tick
+## that takes it more than MovementProfile.no_go_tolerance beyond the mesh edge fails the maneuver ("centre enters
+## the no-go zone"). A ship starting inside a zone may leave it. The rotating hull may cross the edge (only the centre
+## is tested), the braking wait and clearance mode are not tested, and nothing is enforced in real flight.
+##
 ## Clearance mode (find_clear): a departure is predicted only until the hull has room to turn, a cylinder of hull reach
 ## + clearance buffer around the root being empty (rotation is then safe at any yaw). It passes with clear_time, the
 ## predicted time since handoff when that happens, and fails on hull contact or after clear_limit seconds.
@@ -79,9 +84,13 @@ var _sweeps := PackedFloat32Array()
 var _sweep := 0.0
 var _direct_has_course := false
 var _direct_course := 0.0
+## No-go check (Task #48): the navigation map, its cell size and whether the predicted centre has been on the mesh.
+var _map: RID
+var _cell := 0.25
+var _on_mesh := false
 
 
-func _init(p_plan: RouteGuidance.Plan, start: ShipPilot.State, profile: MovementProfile, probe: HullProbe, regions: Array[Vector2], final_hazard: bool, delta: float) -> void:
+func _init(p_plan: RouteGuidance.Plan, start: ShipPilot.State, profile: MovementProfile, probe: HullProbe, regions: Array[Vector2], final_hazard: bool, delta: float, map: RID) -> void:
 	plan = p_plan
 	state = start.copy()
 	_profile = profile
@@ -90,6 +99,8 @@ func _init(p_plan: RouteGuidance.Plan, start: ShipPilot.State, profile: Movement
 	_final_hazard = final_hazard
 	_delta = delta
 	_stop_distance = RoutePlanner.stop_distance_of(profile)
+	_map = map
+	_cell = NavigationServer3D.map_get_cell_size(map)
 	_targets.has_order = true
 	_start_plan()
 
@@ -128,6 +139,9 @@ func _tick() -> int:
 	simulated_ticks += 1
 	_buffer(position, yaw, motion, state.yaw - yaw)
 	if (_sweep >= _probe.half_width or _positions.size() >= SEGMENT_MAX_TICKS) and not _flush():
+		return FAIL
+	if not find_clear and not _centre_allowed():
+		failure = "centre enters the no-go zone at (%.1f, %.1f)" % [state.position.x, state.position.z]
 		return FAIL
 	if find_clear:
 		if _probe.cylinder_clear(state.position, _probe.reach + _profile.plan_clearance_buffer):
@@ -205,6 +219,17 @@ func _wait_tick() -> int:
 		handoff_state = state.copy()
 		_start_plan()
 	return RUNNING
+
+
+## Whether the predicted centre may be here: on the navigation mesh, still before it first reached the mesh (a ship
+## leaving a zone), or within no_go_tolerance beyond its edge.
+func _centre_allowed() -> bool:
+	var closest := NavigationServer3D.map_get_closest_point(_map, state.position)
+	var off_mesh := RouteGuidance.planar(closest - state.position).length()
+	if off_mesh <= _cell:
+		_on_mesh = true
+		return true
+	return not _on_mesh or off_mesh <= _profile.no_go_tolerance
 
 
 ## Starts following the plan from the current predicted state, as ShipMovement does at handoff: fresh route

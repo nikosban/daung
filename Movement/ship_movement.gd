@@ -361,4 +361,4 @@ func _profile_valid() -> bool:
 		and profile.thruster_strength > 0.0 and profile.max_speed > 0.0 and profile.pilot_response_time > 0.0 \
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
 		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 \
-		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0
+		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.no_go_tolerance >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0
