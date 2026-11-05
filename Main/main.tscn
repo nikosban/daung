@@ -8,6 +8,7 @@
 [ext_resource type="Script" uid="uid://bw82flnn8gbww" path="res://Main/movement_trail.gd" id="6_trail"]
 [ext_resource type="Resource" path="res://Main/movement_trail_settings.tres" id="7_trail_settings"]
 [ext_resource type="Script" path="res://Main/collision_shape_outline.gd" id="8_outline"]
+[ext_resource type="PackedScene" path="res://Main/asteroid.tscn" id="9_asteroid"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -23,16 +24,6 @@ outer_radius = 2.0
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_marker"]
 shading_mode = 0
 albedo_color = Color(1, 0.75, 0.2, 1)
-
-[sub_resource type="SphereShape3D" id="SphereShape3D_obstacle"]
-radius = 6.0
-
-[sub_resource type="SphereMesh" id="SphereMesh_obstacle"]
-radius = 6.0
-height = 12.0
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_obstacle"]
-albedo_color = Color(0.5, 0.5, 0.5, 1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_navigation_floor"]
 size = Vector3(800, 1, 800)
@@ -80,18 +71,89 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -40)
 mesh = SubResource("TorusMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
-[node name="TestObstacle" type="StaticBody3D" parent="." unique_id=222604826 groups=["navigation_source"]]
+[node name="TestObstacle" parent="." unique_id=222604826 instance=ExtResource("9_asteroid")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 83, 0, 0)
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="TestObstacle" unique_id=1429772171]
-shape = SubResource("SphereShape3D_obstacle")
+[node name="ClusterA" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 215, 0, -170)
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="TestObstacle" unique_id=1650572131]
-mesh = SubResource("SphereMesh_obstacle")
-surface_material_override/0 = SubResource("StandardMaterial3D_obstacle")
+[node name="A1" parent="ClusterA" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -34, 0, -22)
 
-[node name="CollisionOutline" type="MeshInstance3D" parent="TestObstacle/CollisionShape3D"]
-script = ExtResource("8_outline")
+[node name="A2" parent="ClusterA" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, 0, -31)
+
+[node name="A3" parent="ClusterA" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -26, 0, 32)
+
+[node name="A4" parent="ClusterA" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 0, 24)
+
+[node name="ClusterB" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -155, 0, -165)
+
+[node name="B1" parent="ClusterB" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -58, 0, -42)
+
+[node name="B2" parent="ClusterB" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0, -63)
+
+[node name="B3" parent="ClusterB" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 52, 0, -43)
+
+[node name="B4" parent="ClusterB" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -63, 0, 15)
+
+[node name="B5" parent="ClusterB" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0, 4)
+
+[node name="B6" parent="ClusterB" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 67, 0, 20)
+
+[node name="B7" parent="ClusterB" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 0, 65)
+
+[node name="B8" parent="ClusterB" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0, 62)
+
+[node name="ClusterC" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, 0, 205)
+
+[node name="C1" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -82, 0, -66)
+
+[node name="C2" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -26, 0, -84)
+
+[node name="C3" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 0, -84)
+
+[node name="C4" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 91, 0, -63)
+
+[node name="C5" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -95, 0, 0)
+
+[node name="C6" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -37, 0, -15)
+
+[node name="C7" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 0, -20)
+
+[node name="C8" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 92, 0, 2)
+
+[node name="C9" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -80, 0, 72)
+
+[node name="C10" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -17, 0, 82)
+
+[node name="C11" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 47, 0, 80)
+
+[node name="C12" parent="ClusterC" instance=ExtResource("9_asteroid")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 92, 0, 69)
 
 [node name="CollisionOutline" type="MeshInstance3D" parent="Ship/CollisionShape3D"]
 script = ExtResource("8_outline")
@@ -128,6 +190,6 @@ script = ExtResource("5_overlay")
 ship = NodePath("../Ship")
 trail = NodePath("../MovementTrail")
 destination_marker = NodePath("../DebugDestinationMarker")
-collision_outlines = [NodePath("../Ship/CollisionShape3D/CollisionOutline"), NodePath("../TestObstacle/CollisionShape3D/CollisionOutline")]
+collision_outlines = [NodePath("../Ship/CollisionShape3D/CollisionOutline"), NodePath("../TestObstacle/CollisionShape3D/CollisionOutline"), NodePath("../ClusterA/A1/CollisionShape3D/CollisionOutline"), NodePath("../ClusterA/A2/CollisionShape3D/CollisionOutline"), NodePath("../ClusterA/A3/CollisionShape3D/CollisionOutline"), NodePath("../ClusterA/A4/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B1/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B2/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B3/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B4/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B5/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B6/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B7/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B8/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C1/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C2/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C3/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C4/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C5/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C6/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C7/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C8/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C9/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C10/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C11/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C12/CollisionShape3D/CollisionOutline")]
 
 [connection signal="move_requested" from="RightClickMoveInput" to="MovementDebugOverlay" method="record_move_request"]
