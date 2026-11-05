@@ -139,6 +139,7 @@ Values were measured with deterministic 60 Hz headless traces in `Main/main.tscn
   - **No declines.** No route passed close enough to an asteroid to need prediction.
   - **Central tests:** the (130, 0, 0) detour's route corner is (85.50, 19.50) instead of (85.75, 19.50) on `main` (the rebake moved one vertex of the original asteroid's hole by one 0.25 m cell); arrival 23.78 s (23.87 s), closest gap 5.00 m (5.02 m), rest (129.78, 0.12). (60, 0, −40) unchanged: direct, rest (61.79, −40.95).
   - **F3:** 26 outlines (ship and 25 asteroids) in the overlay list; on/off/on shows 26, 0, 26.
+  - **Acceptance:** the owner merged PR #53 (8d5539e). No separate F5 notes were recorded.
   - **Not verified:** the look in F5 (legibility at long camera distance, the 1000 m far plane), fast redirects and departures inside the clusters, routes forced through the narrowest gaps, several ships.
 - **No-go zone (Task #48, current profile, headless 60 Hz, 0.3 s delay; before = `main` efb4ab9 with the 10.75 m mesh):**
   - **Decisive detour (0, 0, 0) → (130, 0, 0):** route via the +Z side, now without hazard regions, so it is not predicted (0.6 ms in 1 tick; before: 941 predicted ticks, about 10 ms over 8 ticks). Closest rotating hull gap **5.02 m** (before 2.31 m); closest centre to the asteroid 19.31 m (16.37 m); the centre goes at most 0.38 m beyond the mesh edge (0.34 m); arrival at 24.38 s on the Movement clock (23.80 s); rests at (129.77, 0.12).
@@ -206,7 +207,7 @@ Values were measured with deterministic 60 Hz headless traces in `Main/main.tscn
 
 ## Remaining work
 
-**Next:** destination resolution, its own ticket (Task #49, the asteroid field, is in review): a click on or near an obstacle resolves to the nearest safe reachable position, reusing the same navigator, hull probe and pilot. The tech lead's retrospective on issue #41 suggests judging the 5–15 m pickup separately afterwards (not decided).
+**Next:** destination resolution, its own ticket (Task #49, the asteroid field, is merged: PR #53): a click on or near an obstacle resolves to the nearest safe reachable position, reusing the same navigator, hull probe and pilot. The tech lead's retrospective on issue #41 suggests judging the 5–15 m pickup separately afterwards (not decided).
 
 **Open owner decisions:** long-term command feedback and whether crew changes may modify the reaction delay; whether the no-retro stern-first weakening feels right (provisional); keep the speed-linked turn-rate clamp as a game rule or replace it with powered counter-turn braking; later, a weaker-directional-thrust trial.
 
