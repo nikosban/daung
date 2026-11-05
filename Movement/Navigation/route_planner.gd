@@ -135,13 +135,14 @@ func _classify() -> void:
 	_step = Step.PATH
 
 
-## One path query, then the route: the ship, the path's corners, the click; Y at the ship. The path starts at the
+## One path query, then the route: the ship, the path's corners, the click; Y at the ship. The path must reach the
+## click, or end where a straight on-mesh leg reaches it (_leg_on_mesh()); otherwise the click is unreachable. The path starts at the
 ## mesh point nearest the ship (within one cell that is the ship itself); duplicates and corners within one cell of
 ## the line between their neighbours (polygon-edge crossings) are dropped.
 func _path() -> void:
 	var position: Vector3 = (_live_state.call() as ShipPilot.State).position
 	var path := NavigationServer3D.map_get_path(_map, position, _click, true)
-	if path.is_empty() or RouteGuidance.planar(path[path.size() - 1] - _click).length() > _cell:
+	if path.is_empty() or not _leg_on_mesh(path[path.size() - 1], _click):
 		result = UNREACHABLE
 		note = "destination unreachable on the navigation mesh"
 		return
@@ -184,6 +185,19 @@ func _path() -> void:
 		s += spacing
 	_samples.push_back(total)
 	_step = Step.HAZARDS
+
+
+## Whether the straight leg from the path's end to the click stays on the mesh (every point within one cell of it,
+## sampled every cell). The click is already known to be on the mesh; Godot can end a path short of an on-mesh
+## target (observed: (97.43, −12.02) for a click on (98, −12)), and the route then ends with this leg to the click.
+func _leg_on_mesh(from: Vector3, to: Vector3) -> bool:
+	var leg := RouteGuidance.planar(to - from)
+	var samples := int(ceil(leg.length() / _cell))
+	for i in range(1, samples + 1):
+		var point := from + leg * (float(i) / samples)
+		if RouteGuidance.planar(NavigationServer3D.map_get_closest_point(_map, point) - point).length() > _cell:
+			return false
+	return true
 
 
 func _hazard_sample() -> void:

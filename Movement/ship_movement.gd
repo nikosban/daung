@@ -64,6 +64,9 @@ var _probe: HullProbe
 var _job: Navigator.Job
 var _plan: RouteGuidance.Plan
 var _follow: RouteGuidance.Follow
+## Outcome of the latest activated command for F3 (Task #46): planning, accepted, declined with its reason, arrived,
+## stopped or static-contact stop. Kept after the order ends.
+var _order_status := "no order yet"
 
 
 func _ready() -> void:
@@ -185,6 +188,12 @@ func get_thruster_command() -> Vector3:
 	return _pilot_out.thruster_command
 
 
+## The latest activated command's outcome as text (F3 debugging): planning, accepted, declined with its reason, arrived,
+## stopped or static-contact stop. It stays after the order ends.
+func get_order_status() -> String:
+	return _order_status
+
+
 ## Whether the active order is still waiting for its navigation plan (the ship brakes meanwhile).
 func is_planning() -> bool:
 	return _job != null
@@ -237,6 +246,7 @@ func _physics_process(delta: float) -> void:
 		_has_order = false
 		_plan = null
 		_follow = null
+		_order_status = "arrived at (%.1f, %.1f) at %.2f s" % [_destination.x, _destination.z, _clock]
 
 	_turn_rate = _pilot_state.turn_rate
 	_planar_fraction_prev = _pilot_state.planar_fraction_prev
@@ -265,6 +275,7 @@ func _stop_on_static_contact(attempted: Vector3) -> void:
 		_end_navigation()
 		velocity = Vector3.ZERO
 		_turn_rate = 0.0
+		_order_status = "static-contact stop (%s) at %.2f s" % [collider.name, _clock]
 		print("Movement: static contact with %s at %.3f s, normal (%.2f, %.2f), speed %.2f m/s; order ended" % [collider.name, _clock, normal.x, normal.z, attempted.length()])
 		return
 
@@ -289,9 +300,11 @@ func _activate(command: Dictionary) -> void:
 			_course_yaw = atan2(-course.x, -course.z)
 		_end_navigation()
 		_job = Navigator.start_job(self, _probe, world_position)
+		_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
 	else:
 		_has_order = false
 		_end_navigation()
+		_order_status = "stopped at %.2f s" % _clock
 	_last_activated = _clock
 	print("Movement: activated %s at %.3f s (%.3f s after receipt)" % [_describe(command), _clock, _clock - command.received])
 
@@ -302,10 +315,12 @@ func _take_plan() -> void:
 	_job = null
 	if job.status == Navigator.Status.DECLINED:
 		_has_order = false
+		_order_status = "declined (%.1f, %.1f): %s" % [job.click.x, job.click.z, job.reason]
 		print("Movement: order to (%.1f, %.1f) declined at %.3f s: %s (%d µs over %d ticks)" % [job.click.x, job.click.z, _clock, job.reason, job.used_usec, job.ticks])
 		return
 	if job.status != Navigator.Status.DONE:
 		return
+	_order_status = "accepted (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, ["direct", "route", "departure"][job.plan.kind], job.summary.get_slice(";", 0)]
 	if job.plan.kind == RouteGuidance.Kind.DIRECT:
 		# The direct order keeps its course from the ship's position now (the activation tick when planning took one
 		# tick, as before Task #46).

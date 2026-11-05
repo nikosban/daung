@@ -10,6 +10,10 @@ extends RefCounted
 ## then starts from the re-entry assumption (on the route, hull along it, the speed the speed law allows there). That
 ## assumption is not proof; the Task #44 stop remains the fallback there. Past the last region the prediction passes
 ## once the predicted ship's drift corridor (CorridorScan) is empty.
+##
+## Clearance mode (find_clear): a departure is predicted only until the hull has room to turn, a cylinder of hull reach
+## + clearance buffer around the root being empty (rotation is then safe at any yaw). It passes with clear_time, the
+## predicted time since handoff when that happens, and fails on hull contact or after clear_limit seconds.
 
 enum { RUNNING, PASS, FAIL }
 
@@ -39,6 +43,14 @@ var failure := ""
 ## Whether the predicted ship had settled onto the route at some point (a later failure is then not a departure
 ## problem).
 var settled_once := false
+## The most ticks this prediction may simulate (the job's remaining prediction allowance); reaching it fails with
+## exhausted set.
+var tick_limit := 1 << 30
+var exhausted := false
+## Clearance mode (see above).
+var find_clear := false
+var clear_limit := 0.0
+var clear_time := 0.0
 
 var _targets := ShipPilot.Targets.new()
 var _out := ShipPilot.Output.new()
@@ -86,6 +98,10 @@ func run(clock: PlanClock) -> int:
 
 ## One predicted tick plus the region bookkeeping.
 func _tick() -> int:
+	if simulated_ticks >= tick_limit:
+		exhausted = true
+		failure = "prediction limit reached"
+		return FAIL
 	RouteGuidance.guide(plan, follow, state.position, state.yaw, _targets)
 	_targets.has_order = not _arrived
 	var position := state.position
@@ -101,6 +117,16 @@ func _tick() -> int:
 	_buffer(position, yaw, motion, state.yaw - yaw)
 	if (_sweep >= _probe.half_width or _positions.size() >= SEGMENT_MAX_TICKS) and not _flush():
 		return FAIL
+	if find_clear:
+		if _probe.cylinder_clear(state.position, _probe.reach + _profile.plan_clearance_buffer):
+			if not _flush():
+				return FAIL
+			clear_time = follow.time
+			return PASS
+		if follow.time >= clear_limit - RouteGuidance.TIME_EPSILON:
+			failure = "no room to turn within the longest departure"
+			return FAIL
+		return RUNNING
 	if _arrived:
 		_rest_time += _delta
 		if state.velocity.length() <= REST_SPEED or _rest_time >= REST_TIME:

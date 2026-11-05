@@ -17,11 +17,6 @@ func _init(p_deadline: int, allowance: int) -> void:
 	_reserve_cap = allowance / 2
 
 
-## The time held back before a deadline: the longest item measured so far, at most half of allowance (µs).
-static func reserve(allowance: int) -> int:
-	return mini(_item_max, allowance / 2)
-
-
 ## Whether one more work item fits before the deadline; starts timing that item.
 func has_time() -> bool:
 	_item_start = Time.get_ticks_usec()

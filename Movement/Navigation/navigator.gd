@@ -4,6 +4,8 @@ extends RefCounted
 ## queue shared by all ships within a wall-clock allowance per physics tick (NavigationBudget). A Job runs its
 ## RoutePlanner (readiness, path, hazard regions), then, when anything needs predicting, its ManeuverPlanner
 ## (candidate predictions), and ends with one plan for the pilot (RouteGuidance.Plan), a decline, or a cancellation.
+## The outcome depends only on the ship's state and the world, never on wall-clock time: the per-tick allowance only
+## spreads the work over ticks, and the per-order limit counts predicted flight time.
 ## Nothing here writes a transform or velocity; ShipMovement stays the single writer and follows the plan with
 ## RouteGuidance.guide() every tick. No job ever runs again for the same order.
 
@@ -99,11 +101,6 @@ class Job:
 		if frame != _last_frame:
 			_last_frame = frame
 			ticks += 1
-		var order_left := Navigator.BUDGET.plan_time_per_order - used_usec
-		if order_left <= PlanClock.reserve(Navigator.BUDGET.plan_time_per_tick):
-			_decline("planning time %d µs reached the per-order limit" % used_usec)
-			return
-		clock.deadline = mini(clock.deadline, start + order_left)
 		if _maneuver == null:
 			match _route.run(clock):
 				RoutePlanner.BASELINE:
@@ -114,7 +111,7 @@ class Job:
 					_decline(_route.note)
 				RoutePlanner.ROUTE:
 					if _route.needs_prediction:
-						_maneuver = ManeuverPlanner.new(_route.route_plan, _route.primary_plan, _route.regions, _route.final_hazard, _profile, _probe, _ship.get_pilot_state, _ship.get_physics_process_delta_time())
+						_maneuver = ManeuverPlanner.new(_route.route_plan, _route.primary_plan, _route.regions, _route.final_hazard, _profile, _probe, _ship.get_pilot_state, _ship.get_physics_process_delta_time(), Navigator.BUDGET.plan_prediction_per_order)
 					else:
 						_finish(_route.primary_plan, "no hazard regions")
 		if status == Status.PENDING and _maneuver != null:
@@ -122,10 +119,11 @@ class Job:
 				ManeuverPlanner.PASS:
 					_finish(_maneuver.chosen, "%s%s; %d rollouts, %d predicted ticks, %d skipped stretches, %d queries" % [_route.hazard_text, _maneuver.departure_text(), _maneuver.rollouts, _maneuver.predicted_ticks, _maneuver.skipped, _probe.queries])
 				ManeuverPlanner.FAIL:
-					_decline("no safe maneuver found (route: %s)" % _maneuver.failure)
+					if _maneuver.exhausted:
+						_decline("no safe maneuver found within %.0f s of predicted flight (route: %s)" % [Navigator.BUDGET.plan_prediction_per_order, _maneuver.failure])
+					else:
+						_decline("no safe maneuver found (route: %s)" % _maneuver.failure)
 		used_usec += Time.get_ticks_usec() - start
-		if status == Status.PENDING and used_usec >= Navigator.BUDGET.plan_time_per_order:
-			_decline("planning time %d µs exceeded the per-order limit" % used_usec)
 
 	func _finish(p_plan: RouteGuidance.Plan, note: String) -> void:
 		plan = p_plan

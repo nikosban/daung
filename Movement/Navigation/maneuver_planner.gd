@@ -3,25 +3,40 @@ extends RefCounted
 ## The maneuver half of one planning job (Task #46): predicts candidate maneuvers over a planned route (one
 ## ManeuverRollout each) and picks the first that passes. Resumable: run() continues where its PlanClock stopped.
 ##
-## Candidates, in order: the direct order (2-point route) or route guidance; departures, only when the start is a
-## hazard or the ship already moves: a moving ship first brakes for one to several departure steps, then any ship
-## translates astern, to port, to starboard or ahead for one to several steps (shorter first). Each departure keeps
-## the hull's heading (no commanded course) and then follows the route. A first candidate that fails after its
-## prediction had settled onto the route failed on the route itself, which no departure can change, so the search
-## ends there.
+## Candidates, in order:
+## 1. the direct order (2-point route) or route guidance;
+## 2. only when the start is a hazard or the ship already moves, departures that keep the hull's heading (no commanded
+##    course) and then follow the route. First, for each direction (braking for a moving ship, then astern, port,
+##    starboard, ahead), a clearance-mode prediction finds when the hull has room to turn (at most departure_max_time)
+##    or when that direction runs into something; a direction with room is tried at once with the departure that
+##    switches to the route exactly then. Then fixed departures of one to several departure_step_time steps (shorter
+##    first): in a direction with room, only those longer than its time to room (a slow-turning hull may need more
+##    distance before it can line up with the route); in a direction that runs into something, only those that end
+##    before the contact.
+## A first candidate that fails after its prediction had settled onto the route failed on the route itself, which no
+## departure can change, so the search ends there.
+##
+## All predictions of one order together may simulate at most NavigationBudget.plan_prediction_per_order seconds of
+## flight; reaching it declines the order. That limit counts predicted time, so the outcome does not depend on how
+## fast the machine runs the search.
 ##
 ## The search predicts from a snapshot of the ship. If the ship has moved by the time a candidate passes (it brakes
 ## while the job waits), the candidate's first stretch is predicted again from the actual state (validation); a
 ## failure restarts the search from that state.
 
 enum { RUNNING, PASS, FAIL }
+enum Task { PRIMARY, CLEARANCE, DEPARTURE }
 
 ## Hull-local departure translations, in order: astern, port, starboard, ahead (bow is local −Z).
 const DEPART_AXES: Array[Vector3] = [Vector3(0, 0, 1), Vector3(-1, 0, 0), Vector3(1, 0, 0), Vector3(0, 0, -1)]
+## A departure that never switches to the route (clearance mode ends it).
+const NEVER := 1.0e9
 
 ## The chosen plan once run() returned PASS; why the first candidate failed once it returned FAIL.
 var chosen: RouteGuidance.Plan
 var failure := ""
+## Whether the search stopped at the prediction limit.
+var exhausted := false
 var rollouts := 0
 var predicted_ticks := 0
 var skipped := 0
@@ -34,16 +49,19 @@ var _profile: MovementProfile
 var _probe: HullProbe
 var _live_state: Callable
 var _delta := 1.0 / 60.0
+var _ticks_left := 0
 var _snapshot: ShipPilot.State
-var _moving := false
-var _departures := false
-var _steps := 1
-var _candidate := 0
+## Pending work, in order: [Task, direction (hull-local), switch time (s)].
+var _tasks: Array = []
+var _task: Array = []
+## Clearance results per direction: [direction, has room, time (s): room found, or contact].
+var _clearance: Array = []
+var _fixed_added := false
 var _validating := false
 var _rollout: ManeuverRollout
 
 
-func _init(route_plan: RouteGuidance.Plan, primary: RouteGuidance.Plan, regions: Array[Vector2], final_hazard: bool, profile: MovementProfile, probe: HullProbe, live_state: Callable, delta: float) -> void:
+func _init(route_plan: RouteGuidance.Plan, primary: RouteGuidance.Plan, regions: Array[Vector2], final_hazard: bool, profile: MovementProfile, probe: HullProbe, live_state: Callable, delta: float, prediction_limit: float) -> void:
 	_route_plan = route_plan
 	_primary = primary
 	_regions = regions
@@ -52,7 +70,7 @@ func _init(route_plan: RouteGuidance.Plan, primary: RouteGuidance.Plan, regions:
 	_probe = probe
 	_live_state = live_state
 	_delta = delta
-	_steps = maxi(1, roundi(profile.departure_max_time / profile.departure_step_time))
+	_ticks_left = int(ceil(prediction_limit / delta))
 	_start_search()
 
 
@@ -60,11 +78,16 @@ func run(clock: PlanClock) -> int:
 	while true:
 		if _rollout == null:
 			if _validating:
-				_rollout = _new_rollout(chosen, true)
+				_rollout = _new_rollout(chosen)
+				_rollout.first_stretch_only = true
 			else:
-				if _candidate >= _candidate_count():
+				if _tasks.is_empty() and not _fixed_added:
+					_add_fixed_departures()
+				if _tasks.is_empty():
 					return FAIL
-				_rollout = _new_rollout(_candidate_plan(_candidate), false)
+				_task = _tasks.pop_front()
+				_rollout = _task_rollout(_task)
+			_rollout.tick_limit = _ticks_left
 			rollouts += 1
 		var result := _rollout.run(clock)
 		if result == ManeuverRollout.RUNNING:
@@ -73,11 +96,23 @@ func run(clock: PlanClock) -> int:
 		_rollout = null
 		predicted_ticks += finished.simulated_ticks
 		skipped += finished.skipped
+		_ticks_left -= finished.simulated_ticks
+		if finished.exhausted:
+			exhausted = true
+			return FAIL
 		if _validating:
 			if result == ManeuverRollout.PASS:
 				return PASS
 			# The ship moved while the job ran and the chosen maneuver no longer holds: search again from now.
 			_start_search()
+			continue
+		if _task[0] == Task.CLEARANCE:
+			# The hull has room to turn after clear_time: try the departure that switches to the route exactly then.
+			if result == ManeuverRollout.PASS:
+				_clearance.push_back([_task[1], true, finished.clear_time])
+				_tasks.push_front([Task.DEPARTURE, _task[1], finished.clear_time])
+			else:
+				_clearance.push_back([_task[1], false, finished.follow.time])
 			continue
 		if result == ManeuverRollout.PASS:
 			chosen = finished.plan
@@ -87,11 +122,10 @@ func run(clock: PlanClock) -> int:
 			_validating = true
 			_snapshot = now
 			continue
-		if _candidate == 0:
+		if _task[0] == Task.PRIMARY:
 			failure = finished.failure
 			if finished.settled_once:
 				return FAIL
-		_candidate += 1
 	return FAIL
 
 
@@ -112,44 +146,53 @@ func departure_text() -> String:
 
 func _start_search() -> void:
 	_snapshot = _live_state.call()
-	_moving = RouteGuidance.planar(_snapshot.velocity).length() > _profile.arrival_speed_tolerance
-	_departures = _moving or (not _regions.is_empty() and _regions[0].x <= 0.0)
-	_candidate = 0
 	_validating = false
+	_tasks = [[Task.PRIMARY, Vector3.ZERO, 0.0]]
+	var moving := RouteGuidance.planar(_snapshot.velocity).length() > _profile.arrival_speed_tolerance
+	if not moving and (_regions.is_empty() or _regions[0].x > 0.0):
+		return
+	_clearance.clear()
+	_fixed_added = false
+	var directions: Array[Vector3] = []
+	if moving:
+		directions.push_back(Vector3.ZERO)
+	directions.append_array(DEPART_AXES)
+	for direction in directions:
+		_tasks.push_back([Task.CLEARANCE, direction, 0.0])
 
 
-func _candidate_count() -> int:
-	if not _departures:
-		return 1
-	return 1 + (_steps if _moving else 0) + _steps * DEPART_AXES.size()
+## Fixed departures, once every clearance result is known (see the class description).
+func _add_fixed_departures() -> void:
+	_fixed_added = true
+	var steps := maxi(1, roundi(_profile.departure_max_time / _profile.departure_step_time))
+	for step in range(1, steps + 1):
+		var time := step * _profile.departure_step_time
+		for result in _clearance:
+			if (result[1] and time > result[2] + RouteGuidance.TIME_EPSILON) or (not result[1] and time < result[2] - RouteGuidance.TIME_EPSILON):
+				_tasks.push_back([Task.DEPARTURE, result[0], time])
 
 
-## Candidate plans are made when they are reached: 0 is the primary plan, then braking (moving ships), then the
-## translations by duration and axis.
-func _candidate_plan(index: int) -> RouteGuidance.Plan:
-	if index == 0:
-		return _primary
-	var k := index - 1
-	var axis := Vector3.ZERO
-	var step := 0
-	if _moving and k < _steps:
-		step = k + 1
-	else:
-		if _moving:
-			k -= _steps
-		step = k / DEPART_AXES.size() + 1
-		axis = DEPART_AXES[k % DEPART_AXES.size()]
+func _task_rollout(task: Array) -> ManeuverRollout:
+	if task[0] == Task.PRIMARY:
+		return _new_rollout(_primary)
+	if task[0] == Task.CLEARANCE:
+		var rollout := _new_rollout(_departure(task[1], NEVER))
+		rollout.find_clear = true
+		rollout.clear_limit = _profile.departure_max_time
+		return rollout
+	return _new_rollout(_departure(task[1], task[2]))
+
+
+func _departure(local_direction: Vector3, switch_time: float) -> RouteGuidance.Plan:
 	var depart := RouteGuidance.make_plan(RouteGuidance.Kind.DEPART, _route_plan.route, _route_plan.destination, _route_plan.lookahead)
 	depart.hold_yaw = _snapshot.yaw
-	depart.depart_direction = Basis(Vector3.UP, _snapshot.yaw) * axis
-	depart.switch_time = step * _profile.departure_step_time
+	depart.depart_direction = Basis(Vector3.UP, _snapshot.yaw) * local_direction
+	depart.switch_time = switch_time
 	return depart
 
 
-func _new_rollout(plan: RouteGuidance.Plan, first_stretch_only: bool) -> ManeuverRollout:
-	var rollout := ManeuverRollout.new(plan, _snapshot, _profile, _probe, _regions, _final_hazard, _delta)
-	rollout.first_stretch_only = first_stretch_only
-	return rollout
+func _new_rollout(plan: RouteGuidance.Plan) -> ManeuverRollout:
+	return ManeuverRollout.new(plan, _snapshot, _profile, _probe, _regions, _final_hazard, _delta)
 
 
 func _same_state(a: ShipPilot.State, b: ShipPilot.State) -> bool:
