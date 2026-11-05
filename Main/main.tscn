@@ -23,10 +23,6 @@ outer_radius = 2.0
 shading_mode = 0
 albedo_color = Color(1, 0.75, 0.2, 1)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_debug_destination"]
-shading_mode = 0
-albedo_color = Color(1, 0.2, 1, 1)
-
 [sub_resource type="SphereShape3D" id="SphereShape3D_obstacle"]
 radius = 6.0
 
@@ -39,6 +35,10 @@ albedo_color = Color(0.5, 0.5, 0.5, 1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_navigation_floor"]
 size = Vector3(800, 1, 800)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_debug_destination"]
+shading_mode = 0
+albedo_color = Color(1, 0.2, 1, 1)
 
 [node name="Main" type="Node3D" unique_id=2048189383]
 
@@ -111,7 +111,7 @@ script = ExtResource("6_trail")
 ship = NodePath("../Ship")
 settings = ExtResource("7_trail_settings")
 
-[node name="DebugDestinationMarker" type="MeshInstance3D" parent="."]
+[node name="DebugDestinationMarker" type="MeshInstance3D" parent="." unique_id=1417822898]
 transform = Transform3D(1.25, 0, 0, 0, 1.25, 0, 0, 0, 1.25, 0, 0.1, 0)
 visible = false
 mesh = SubResource("TorusMesh_marker")
