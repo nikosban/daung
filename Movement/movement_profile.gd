@@ -42,11 +42,11 @@ extends Resource
 ## than its reach is empty (a cheap shortcut used to find the route sections that need a full hull check). Never
 ## blocks a ship that is touching an obstacle from moving away.
 @export_range(0.05, 5.0, 0.01, "suffix:m") var plan_clearance_buffer: float = 0.5
-## Departures (Task #46): when a ship must first brake or back off before following a route, the planner tries
-## departures lasting one, two, … steps of this length, up to departure_max_time, shortest first.
-@export_range(0.1, 2.0, 0.05, "suffix:s") var departure_step_time: float = 0.5
-@export_range(0.5, 10.0, 0.1, "suffix:s") var departure_max_time: float = 4.0
+## Corner clearance (Task #56, provisional): on a checked route, each interior corner the route bends around is moved
+## this far outward along its bisector (halved until it stays on the navigation mesh, so narrow passages stay usable),
+## so the lookahead aim does not cut the centre into the no-go zone. Navigation geometry only.
+@export_range(0.0, 5.0, 0.05, "suffix:m") var path_corner_clearance: float = 1.5
 ## No-go tolerance (Task #48, provisional): a predicted maneuver is rejected when the predicted ship centre, once on
 ## the navigation mesh, goes more than this far beyond the mesh edge (the static no-go zone around obstacles). Only
-## for maneuvers the navigator predicts; it is not a physical boundary, and the rotating hull may cross the edge.
+## for maneuvers the navigator checks; it is not a physical boundary, and the rotating hull may cross the edge.
 @export_range(0.0, 5.0, 0.01, "suffix:m") var no_go_tolerance: float = 0.5

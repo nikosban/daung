@@ -28,11 +28,14 @@ extends CharacterBody3D
 ## Static contact (Task #44): driving into a stationary StaticBody3D ends the active order and zeroes planar
 ## velocity and turn rate; see _stop_on_static_contact().
 ##
-## Navigation (Task #46): each activated move starts one planning job (Navigator). Until the job finishes the ship
-## brakes as it does without an order; the job's plan is then handed to the pilot once and followed every tick (the
-## unchanged direct order, a route around obstacles, or a departure that holds heading before following the route).
-## A declined plan ends the order. Nothing is re-planned without a new order; a later move or stop cancels the job.
-## The pilot itself is ShipPilot; this script stays the single writer of position, velocity and yaw.
+## Navigation (Tasks #46, #56): each activated move starts one navigation job (Navigator). From activation the ship
+## coasts (no thrust, no turning: the previous order's steering is gone, its momentum is not) until the job says
+## otherwise. An open-space order's plan is handed to the pilot once and followed unchecked (the direct order or a
+## route). A route near obstacles is flown under checked flight: each interval the job gives the guidance (follow its
+## route, brake, or coast) and this script turns it into pilot targets; the job may switch to a distinct passage, and
+## an order it cannot resolve stays active as blocked while the ship rests. A declined order (no destination) ends.
+## A later move or stop cancels the job. The pilot itself is ShipPilot; this script stays the single writer of
+## position, velocity and yaw.
 
 @export var profile: MovementProfile
 
@@ -60,15 +63,18 @@ var _planar_fraction_prev := 0.0
 var _pilot_state := ShipPilot.State.new()
 var _pilot_targets := ShipPilot.Targets.new()
 var _pilot_out := ShipPilot.Output.new()
-## Navigation (Task #46): the hull probe, the active order's planning job (null when none) and the plan the pilot
-## follows (null for the direct order) with its progress.
+## Navigation (Tasks #46, #56): the hull probe, the active order's navigation job (null when none) and the unchecked
+## plan the pilot follows (null for the direct order or checked flight) with its progress.
 var _probe: HullProbe
 var _job: Navigator.Job
 var _plan: RouteGuidance.Plan
 var _follow: RouteGuidance.Follow
-## Outcome of the latest activated command for F3 (Task #46): planning, accepted, declined with its reason, arrived,
-## stopped or static-contact stop. Kept after the order ends.
+## Outcome of the latest activated command for F3 (Tasks #46, #56): planning, accepted, the checked-flight phase,
+## blocked, declined with its reason, arrived, stopped or static-contact stop. Kept after the order ends.
 var _order_status := "no order yet"
+var _status_head := ""
+## Physics frame of this ship's last move (navigation reads whether its state is already past this frame's start).
+var _moved_frame := -1
 
 
 func _ready() -> void:
@@ -202,9 +208,14 @@ func get_order_status() -> String:
 	return _order_status
 
 
-## Whether the active order is still waiting for its navigation plan (the ship brakes meanwhile).
+## Whether the active order is still waiting for its route (the ship coasts meanwhile).
 func is_planning() -> bool:
-	return _job != null
+	return _job != null and _job.status == Navigator.Status.PENDING
+
+
+## Physics frame in which this ship last moved (Navigator: whether its state already belongs to the next frame).
+func get_moved_frame() -> int:
+	return _moved_frame
 
 
 ## The ship's planar pilot state now, as the pilot reads it at the start of a tick (navigation planning).
@@ -226,8 +237,11 @@ func _physics_process(delta: float) -> void:
 	while not _pending.is_empty() and _pending[0].due <= _clock:
 		_activate(_pending.pop_front())
 	Navigator.service()
-	if _job != null and _job.status != Navigator.Status.PENDING:
+	if _job != null and (_job.status == Navigator.Status.DONE or _job.status == Navigator.Status.DECLINED):
 		_take_plan()
+	var guided := _job != null and _has_order
+	if guided:
+		_report_job()
 
 	var bow := -global_basis.z
 	bow.y = 0.0
@@ -237,8 +251,12 @@ func _physics_process(delta: float) -> void:
 	_pilot_state.bow = bow.normalized()
 	_pilot_state.turn_rate = _turn_rate
 	_pilot_state.planar_fraction_prev = _planar_fraction_prev
-	_pilot_targets.has_order = _has_order and _job == null
-	if _plan != null and _has_order:
+	_pilot_targets.has_order = _has_order
+	_pilot_targets.coast = false
+	var control := _job.control if guided else Navigator.Guidance.FOLLOW
+	if guided and control == Navigator.Guidance.FOLLOW:
+		RouteGuidance.guide(_job.guided_plan, _job.guided_follow, global_position, rotation.y, _pilot_targets)
+	elif _plan != null and _has_order:
 		RouteGuidance.guide(_plan, _follow, global_position, rotation.y, _pilot_targets)
 	else:
 		_pilot_targets.destination = _destination
@@ -247,14 +265,16 @@ func _physics_process(delta: float) -> void:
 		_pilot_targets.course_yaw = _course_yaw
 		_pilot_targets.bend_from = 0
 		_pilot_targets.bend_radii = PackedFloat32Array()
+		if guided:
+			_pilot_targets.coast = control == Navigator.Guidance.COAST
+			_pilot_targets.has_order = control == Navigator.Guidance.COAST
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
-	if _follow != null:
-		_follow.time += delta
 	if _pilot_out.arrived:
 		_has_order = false
-		_plan = null
-		_follow = null
 		_order_status = "arrived at (%.1f, %.1f) at %.2f s" % [_destination.x, _destination.z, _clock]
+		if guided:
+			print("Movement: arrived at (%.1f, %.1f) at %.3f s; checked flight: %s" % [_destination.x, _destination.z, _clock, _job.evidence_text()])
+		_end_navigation()
 
 	_turn_rate = _pilot_state.turn_rate
 	_planar_fraction_prev = _pilot_state.planar_fraction_prev
@@ -262,6 +282,7 @@ func _physics_process(delta: float) -> void:
 	rotation.y = _pilot_state.yaw
 	var attempted := Vector3(velocity.x, 0.0, velocity.z)
 	move_and_slide()
+	_moved_frame = Engine.get_physics_frames()
 	_stop_on_static_contact(attempted)
 
 
@@ -310,6 +331,7 @@ func _activate(command: Dictionary) -> void:
 		_end_navigation()
 		_job = Navigator.start_job(self, _probe, world_position)
 		_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
+		_status_head = ""
 	else:
 		_has_order = false
 		_end_navigation()
@@ -318,7 +340,7 @@ func _activate(command: Dictionary) -> void:
 	print("Movement: activated %s at %.3f s (%.3f s after receipt)" % [_describe(command), _clock, _clock - command.received])
 
 
-## Hands the finished planning job's result to the pilot once (or ends a declined order).
+## Hands an open-space job's plan to the pilot once (or ends a declined order).
 func _take_plan() -> void:
 	var job := _job
 	_job = null
@@ -331,7 +353,7 @@ func _take_plan() -> void:
 	if job.status != Navigator.Status.DONE:
 		return
 	_destination = job.destination
-	_order_status = "accepted (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, ["direct", "route", "departure"][job.plan.kind], job.summary.get_slice(";", 0)]
+	_order_status = "accepted (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, ["direct", "route"][job.plan.kind], job.summary.get_slice(";", 0)]
 	if job.resolution != "":
 		_order_status += "; %s" % job.resolution
 	if job.plan.kind == RouteGuidance.Kind.DIRECT:
@@ -351,8 +373,25 @@ func _take_plan() -> void:
 		for point in job.plan.route:
 			points.push_back("(%.2f, %.2f)" % [point.x, point.z])
 		route = " via " + " ".join(points)
-	print("Movement: plan for (%.1f, %.1f) at %.3f s: %s%s; %s (%d µs over %d ticks, worst tick %d µs)" % [job.click.x, job.click.z, _clock, ["direct", "route", "departure"][job.plan.kind], route, job.summary, job.used_usec, job.ticks, job.worst_tick_usec])
+	print("Movement: plan for (%.1f, %.1f) at %.3f s: %s%s; %s (%d µs over %d ticks, worst tick %d µs)" % [job.click.x, job.click.z, _clock, ["direct", "route"][job.plan.kind], route, job.summary, job.used_usec, job.ticks, job.worst_tick_usec])
 	_print_resolution(job)
+
+
+## Checked flight (Task #56): the destination once the route is known, the F3 status from the job's phase, and the
+## job's Output lines.
+func _report_job() -> void:
+	if _job.status == Navigator.Status.GUIDING or _job.status == Navigator.Status.BLOCKED:
+		if _status_head == "":
+			_destination = _job.destination
+			_status_head = "(%.1f, %.1f)" % [_job.click.x, _job.click.z]
+			if _job.resolution != "":
+				_status_head += "; %s" % _job.resolution
+			_print_resolution(_job)
+		var label := "blocked" if _job.status == Navigator.Status.BLOCKED else "checked flight"
+		_order_status = "%s %s: %s" % [label, _status_head, _job.phase]
+	for line in _job.events:
+		print("Movement: %.3f s: %s" % [_clock, line])
+	_job.events.clear()
 
 
 ## Destination resolution evidence (Task #54): the summary, every tested candidate in test order and the query counts.
@@ -364,7 +403,7 @@ func _print_resolution(job: Navigator.Job) -> void:
 		print("  %s" % line)
 
 
-## Cancels the planning job and drops the plan (a new command activated, or the order ended).
+## Cancels the navigation job and drops the plan (a new command activated, or the order ended).
 func _end_navigation() -> void:
 	if _job != null:
 		_job.cancel()

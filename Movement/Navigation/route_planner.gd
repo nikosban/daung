@@ -1,16 +1,17 @@
 class_name RoutePlanner
 extends RefCounted
-## The route half of one planning job (Task #46): navigation readiness, destination classification, one Godot
-## navigation path, route cleanup, hazard regions and, for a moving ship without hazards, the drift corridor.
+## The route half of one navigation job (Task #46): navigation readiness, destination classification, one Godot
+## navigation path, route cleanup, the hazard scan and, for a moving ship without hazards, the drift corridor.
 ## Resumable: run() does one small item at a time while its PlanClock allows and continues on a later call.
 ##
 ## Readiness: map inactive or iteration 0, or an enabled region with region iteration 0: wait (no path query). No
 ## enabled region once the map has synced: navigation unavailable. Regions synced but no polygon merged yet: wait
 ## while the map iteration still changes; after MERGE_WAIT_FRAMES frames without change, unavailable.
 ##
-## Hazard regions: route samples every hull half-width where a cylinder of radius hull reach + clearance buffer is not
-## empty (the hull could touch something there at some yaw), each with a lead-in of the stopping distance at max
-## speed; regions closer than that merge. The start (departure) and end (final approach) samples are included.
+## Hazard scan: route samples every hull half-width; the first one where a cylinder of radius hull reach + clearance
+## buffer is not empty (the hull could touch something there at some yaw) ends the scan and the route needs checked
+## flight (Navigator, Task #56). With none, a ship at rest, or a moving ship whose drift corridor is clear, flies the
+## route unchecked (the open-space fast path).
 ##
 ## Destination resolution (Task #54): a click inside the bounds that is off the mesh (a no-go zone) or that the path
 ## cannot reach is replaced by the nearest candidate found by a bounded local search; a valid click skips it entirely.
@@ -53,12 +54,10 @@ var resolution := ""
 var resolution_log := PackedStringArray()
 var closest_queries := 0
 var path_queries := 0
-## For ROUTE: the route plan, the direct-or-route plan the pilot flies when nothing needs predicting, the hazard
-## regions (arc-length intervals, m), whether the last one is the final approach, and whether prediction is needed.
+## For ROUTE: the route plan, the direct-or-route plan the pilot flies when nothing needs checking, and whether the
+## route needs checked flight.
 var route_plan: RouteGuidance.Plan
 var primary_plan: RouteGuidance.Plan
-var regions: Array[Vector2] = []
-var final_hazard := false
 var needs_prediction := true
 var hazard_text := ""
 ## Whether run() is only waiting for navigation to sync (no work done; the job may yield to others).
@@ -385,32 +384,16 @@ func _query_path(from: Vector3, to: Vector3) -> PackedVector3Array:
 
 func _hazard_sample() -> void:
 	var total := route_plan.total_length()
-	var spacing := maxf(_probe.half_width, 0.5)
-	var stop_distance := stop_distance_of(_profile)
 	var k := _sample
 	_sample += 1
 	var point := RouteGuidance.point_at(route_plan, _samples[k])
 	if not _probe.cylinder_clear(point, _probe.reach + _profile.plan_clearance_buffer):
-		var start := maxf(_samples[k] - stop_distance, 0.0)
-		var end := minf(_samples[k] + spacing, total)
-		if k == _samples.size() - 1:
-			final_hazard = true
-			end = total
-		if not regions.is_empty() and start - regions[regions.size() - 1].y < stop_distance:
-			regions[regions.size() - 1].y = maxf(regions[regions.size() - 1].y, end)
-		else:
-			regions.push_back(Vector2(start, end))
-	if _sample < _samples.size():
-		return
-	if final_hazard and not regions.is_empty():
-		regions[regions.size() - 1].y = total
-	var parts: Array[String] = []
-	for region in regions:
-		parts.push_back("%.1f–%.1f" % [region.x, region.y])
-	hazard_text = "hazards [%s] of %.1f m%s" % [", ".join(parts), total, " (final approach)" if final_hazard else ""]
-	if not regions.is_empty():
+		hazard_text = "hull may touch obstacles from %.1f m of %.1f m" % [_samples[k], total]
 		result = ROUTE
 		return
+	if _sample < _samples.size():
+		return
+	hazard_text = "no hazard along %.1f m" % total
 	# Nowhere along the route can the hull touch anything at any yaw. From rest the ship sets off along the route; a
 	# moving ship needs its drift corridor empty as well.
 	var state: ShipPilot.State = _live_state.call()
@@ -429,6 +412,7 @@ func _drift_sample() -> void:
 			needs_prediction = false
 			result = ROUTE
 		CorridorScan.BLOCKED:
+			hazard_text += ", drift corridor not clear"
 			result = ROUTE
 
 
@@ -441,13 +425,5 @@ func _baseline(reason: String) -> void:
 ## then only brakes, at least at the weakest planned braking (half the thruster rating at full turning share, or the
 ## no-retro sternward cap when that is lower), so it comes to rest within this distance of its destination.
 static func arrival_allowance_of(profile: MovementProfile) -> float:
-	var thrusters := profile.thruster_strength / profile.mass
-	var braking := thrusters * 0.5
-	if not profile.retro_thrusters:
-		braking = minf(braking, profile.no_retro_braking_effectiveness * thrusters)
+	var braking := Navigator.weakest_braking_of(profile)
 	return profile.arrival_tolerance + profile.arrival_speed_tolerance * profile.arrival_speed_tolerance / (2.0 * braking)
-
-
-## Stopping distance from max speed with the full directional-thruster braking (m).
-static func stop_distance_of(profile: MovementProfile) -> float:
-	return profile.max_speed * profile.max_speed / (2.0 * profile.thruster_strength / profile.mass)
