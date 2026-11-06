@@ -11,9 +11,13 @@ extends Resource
 @export_range(1.0, 600.0, 1.0) var thruster_strength: float = 60.0
 ## Directional-thruster effectiveness (output, 0–1) against the actual planar speed in m/s (input; the curve's domain
 ## is in m/s, and speeds beyond its first and last points use those points' values). It scales the directional
-## thrusters' sideways and bow-forward acceleration (repositioning); sternward thrust keeps the full
-## thruster_strength / mass (then the retro rule). Required.
+## thrusters' sideways acceleration (thruster_strength / mass) and their bow-forward acceleration
+## (forward_directional_acceleration); sternward thrust keeps the full thruster_strength / mass (then the retro rule).
+## Required.
 @export var directional_thrust_curve: Curve
+## Directional thrusters' bow-forward acceleration at rest, scaled by directional_thrust_curve at the actual speed. Not
+## divided by mass. It adds to the main engine and shares the directional thrusters' capacity; 0 = no forward thrust.
+@export_range(0.0, 100.0, 0.0001, "suffix:m/s²") var forward_directional_acceleration: float = 0.25
 ## Hard cap on the planar speed.
 @export_range(1.0, 150.0, 0.1, "suffix:m/s") var max_speed: float = 15.0
 ## Time the pilot takes to close the gap between desired and actual velocity.

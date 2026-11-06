@@ -1,11 +1,12 @@
 extends SceneTree
-## Headless open-space check of speed-dependent directional thrust (no scene, no navigation): drives ShipPilot.step()
-## directly at 60 Hz, as the navigator's predictions do, and compares it with the pilot at the baseline commit
-## (BASELINE, read from Git at run time). Run from the project folder:
+## Headless open-space check of directional thrust (no scene, no navigation): drives ShipPilot.step() directly at 60 Hz,
+## as the navigator's predictions do, and compares it with the pilot at the baseline commit (BASELINE, the previous
+## orientation implementation: speed-dependent directional thrust with forward thrust at the sideways limit), read from
+## Git at run time. Run from the project folder:
 ##   godot --headless --path . --script res://Tests/directional_thrust_test.gd
 ## Prints measurements and PASS/FAIL lines; exits with code 1 when any check fails.
 
-const BASELINE := "777483b"
+const BASELINE := "81299ce"
 const DELTA := 1.0 / 60.0
 const PROFILE_PATH := "res://Movement/Profiles/frigate_movement_profile.tres"
 
@@ -24,47 +25,47 @@ func _init() -> void:
 	var no_retro: MovementProfile = profile.duplicate()
 	no_retro.retro_thrusters = false
 
-	_test_curve(profile)
-	_test_stationary(profile)
-	_test_cruise(profile)
+	_test_limits(profile)
+	_test_main_engine_dominates(profile)
+	_test_sideways(profile, "3. Stationary", Vector3.ZERO, Vector3(40, 0, 0), 20.0)
+	_test_sideways(profile, "4. Cruise 15 m/s,", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 6.0)
 	_test_braking(profile, "retro thrusters", false)
 	_test_braking(no_retro, "no retro thrusters", false)
 	_test_braking(profile, "retro thrusters", true)
 	_test_braking(no_retro, "no retro thrusters", true)
+	_test_stern_first_stop(profile)
 	_test_capacity(profile)
 	_test_translate_and_rotate(profile)
 
-	print("\n7. Profile unchanged at run time")
+	print("\n8. Profile unchanged at run time")
 	_check(_snapshot(profile) == before, "frigate profile (every property and curve point) identical after all runs")
 	_check(no_retro.directional_thrust_curve == profile.directional_thrust_curve and profile.retro_thrusters, "no-retro test copy did not touch the shared profile")
 	print("\n%s (%d failed)" % ["ALL PASSED" if _failures == 0 else "FAILURES", _failures])
 	quit(1 if _failures > 0 else 0)
 
 
-# 1. Directional repositioning acceleration against the curve, measured from one step() at each speed.
-func _test_curve(profile: MovementProfile) -> void:
-	print("\n1. Directional repositioning acceleration (one pilot tick, saturated request, no turning)")
+# 1. Directional thruster limits, measured from one step() at each speed.
+func _test_limits(profile: MovementProfile) -> void:
+	print("\n1. Directional thruster limits (one pilot tick, saturated request, no turning)")
 	var a_t := profile.thruster_strength / profile.mass
 	# Measurement copy: max_speed raised only so the speed cap cannot hide a pure sideways or forward request at
 	# 15 m/s; the curve's domain is in m/s, so effectiveness is unaffected.
 	var probe: MovementProfile = profile.duplicate()
 	probe.max_speed = 1000.0
-	print("   speed   expected   sideways   forward(thr)   sternward   stern-first rated")
-	for entry in [[0.0, 1.0], [5.0, 0.75], [10.0, 0.5], [15.0, 0.25]]:
+	print("   speed   forward thr (expected)   main engine   sideways (expected)   sternward")
+	for entry in [[0.0, 0.25], [5.0, 0.1875], [10.0, 0.125], [15.0, 0.0625]]:
 		var v: float = entry[0]
-		var expected: float = a_t * entry[1]
-		var sideways := _one_tick_accel(probe, v, Vector3.RIGHT * 10.0).dot(Vector3.RIGHT)
-		# Forward: the main engine adds its 0.5 m/s²; subtract it to report the directional thrusters alone.
+		var e := ShipPilot.effectiveness_of(profile, v)
 		var forward_out := ShipPilot.Output.new()
-		var forward := _one_tick_accel(probe, v, Vector3.FORWARD * 10.0, forward_out).dot(Vector3.FORWARD) - forward_out.main_command
+		var forward_total := _one_tick_accel(probe, v, Vector3.FORWARD * 10.0, forward_out).dot(Vector3.FORWARD)
+		var forward := forward_out.thruster_command.dot(Vector3.FORWARD)
+		var sideways := _one_tick_accel(probe, v, Vector3.RIGHT * 10.0).dot(Vector3.RIGHT)
 		var sternward := -_one_tick_accel(probe, v, Vector3.BACK * 10.0).dot(Vector3.FORWARD)
-		print("   %5.1f   %8.3f   %8.3f   %12.3f   %9.3f" % [v, expected, sideways, forward, sternward])
-		_check(absf(sideways - expected) < 1e-3, "sideways at %.0f m/s = %.3f m/s² (curve %.0f%%)" % [v, sideways, entry[1] * 100.0])
-		_check(absf(forward - expected) < 1e-3, "bow-forward thrusters at %.0f m/s = %.3f m/s²" % [v, forward])
-		_check(absf(sternward - a_t) < 1e-3, "sternward braking at %.0f m/s keeps %.3f m/s²" % [v, sternward])
-	for v in [2.5, 7.5, 12.5, 20.0]:
-		print("   interpolated/clamped effectiveness at %4.1f m/s: %.3f" % [v, ShipPilot.effectiveness_of(profile, v)])
-	_check(absf(ShipPilot.effectiveness_of(profile, 7.5) - 0.625) < 1e-4 and absf(ShipPilot.effectiveness_of(profile, 20.0) - 0.25) < 1e-4, "linear between points, clamped past the end")
+		print("   %5.1f   %9.4f (%6.4f)        %9.4f   %9.4f (%6.4f)      %9.4f   total forward %.4f" % [v, forward, entry[1], forward_out.main_command, sideways, a_t * e, sternward, forward_total])
+		_check(absf(forward - entry[1]) < 1e-5, "forward directional at %.0f m/s = %.4f m/s² (approved %.4f)" % [v, forward, entry[1]])
+		_check(absf(forward_out.main_command - profile.main_acceleration) < 1e-6 and forward < forward_out.main_command, "main engine %.2f m/s² along the bow, above the directional %.4f" % [forward_out.main_command, forward])
+		_check(absf(sideways - a_t * e) < 1e-4, "sideways at %.0f m/s = %.3f m/s² (unchanged)" % [v, sideways])
+		_check(absf(sternward - a_t) < 1e-4, "sternward braking at %.0f m/s keeps %.3f m/s²" % [v, sternward])
 
 
 ## Velocity change of one tick at speed v along the bow (bow = −Z, no turning) when the desired velocity differs from
@@ -78,7 +79,7 @@ func _one_tick_accel(profile: MovementProfile, v: float, change: Vector3, out :=
 	targets.destination = Vector3(0, 0, -100000)
 	targets.use_steer = true
 	targets.steer_direction = desired.normalized()
-	targets.steer_distance = desired.length_squared() / (2.0 * 0.01) + 1000.0
+	targets.steer_distance = 1000.0
 	# Exact desired speed: pick the steer distance from the planned braking so sqrt(2 a d) − lag = |desired|.
 	var trial := ShipPilot.Output.new()
 	ShipPilot.step(profile, state.copy(), targets, DELTA, trial)
@@ -89,140 +90,206 @@ func _one_tick_accel(profile: MovementProfile, v: float, change: Vector3, out :=
 	return (state.velocity - Vector3.FORWARD * v) / DELTA
 
 
-# 2. A stationary ship ordered 40 m to its beam (abeam, course toward it).
-func _test_stationary(profile: MovementProfile) -> void:
-	print("\n2. Stationary ship, order 40 m abeam (open space)")
-	# The order also turns the hull toward the destination, so proportional sharing gives the planar thrust about half
-	# the capacity in the first second in both pilots; strong means as strong as the baseline at low speed.
-	var rows := {}
+# 2. From rest, straight ahead to cruise: the main engine supplies most of the forward acceleration on every tick.
+func _test_main_engine_dominates(profile: MovementProfile) -> void:
+	print("\n2. Acceleration from rest toward cruise (order 1000 m ahead, no turning)")
 	for pilot in ["baseline", "new"]:
-		var r := _run(pilot, profile, Vector3.ZERO, Vector3(40, 0, 0), 30.0)
-		rows[pilot] = r
-		print("   %-8s peak sideways accel %.3f m/s² (first 1 s mean %.3f), sideways speed at 2 s %.2f m/s, at 4 s %.2f m/s, arrived %s at %.2f s, heading change %.1f°" % [pilot, r.peak_side, r.side_accel_1s, r.side_speed_2s, r.side_speed_4s, r.arrived, r.arrive_time, r.heading_change])
-	var new_r: Dictionary = rows["new"]
-	var old_r: Dictionary = rows["baseline"]
-	_check(new_r.side_accel_1s >= 0.9 * old_r.side_accel_1s, "stationary sideways acceleration over the first second %.3f m/s² is at least 90%% of baseline %.3f" % [new_r.side_accel_1s, old_r.side_accel_1s])
-	_check(new_r.arrived, "stationary ship reaches the abeam destination")
+		var script: Variant = _old if pilot == "baseline" else ShipPilot
+		var state: Variant = script.State.new()
+		var targets: Variant = script.Targets.new()
+		targets.has_order = true
+		targets.destination = Vector3(0, 0, -1000)
+		targets.has_course = true
+		var out: Variant = script.Output.new()
+		var worst_share := 1.0
+		var main_sum := 0.0
+		var thr_sum := 0.0
+		var marks := {}
+		var rows: Array[String] = []
+		var next_row := 0.0
+		for i in 3600:
+			var v: float = state.velocity.length()
+			if v >= next_row and next_row <= 14.0:
+				rows.push_back("%5.1f m/s: main %.4f + thrusters %.4f m/s²" % [v, out.main_command, out.thruster_command.dot(Vector3.FORWARD)])
+				next_row += 2.0 if next_row < 14.0 else 100.0
+			_step(script, profile, state, targets, out)
+			var main: float = out.main_command
+			var thr := maxf(out.thruster_command.dot(Vector3.FORWARD), 0.0)
+			if main + thr > 1e-6:
+				worst_share = minf(worst_share, main / (main + thr))
+				main_sum += main
+				thr_sum += thr
+			var speed: float = state.velocity.length()
+			for mark in [5.0, 10.0, 14.0, 14.9]:
+				if speed >= mark and not marks.has(mark):
+					marks[mark] = (i + 1) * DELTA
+			if speed >= 14.9:
+				break
+		print("   %-8s time to 5 / 10 / 14 / 14.9 m/s: %s / %s / %s / %s s; distance %.1f m; main share of forward acceleration: overall %.1f%%, lowest tick %.1f%%" % [pilot, _t(marks, 5.0), _t(marks, 10.0), _t(marks, 14.0), _t(marks, 14.9), -state.position.z, 100.0 * main_sum / maxf(main_sum + thr_sum, 1e-9), 100.0 * worst_share])
+		print("            per tick at: %s" % "; ".join(rows))
+		if pilot == "new":
+			_check(worst_share > 0.5, "main engine provides most of the forward acceleration on every tick (lowest %.1f%%)" % (100.0 * worst_share))
+			_check(marks.has(14.9), "the ship still reaches cruise")
 
 
-# 3. The same 40 m sideways correction from cruise (15 m/s along the bow): order 40 m abeam of a point 300 m ahead.
-func _test_cruise(profile: MovementProfile) -> void:
-	print("\n3. Cruise 15 m/s, same 40 m sideways correction (order 300 m ahead, 40 m abeam)")
-	var results := {}
+func _t(marks: Dictionary, key: float) -> String:
+	return "%.2f" % marks[key] if marks.has(key) else "—"
+
+
+# 3 and 4. Sideways repositioning (no hull turn, no forward component): identical to the baseline tick by tick.
+# Also prints the same order with the course turn on, which is not pure sideways once the hull has turned.
+func _test_sideways(profile: MovementProfile, label: String, velocity: Vector3, destination: Vector3, seconds: float) -> void:
+	print("\n%s order %s, sideways repositioning" % [label, destination])
+	var pure_old := _run("baseline", profile, velocity, destination, seconds, true, false)
+	var pure_new := _run("new", profile, velocity, destination, seconds, true, false)
+	for row in [["baseline", pure_old], ["new", pure_new]]:
+		var r: Dictionary = row[1]
+		print("   %-8s (no course turn) first 1 s sideways accel %.4f m/s², peak %.4f, sideways speed at 2 s %.4f, sideways offset at 6 s %.3f m, forward speed at 6 s %.3f, max forward thrusters %.4f m/s²" % [row[0], r.side_accel_1s, r.peak_side, r.side_speed_2s, r.side_offset_6s, r.fwd_speed_6s, r.max_fwd_thr])
+	_check(pure_old.trace == pure_new.trace, "sideways repositioning identical to the baseline on every tick (%d ticks, position and velocity)" % pure_new.ticks)
 	for pilot in ["baseline", "new"]:
-		var r := _run(pilot, profile, Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 6.0)
-		results[pilot] = r
-		print("   %-8s first 1 s: sideways accel %.3f m/s², peak %.3f; forward speed at 1 s %.2f, 3 s %.2f, 6 s %.2f m/s; sideways speed at 2 s %.2f m/s; sideways offset at 6 s %.1f m" % [pilot, r.side_accel_1s, r.peak_side, r.fwd_speed_1s, r.fwd_speed_3s, r.fwd_speed_6s, r.side_speed_2s, r.side_offset_6s])
-	var stationary := _run("new", profile, Vector3.ZERO, Vector3(40, 0, 0), 2.0)
-	var new_r: Dictionary = results["new"]
-	var old_r: Dictionary = results["baseline"]
-	_check(new_r.side_accel_1s < 0.35 * stationary.side_accel_1s, "cruise sideways acceleration over the first second %.3f m/s² vs stationary %.3f m/s² (%.0f%%)" % [new_r.side_accel_1s, stationary.side_accel_1s, 100.0 * new_r.side_accel_1s / stationary.side_accel_1s])
-	_check(new_r.side_accel_1s < 0.35 * old_r.side_accel_1s, "cruise sideways acceleration vs baseline cruise %.3f m/s²" % old_r.side_accel_1s)
-	# Peak bound: directional thrusters at 15 m/s plus the main engine's sideways share while the hull turns.
-	var bound := profile.thruster_strength / profile.mass * ShipPilot.effectiveness_of(profile, 15.0) + profile.main_acceleration
-	_check(new_r.peak_side <= bound, "cruise peak sideways acceleration %.3f m/s² within thrusters at 15 m/s + main engine (%.3f)" % [new_r.peak_side, bound])
-	_check(new_r.fwd_speed_1s > 14.0, "forward momentum kept: %.2f m/s after 1 s" % new_r.fwd_speed_1s)
+		var r := _run(pilot, profile, velocity, destination, 30.0, true, true)
+		print("   %-8s (with course turn) first 1 s sideways accel %.4f m/s², sideways speed at 2 s %.3f, at 4 s %.3f, sideways offset at 6 s %.2f m, heading after 30 s %.1f°, arrived %s at %.2f s" % [pilot, r.side_accel_1s, r.side_speed_2s, r.side_speed_4s, r.side_offset_6s, r.heading_change, r.arrived, r.arrive_time])
 
 
-# 4. Straight braking from 15 m/s: idle stop (no order) and arrival at a point ahead.
+# 5. Straight braking from 15 m/s: idle stop (no order) and arrival at a point ahead.
 func _test_braking(profile: MovementProfile, label: String, arrival: bool) -> void:
-	print("\n4. Straight braking from 15 m/s, %s, %s" % [label, "arrival at a point 80 m ahead" if arrival else "stop (no order)"])
+	print("\n5. Straight braking from 15 m/s, %s, %s" % [label, "arrival at a point 80 m ahead" if arrival else "stop (no order)"])
 	var rows := {}
 	for pilot in ["baseline", "new"]:
 		var destination := Vector3(0, 0, -80) if arrival else Vector3.ZERO
-		var r := _run(pilot, profile, Vector3.FORWARD * 15.0, destination, 40.0, arrival)
+		var r := _run(pilot, profile, Vector3.FORWARD * 15.0, destination, 40.0, arrival, true)
 		rows[pilot] = r
 		print("   %-8s stop time %.3f s, stop distance %.3f m, peak deceleration %.3f m/s²%s" % [pilot, r.stop_time, r.stop_distance, r.peak_decel, (", arrived %s at %.2f s, final distance to point %.3f m" % [r.arrived, r.arrive_time, r.final_miss]) if arrival else ""])
 	var old_r: Dictionary = rows["baseline"]
 	var new_r: Dictionary = rows["new"]
-	_check(absf(old_r.stop_time - new_r.stop_time) < 1e-6 and absf(old_r.stop_distance - new_r.stop_distance) < 1e-4, "identical to baseline (%s, %s)" % [label, "arrival" if arrival else "stop"])
+	_check(old_r.trace == new_r.trace, "identical to baseline on every tick (%s, %s)" % [label, "arrival" if arrival else "stop"])
 
 
-# 5. Braking, sideways correction and turning together stay inside the shared capacity.
+# Measurement only (no check): stopping stern-first travel needs bow-forward thrust, now the forward limit, and the main
+# engine never brakes, so this braking changes on purpose with the forward limit.
+func _test_stern_first_stop(profile: MovementProfile) -> void:
+	print("
+5b. Stern-first stop from 5 m/s (no order; measurement, consequence of the forward limit)")
+	for pilot in ["baseline", "new"]:
+		var r := _run(pilot, profile, Vector3.BACK * 5.0, Vector3.ZERO, 60.0, false, false)
+		print("   %-8s stop time %.2f s, stop distance %.1f m, peak deceleration %.4f m/s²" % [pilot, r.stop_time, r.stop_distance, r.peak_decel])
+
+
+# 6. Forward, sideways, braking and turning together stay inside every limit and the shared capacity.
 func _test_capacity(profile: MovementProfile) -> void:
-	print("\n5. Combined braking + sideways correction + turning within capacity")
+	print("\n6. Combined demands within the limits and the shared capacity")
 	var a_t := profile.thruster_strength / profile.mass
-	# Direct allocation at 15 m/s: braking 3 m/s² sternward and 3 m/s² sideways requested, full planar share.
 	var bow := Vector3.FORWARD
-	var limit := a_t * ShipPilot.effectiveness_of(profile, 15.0)
-	var command := ShipPilot.allocate(Vector3(3, 0, 3), bow, 1.0, bow, a_t, limit)
-	print("   allocate at 15 m/s: request braking 3.000 + sideways 3.000 → braking %.3f, sideways %.3f, envelope use %.4f" % [-command.dot(bow), command.x, ShipPilot.envelope_norm(command, bow, a_t, limit)])
-	_check(absf(-command.dot(bow) - 3.0) < 1e-6, "braking served in full first")
-	_check(absf(ShipPilot.envelope_norm(command, bow, a_t, limit) - 1.0) < 1e-4 and command.x < 3.0, "sideways gets only the remaining capacity")
-	var uniform := Vector3(3, 0, 3) / ShipPilot.envelope_norm(Vector3(3, 0, 3), bow, a_t, limit)
-	print("   (uniform scaling would give braking %.3f, sideways %.3f)" % [-uniform.dot(bow), uniform.x])
+	var e := ShipPilot.effectiveness_of(profile, 15.0)
+	var side_limit := a_t * e
+	var fwd_limit := profile.forward_directional_acceleration * e
+	var command := ShipPilot.allocate(Vector3(3, 0, 3), bow, 1.0, bow, a_t, side_limit, fwd_limit)
+	print("   allocate at 15 m/s: request braking 3.000 + sideways 3.000 → braking %.3f, sideways %.3f, envelope use %.4f" % [-command.dot(bow), command.x, ShipPilot.envelope_norm(command, bow, a_t, side_limit, fwd_limit)])
+	_check(absf(-command.dot(bow) - 3.0) < 1e-6 and absf(ShipPilot.envelope_norm(command, bow, a_t, side_limit, fwd_limit) - 1.0) < 1e-4, "braking served first, sideways only the remainder (unchanged)")
+	command = ShipPilot.allocate(Vector3(3, 0, -3), bow, 1.0, bow, a_t, side_limit, fwd_limit)
+	print("   allocate at 15 m/s: request forward 3.000 + sideways 3.000 → forward %.4f, sideways %.4f (limits %.4f / %.4f)" % [command.dot(bow), command.x, fwd_limit, side_limit])
+	_check(command.dot(bow) <= fwd_limit + 1e-6 and command.x <= side_limit + 1e-6, "combined forward and sideways inside both limits")
 
-	# Simulated: 10 m/s along the bow, ordered to a point behind and to the side (braking, sideways and a large turn).
-	var state := ShipPilot.State.new()
-	state.velocity = Vector3.FORWARD * 10.0
-	var targets := _targets(state, Vector3(30, 0, 20))
-	var out := ShipPilot.Output.new()
-	var worst_norm := 0.0
-	var worst_total := 0.0
-	var worst_magnitude := 0.0
-	var both_ticks := 0
+	# Simulated orders from different states: braking, sideways correction, forward acceleration and large turns.
+	var cases := [
+		[Vector3.FORWARD * 10.0, Vector3(30, 0, 20), "10 m/s, order behind and to the side"],
+		[Vector3.ZERO, Vector3(-50, 0, -60), "rest, order ahead-left"],
+		[Vector3(6, 0, -6), Vector3(-80, 0, -10), "drifting, order across the drift"],
+		[Vector3.BACK * 5.0, Vector3(0, 0, -100), "5 m/s stern-first, order ahead"],
+	]
 	var turn_limit_rated := deg_to_rad(profile.turn_authority / profile.mass)
-	for i in 1800:
-		var speed := Vector3(state.velocity.x, 0, state.velocity.z).length()
-		var bow_now := ShipPilot.bow_of(state.yaw)
-		var rudder := profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
-		var lim := a_t * ShipPilot.effectiveness_of(profile, speed)
-		_step(ShipPilot, profile, state, targets, out)
-		var planar_use := ShipPilot.envelope_norm(out.thruster_command, bow_now, a_t, lim)
-		var turn_use := absf(out.turn_acceleration) / (turn_limit_rated * rudder) if rudder > 0.0 else 0.0
-		worst_norm = maxf(worst_norm, planar_use)
-		worst_total = maxf(worst_total, planar_use + turn_use)
-		worst_magnitude = maxf(worst_magnitude, out.thruster_command.length())
-		if planar_use > 0.5 and turn_use > 0.2:
-			both_ticks += 1
-		if out.arrived:
-			targets.has_order = false
-	print("   sim 30 s: worst planar envelope use %.4f, worst planar + turning use %.4f, largest thruster acceleration %.3f m/s² (rating %.3f), ticks with heavy thrust and turning together %d, final speed %.3f m/s" % [worst_norm, worst_total, worst_magnitude, a_t, both_ticks, state.velocity.length()])
-	_check(worst_norm <= 1.0 + 1e-4 and worst_total <= 1.0 + 1e-4 and worst_magnitude <= a_t + 1e-4, "never more than the shared capacity or the thruster rating")
+	for case in cases:
+		var state := ShipPilot.State.new()
+		state.velocity = case[0]
+		var targets := _targets(state, case[1])
+		var out := ShipPilot.Output.new()
+		var worst := {planar = 0.0, total = 0.0, magnitude = 0.0, forward = 0.0, sideways = 0.0, main = 0.0}
+		var heavy := 0
+		for i in 2400:
+			var speed := Vector3(state.velocity.x, 0, state.velocity.z).length()
+			var bow_now := ShipPilot.bow_of(state.yaw)
+			var right := Vector3(-bow_now.z, 0, bow_now.x)
+			var e_now := ShipPilot.effectiveness_of(profile, speed)
+			var side_now := a_t * e_now
+			var fwd_now := profile.forward_directional_acceleration * e_now
+			var rudder := profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
+			_step(ShipPilot, profile, state, targets, out)
+			var planar_use := ShipPilot.envelope_norm(out.thruster_command, bow_now, a_t, side_now, fwd_now)
+			var turn_use := absf(out.turn_acceleration) / (turn_limit_rated * rudder) if rudder > 0.0 else 0.0
+			worst.planar = maxf(worst.planar, planar_use)
+			worst.total = maxf(worst.total, planar_use + turn_use)
+			worst.magnitude = maxf(worst.magnitude, out.thruster_command.length() / a_t)
+			worst.forward = maxf(worst.forward, out.thruster_command.dot(bow_now) / fwd_now if fwd_now > 0.0 else 0.0)
+			worst.sideways = maxf(worst.sideways, absf(out.thruster_command.dot(right)) / side_now)
+			worst.main = maxf(worst.main, out.main_command / profile.main_acceleration)
+			if planar_use > 0.5 and turn_use > 0.2:
+				heavy += 1
+			if out.arrived:
+				targets.has_order = false
+		print("   %-38s use of limit (1 = at the limit): planar envelope %.4f, planar + turning %.4f, forward thrusters %.4f, sideways %.4f, thruster rating %.4f, main engine %.4f; heavy thrust + turning ticks %d; final speed %.3f m/s" % [case[2], worst.planar, worst.total, worst.forward, worst.sideways, worst.magnitude, worst.main, heavy, state.velocity.length()])
+		var ok: bool = worst.planar <= 1.0 + 1e-4 and worst.total <= 1.0 + 1e-4 and worst.forward <= 1.0 + 1e-4 and worst.sideways <= 1.0 + 1e-4 and worst.magnitude <= 1.0 + 1e-4 and worst.main <= 1.0 + 1e-6
+		_check(ok, "never above a limit or the shared capacity (%s)" % case[2])
 
 
-# 6. Translation and rotation at the same time: from rest, ordered 60 m at 60° off the bow.
+# 7. Translation and rotation at the same time: from rest, ordered 60 m at 60° off the bow.
 func _test_translate_and_rotate(profile: MovementProfile) -> void:
-	print("\n6. Translate while rotating (from rest, order 60 m at 60° off the bow)")
-	var state := ShipPilot.State.new()
-	var targets := _targets(state, Vector3(60 * sin(deg_to_rad(60.0)), 0, -60 * cos(deg_to_rad(60.0))))
-	var out := ShipPilot.Output.new()
-	var both := 0
-	for i in 600:
-		_step(ShipPilot, profile, state, targets, out)
-		if absf(state.turn_rate) > 1e-4 and out.thruster_command.length() > 0.1:
-			both += 1
-		if i == 119:
-			print("   at 2 s: speed %.2f m/s, turn rate %.2f °/s, heading %.1f°, thrusters %.2f m/s²" % [state.velocity.length(), rad_to_deg(state.turn_rate), rad_to_deg(state.yaw), out.thruster_command.length()])
-	print("   ticks (of 600) with the hull turning and the thrusters pushing at once: %d" % both)
-	_check(both > 60, "translation and rotation happen simultaneously")
+	print("\n7. Translate while rotating (from rest, order 60 m at 60° off the bow)")
+	for pilot in ["baseline", "new"]:
+		var script: Variant = _old if pilot == "baseline" else ShipPilot
+		var state: Variant = script.State.new()
+		var targets: Variant = script.Targets.new()
+		targets.has_order = true
+		targets.destination = Vector3(60 * sin(deg_to_rad(60.0)), 0, -60 * cos(deg_to_rad(60.0)))
+		targets.has_course = true
+		targets.course_yaw = atan2(-targets.destination.x, -targets.destination.z)
+		var out: Variant = script.Output.new()
+		var both := 0
+		var at_2s := ""
+		var arrived := -1.0
+		for i in 1800:
+			_step(script, profile, state, targets, out)
+			if absf(state.turn_rate) > 1e-4 and out.thruster_command.length() > 0.1:
+				both += 1
+			if i == 119:
+				at_2s = "speed %.2f m/s, turn rate %.2f °/s, heading %.1f°, thrusters %.2f m/s²" % [state.velocity.length(), rad_to_deg(state.turn_rate), rad_to_deg(state.yaw), out.thruster_command.length()]
+			if out.arrived and arrived < 0.0:
+				arrived = (i + 1) * DELTA
+				targets.has_order = false
+		print("   %-8s at 2 s: %s; ticks (of 1800) with the hull turning and the thrusters pushing %d; arrived at %.2f s" % [pilot, at_2s, both, arrived])
+		if pilot == "new":
+			_check(both > 60, "translation and rotation happen simultaneously")
 
 
 ## Runs one pilot (baseline or new) from the origin with bow −Z at the given velocity toward a destination (an order
-## unless `order` is false and the destination is zero), and measures it.
-func _run(pilot: String, profile: MovementProfile, velocity: Vector3, destination: Vector3, seconds: float, order := true) -> Dictionary:
+## when `order`, with the course turn when `course`), and measures it. `trace` holds every tick's position and velocity.
+func _run(pilot: String, profile: MovementProfile, velocity: Vector3, destination: Vector3, seconds: float, order: bool, course: bool) -> Dictionary:
 	var script: Variant = _old if pilot == "baseline" else ShipPilot
 	var state: Variant = script.State.new()
 	state.velocity = velocity
 	var targets: Variant = script.Targets.new()
 	targets.has_order = order and destination != Vector3.ZERO
 	targets.destination = destination
-	targets.has_course = targets.has_order
+	targets.has_course = course and targets.has_order
 	targets.course_yaw = atan2(-destination.x, -destination.z)
 	var out: Variant = script.Output.new()
 	var r := {peak_side = 0.0, side_accel_1s = 0.0, side_speed_2s = 0.0, side_speed_4s = 0.0, arrived = false, arrive_time = -1.0,
-		heading_change = 0.0, fwd_speed_1s = 0.0, fwd_speed_3s = 0.0, fwd_speed_6s = 0.0, side_offset_6s = 0.0,
-		stop_time = -1.0, stop_distance = 0.0, peak_decel = 0.0, final_miss = 0.0}
+		heading_change = 0.0, fwd_speed_6s = 0.0, side_offset_6s = 0.0, max_fwd_thr = 0.0,
+		stop_time = -1.0, stop_distance = 0.0, peak_decel = 0.0, final_miss = 0.0, trace = PackedVector3Array(), ticks = 0}
 	var start_dir := velocity.normalized() if velocity != Vector3.ZERO else Vector3.FORWARD
 	var right := Vector3(-start_dir.z, 0, start_dir.x)
 	var ticks := roundi(seconds / DELTA)
+	r.ticks = ticks
 	for i in ticks:
 		var t := (i + 1) * DELTA
 		var before: Vector3 = state.velocity
+		var bow_now := ShipPilot.bow_of(state.yaw)
 		_step(script, profile, state, targets, out)
+		r.trace.push_back(state.position)
+		r.trace.push_back(state.velocity)
 		var accel: Vector3 = (state.velocity - before) / DELTA
 		r.peak_side = maxf(r.peak_side, absf(accel.dot(right)))
 		r.peak_decel = maxf(r.peak_decel, -accel.dot(start_dir))
+		r.max_fwd_thr = maxf(r.max_fwd_thr, out.thruster_command.dot(bow_now))
 		if out.arrived and not r.arrived:
 			r.arrived = true
 			r.arrive_time = t
@@ -232,11 +299,8 @@ func _run(pilot: String, profile: MovementProfile, velocity: Vector3, destinatio
 			r.stop_distance = state.position.length()
 		if i == 59:
 			r.side_accel_1s = state.velocity.dot(right) / 1.0
-			r.fwd_speed_1s = state.velocity.dot(start_dir)
 		if i == 119:
 			r.side_speed_2s = state.velocity.dot(right)
-		if i == 179:
-			r.fwd_speed_3s = state.velocity.dot(start_dir)
 		if i == 239:
 			r.side_speed_4s = state.velocity.dot(right)
 		if i == 359:

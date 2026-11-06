@@ -7,8 +7,8 @@ extends CharacterBody3D
 ## Each physics tick the pilot computes a desired velocity toward the destination that falls with the
 ## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
 ## velocity within pilot_response_time. The main engine supplies the useful part along the bow; the
-## directional thrusters supply the rest. Their sideways and bow-forward acceleration fades with actual speed
-## (profile.directional_thrust_curve); sternward they keep the full rating. Within their share, braking against the
+## directional thrusters supply the rest. Their sideways acceleration (thruster_strength / mass) and bow-forward acceleration
+## (forward_directional_acceleration, below the main engine) fade with actual speed (profile.directional_thrust_curve); sternward they keep the full rating. Within their share, braking against the
 ## actual travel is served before sideways correction, and the approach is planned with the braking the thrusters
 ## can actually deliver against the travel direction. Turning demand is computed first, so the approach speed is planned
 ## with the braking that sharing will leave. The pilot also steers the hull toward the order's course heading
@@ -76,7 +76,7 @@ var _order_status := "no order yet"
 
 func _ready() -> void:
 	if not _profile_valid():
-		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0), a rudder curve above 0 at full speed and a directional thrust curve; the ship will not move.")
+		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0), a rudder curve above 0 at full speed, a directional thrust curve and forward_directional_acceleration at least 0; the ship will not move.")
 		set_physics_process(false)
 		return
 	var hull: CollisionShape3D = null
@@ -200,8 +200,8 @@ func get_main_command() -> float:
 	return _pilot_out.main_command
 
 
-## Last directional thruster acceleration (world XZ) in m/s²: up to thruster_strength / mass sternward, and up to
-## that x the directional effectiveness sideways and bow-forward.
+## Last directional thruster acceleration (world XZ) in m/s²: up to thruster_strength / mass sternward, that x the
+## directional effectiveness sideways, and forward_directional_acceleration x the effectiveness bow-forward.
 func get_thruster_command() -> Vector3:
 	return _pilot_out.thruster_command
 
@@ -395,4 +395,4 @@ func _profile_valid() -> bool:
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
 		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 \
 		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.no_go_tolerance >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0 \
-		and profile.directional_thrust_curve != null
+		and profile.directional_thrust_curve != null and profile.forward_directional_acceleration >= 0.0

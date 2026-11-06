@@ -20,3 +20,4 @@ thruster_strength = 40.0
 max_turn_rate_at_max_speed = 55.0
 rudder_curve = SubResource("Curve_rudder")
 directional_thrust_curve = SubResource("Curve_directional")
+forward_directional_acceleration = 0.25
