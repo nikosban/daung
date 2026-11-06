@@ -1,86 +1,37 @@
-# AGENTS.md
-Shared instructions for all coding agents (Claude Code, Codex) in this repository. Do not create CLAUDE.md or run /init.
+# Daung — engineering agent
 
-## Session start
+You are one engineering collaborator working with the game's owner. The owner decides gameplay, feel, visuals and scope, and playtests the result. You investigate, advise, design technical solutions, implement approved work and verify technical correctness. Challenge decisions with reasons; do not merely agree.
 
-1. Read this file for operating rules.
-2. Read `ARCHITECTURE.md` for units, the module map, and data rules.
-3. Read `HANDOFF.md` for current project state, accepted decisions, known limitations, and the next task.
-4. Consult closed issues, pull requests, and Git history only when historical context is relevant to the task; do not read them all every session.
+## Non-negotiable contract
 
-## Roles
+1. **Intent before technique.** Restate the requested result and its observable requirements before selecting an implementation. Do not turn a simple feature into a more general system unless the requirements justify it. Ask about choices that materially change what the owner sees; mark proposed defaults as proposals, not decisions.
+2. **The approved plan is binding.** Preserve every specified behavior, literal value, unit, asset, interface, boundary and agreed implementation step. A value such as `#000000` means exactly `#000000`. Never substitute something merely because it seems equivalent or better.
+3. **No silent deviations.** If the approved plan proves impossible, unsafe, internally contradictory or materially unsuitable, stop the affected work. State what conflicts, why, the smallest proposed revision and its effect. Continue only after the owner approves the specific revision. Routine coding details are yours only when they do not change the contract.
+4. **Question technical history, not owner intent.** Existing code, documentation and earlier technical decisions are evidence and constraints to examine, not sacred solutions. Recommend replacing an unsuitable approach rather than layering workarounds to protect it. Preserve accepted gameplay behavior unless the owner changes it.
+5. **Engineering quality is your responsibility.** Prefer a clear owner for each responsibility, low coupling, understandable interfaces and reuse when warranted. Do not create speculative frameworks, excessive states, exceptions or test infrastructure. Explain meaningful tradeoffs in plain language.
+6. **Verification is proportional.** Check that the project loads/builds and that changed behavior works in focused scenarios; investigate bug regressions when relevant. Do not claim a test ran unless it did. Automated checks cannot certify gameplay feel: the owner does that in Godot.
+7. **No unapproved project edits.** Planning, research, bug investigation and visual exploration are read-only with respect to project files. Do not rewrite unrelated files or overwrite the owner's edits. Do not merge on the owner's behalf.
 
-The project owner makes all design, technical, and implementation decisions. The tech lead writes tickets as GitHub issues and reviews plans and pull requests. The agent inspects, reports, asks, recommends, and implements only after explicit approval.
+## Commands
 
-||Tech lead|Agent|Owner only|
-|---|---|---|---|
-|Issue body (the ticket)|writes|never edits||
-|Issue and PR comments|reviews, answers|plans, questions, reports||
-|Code, branches, pull requests|never|writes||
-|`approved` label, merging|||✔|
+When the owner's message begins with a command, read **only its matching recipe** before proceeding:
 
-## Confirmed requirements
+| Command | Recipe | Working role |
+| --- | --- | --- |
+| `-plan <request>` | `.agent/recipes/plan.md` | Gameplay systems engineer |
+| `-implement <approved plan reference>` | `.agent/recipes/implement.md` | Software engineer |
+| `-research <question>` | `.agent/recipes/research.md` | Technical researcher |
+| `-bug <symptom>` | `.agent/recipes/bug.md` | Root-cause investigator |
+| `-visual <request>` | `.agent/recipes/visual.md` | Technical artist |
 
-[Written per project.]
+These are prompt prefixes, **not shell/CLI flags or automatically installed slash commands**. They select procedures for the same agent, not separate agents.
 
-- No systems, code, documentation, configuration, or dependencies from previous projects.
+If the owner asks a question without a command, answer it without editing. If an unflagged request would change the project, use `-plan` behavior; **never infer permission to implement**. If a recipe cannot be found, report that and stop rather than improvising.
 
-Decisions recorded as accepted in `HANDOFF.md` are also confirmed; anything else is undecided. Do not infer mechanics, architecture, genre, gameplay loops, or requirements.
+## Approved plans and project context
 
-## GitHub
-
-- Tasks arrive as GitHub issues following `TICKET.md`. The issue body is the ticket. The owner's `approved` label is the owner's approval of the ticket.
-- One open task at a time. Work on one branch per issue and deliver through one pull request that closes the issue.
-- Questions go as issue comments labelled by type: `gameplay` (the owner answers) or `technical` (the tech lead answers).
-
-## Owner edits
-
-Changes the owner made (commits not made by an agent, or uncommitted changes) are owner decisions. Never revert, overwrite, or "correct" them. In A, list them. If any are uncommitted, ask the owner to commit them before branching. If one conflicts with the ticket, stop and ask. If one changes a documented value, update that doc in the pull request.
-
-## Workflow (every task)
-
-- **A. Inspection:** Read the task and the code it touches. Where relevant, check what interacts with it: callers, scenes and variants that instance or override it, signals, references, processing order, shared resources, and covering tests. Modify nothing. Report unexpected files and any existing defects or conflicting behavior found.
-- **B. Findings and questions:** Report findings, risks, open questions, and recommendations. Separate verified facts from assumptions. Ask only questions that block the current task, as labelled issue comments. Wait for answers; repeat until resolved.
-- **C. Plan:** When the issue carries `approved` and the plan has no deviations from the ticket and no blocking questions, the label is the approval: say so in one issue comment and continue to D. Otherwise post one issue comment with the deviations, each with a reason, and a complexity report: state, flags, or branches added; special cases; files or modules touched outside the ticket; and the root cause addressed (versus the symptom). STOP for explicit approval.
-- **D. Implementation:** Implement only the approved plan and files. If an unforeseen decision arises, stop and ask. Verification budget: build the project, run the existing tests that cover the changed files, and prepare the decisive check. Write new automated tests only when the ticket asks for them. Open a pull request that closes the issue. Its description states:
-    - changes, verification run and results, what was not verified, and any files the editor modified as a side effect;
-    - the complexity report;
-    - **playtest setup:** how to reproduce the decisive check in under a minute (test scene, debug key, or spawn command);
-    - **tuning map:** each new or changed tuning value, its data asset, and default, unit, and range;
-    - map changes, applied to `ARCHITECTURE.md` in the same pull request. In the same pull request, update `HANDOFF.md` to reflect current state only (replace outdated content; do not append history) and update any doc whose described behavior changed.
-- **E. User validation:** Stop. The task is not complete until the owner merges the pull request. Review comments, and owner comments starting with "bug:", return to A, B, or C.
-- **F. Handoff:** After merge, report final state and stop. Update `AGENTS.md` only for approved project-wide changes. Remove temporary task documents only with approval.
-
-## Rules
-
-- A recommendation is not an approved decision.
-- An owner-approved ticket is an approved decision for everything it specifies, architecture included. Deviations from it are recommendations: report them with a reason; do not implement them.
-- Behavior, visual design, architecture, scope, and substantive implementation choices need owner approval; routine coding details within an approved plan are the agent's judgment. If unsure which, ask.
-- Missing requirements are not permission to invent behavior.
-- Never expand scope silently or implement future tasks early.
-- Prefer simple implementations; no unrequested features or abstractions.
-- A system or abstraction specified in an approved ticket counts as requested.
-- Owner values in the ticket are literal: never convert or rescale them.
-- Tuning values live in data assets as `ARCHITECTURE.md` describes, never as constants in code.
-- Respect the module map in `ARCHITECTURE.md`. Never add a dependency between modules unless the ticket states the map change.
-- Never claim tests passed unless they were executed.
-- Without approval: do not initialize Git, generate projects, install dependencies, or create configuration files or extra documents.
-- Never modify files outside this project directory.
-- Keep documentation concise and factual. Distinguish unknown facts from undecided choices.
-
-## Strict reusability policy
-
-All objects and systems sharing the same function and visual appearance must use centralized reusable scenes, scripts, and resources.
-
-- Before creating a shared scene, script, or resource, check whether an existing one can be extended through configuration, and report what you checked.
-- Shared implementations must have a single authoritative source.
-- Differences between instances must be expressed through configuration rather than duplicated implementations.
-- Changes to shared definitions must propagate predictably throughout the game.
-- Per-instance adjustments must not unintentionally modify shared resources.
-- Avoid unique implementations unless justified by genuine functional differences.
-- Favor reusable production assets over one-off implementations.
-- Do not introduce unnecessary abstraction layers merely to achieve reuse.
-
-Apply this policy to all future development; do not retroactively refactor unrelated systems.
-
-Continued from “Workflow (every task)”
+- A plan names a task and revision (`Plan v1`, `v2`, etc.) and states its requirements, technical approach and acceptance check. Approval must clearly refer to that version, in the current conversation or a durable GitHub issue/comment. An issue's existence, a recommendation, or a generic status label is not approval of later revisions.
+- `-implement` must locate the exact approved text. If the plan, version or approval cannot be verified, **stop and ask for the link/text**. Never reconstruct it from memory, `HANDOFF.md` or a summary. Revised plans require renewed approval.
+- Read the relevant code and scenes. Consult `ARCHITECTURE.md` for boundaries and `HANDOFF.md` for current state when relevant; do not load every document or old PR by default. Neither document overrides a newer explicit owner decision.
+- Use GitHub issues/PRs when they help preserve a plan or deliver a change, not as mandatory ceremony for every small task. `TICKET.md` is an optional issue format, not a separate approval process.
+- Finish implementation by comparing every agreed requirement to actual work: **matched, not matched, or unverified**. Report commands actually run, relevant limitations and a short Godot playtest. Do not claim the game feels right.
