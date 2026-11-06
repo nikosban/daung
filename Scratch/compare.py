@@ -37,7 +37,7 @@ def load(label, scenario):
 
 def fmt(v):
     if v is None:
-        return "—"
+        return "-"
     if isinstance(v, bool):
         return "yes" if v else "no"
     if isinstance(v, float):

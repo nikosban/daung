@@ -440,19 +440,18 @@ func summarize() -> Dictionary:
 func finish_crossover() -> void:
 	var p := shared_profile
 	var limit := p.thruster_strength / p.mass
-	var has_curve := "lateral_authority_curve" in p and p.get("lateral_authority_curve") != null
+	var has_curve := "directional_authority_curve" in p and p.get("directional_authority_curve") != null
 	var keel := float(p.get("keel_drag")) if "keel_drag" in p else 0.0
 	var cross := -1.0
 	var table := []
-	var v := 0.0
-	while v <= p.max_speed + 1e-6:
-		var lat: float = limit * (p.get("lateral_authority_curve").sample(v / p.max_speed) if has_curve else 1.0)
+	for i in int(round(p.max_speed * 100.0)) + 1:
+		var v := i / 100.0
+		var lat: float = limit * (p.get("directional_authority_curve").sample(v / p.max_speed) if has_curve else 1.0)
 		var drag := keel * v * v
 		if cross < 0.0 and drag >= lat:
 			cross = v
-		if is_equal_approx(fmod(v, 1.0), 0.0) or fmod(v, 1.0) < 0.005:
-			table.append([snappedf(v, 0.1), snappedf(lat, 0.001), snappedf(drag, 0.001)])
-		v += 0.01
+		if i % 100 == 0:
+			table.append([v, snappedf(lat, 0.001), snappedf(drag, 0.001)])
 	write({scenario = scenario, label = label, crossover_speed = cross, table = table, keel_drag = keel,
 		thruster_limit = limit, criterion = "lowest speed at which keel drag on a pure sideways velocity (keel_drag v^2) reaches the faded lateral thruster acceleration (thruster_limit x curve(v / max_speed))"})
 

@@ -13,6 +13,9 @@ extends Resource
 ## fraction of max_speed (input, 0–1). It scales lateral and bow-forward directional thrust; sternward braking keeps the
 ## full thruster_strength / mass (then the retro cap). Null = 1 everywhere (no fade).
 @export var directional_authority_curve: Curve
+## Task 28 scratch (#59): keel resistance. Each tick the velocity's sideways component relative to the bow loses
+## keel_drag · v_side² · delta (never more than v_side itself, so it cannot reverse or add energy). 0 = off.
+@export_range(0.0, 0.3, 0.001, "suffix:1/m") var keel_drag: float = 0.0
 ## Hard cap on the planar speed.
 @export_range(1.0, 150.0, 0.1, "suffix:m/s") var max_speed: float = 15.0
 ## Time the pilot takes to close the gap between desired and actual velocity.

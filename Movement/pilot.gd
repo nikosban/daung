@@ -200,6 +200,14 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	planar_velocity += (bow * _main_command + _thruster_command) * delta
 	state.velocity = planar_velocity.limit_length(profile.max_speed)
 	state.yaw += state.turn_rate * delta
+	# Task 28 scratch (#59): keel resistance, relative to the bow after this tick's yaw: dissipative, quadratic in the
+	# sideways speed, bounded so it never reverses the sideways component. The bow-axis component is untouched.
+	if profile.keel_drag > 0.0:
+		var new_bow := bow_of(state.yaw)
+		var side := Vector3(-new_bow.z, 0.0, new_bow.x)
+		var side_speed := state.velocity.dot(side)
+		var loss := minf(profile.keel_drag * side_speed * side_speed * delta, absf(side_speed))
+		state.velocity -= side * (signf(side_speed) * loss)
 
 	out.arrived = arrived
 	out.main_command = _main_command
