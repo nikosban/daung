@@ -46,8 +46,8 @@ extends Resource
 ## instead of chasing each route vertex. Only used for orders the navigator routes around obstacles.
 @export_range(2.0, 60.0, 0.1, "suffix:m") var detour_lookahead_distance: float = 10.0
 ## Task 28 scratch (#59): pure-pursuit bearing. The bow aims at the point this many hull lengths (the hull collision box's
-## length) plus the current straight stopping distance ahead along the path; near the end, along the final segment.
-## Bearing only: the desired velocity, arrival braking and detour_lookahead_distance are unchanged.
+## length) plus the current straight stopping distance ahead along the path, capped at the destination. The desired
+## velocity aims at the same point (steering consistency); detour_lookahead_distance still sets route corner radii.
 @export_range(0.5, 10.0, 0.1) var pursuit_lookahead_hull_lengths: float = 2.0
 ## Planning clearance (Task #46): the hull counts as clear of obstacles at any yaw where a cylinder this much wider
 ## than its reach is empty (a cheap shortcut used to find the route sections that need a full hull check). Never

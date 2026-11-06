@@ -225,7 +225,7 @@ func record(clock: float) -> void:
 	rows.append({t = clock, x = p.x, z = p.z, vx = v.x, vz = v.z, speed = v.length(), yaw = rad_to_deg(yaw),
 		turn = ship.get_turn_rate(), main = ship.get_main_command(), stern = stern, lateral = lateral,
 		thrust = thrust.length(), bow_travel = bow_travel, bow_path = bow_path, target = ship.get_target_heading(),
-		order = ship.has_order(), off = off})
+		order = ship.has_order(), off = off, desired = ship.get_desired_speed()})
 
 
 func path_tangent(p: Vector3) -> Vector3:
@@ -434,6 +434,23 @@ func summarize() -> Dictionary:
 					flips += 1
 				prev = row.turn
 		r.turn_sign_flips_last_10s = flips
+		# Steering-consistency diagnostics: the largest one-tick change of the pilot's desired speed while ordered (a
+		# guidance handoff shows as a step), and the fastest stern-first travel (velocity against the bow) while ordered.
+		var jump := 0.0
+		var jump_t := -1.0
+		var stern_first := 0.0
+		for k in range(1, after.size()):
+			if not after[k].order or not after[k - 1].order:
+				continue
+			var d := absf(after[k].desired - after[k - 1].desired)
+			if d > jump:
+				jump = d
+				jump_t = after[k].t - focus_activated
+			var b := ShipPilot.bow_of(deg_to_rad(after[k].yaw))
+			stern_first = maxf(stern_first, -Vector3(after[k].vx, 0, after[k].vz).dot(b))
+		r.max_desired_speed_step = jump
+		r.max_desired_speed_step_time = jump_t
+		r.max_stern_first_speed = stern_first
 	return r
 
 
