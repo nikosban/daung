@@ -1,0 +1,46 @@
+{
+  "activations": [
+    0.317,
+    5.317
+  ],
+  "arrival_time": 10.6166666666671,
+  "arrived": false,
+  "contact": "",
+  "destination": [
+    20.0,
+    40.0
+  ],
+  "end_time": 10.6166666666671,
+  "final_miss": 185.776077270508,
+  "final_position": [
+    -165.776077270508,
+    40.0
+  ],
+  "final_speed": 0.00968451518565416,
+  "focus_activated": 5.31666666666665,
+  "focus_received": 4.99999999999999,
+  "label": "c4",
+  "main_accel": 0.5,
+  "max_off_mesh": 0.0,
+  "max_speed_drop_per_tick": 0.0250000953674316,
+  "max_thrust_fraction": 0.45,
+  "min_hull_gap": 129.550003051758,
+  "min_speed": 0.00968451518565416,
+  "peak_lateral_thrust": 0.000000145704632359411,
+  "peak_sternward_thrust": 1.5,
+  "profile_unchanged": true,
+  "retro": false,
+  "scenario": "brake_noretro",
+  "speed_at_activation": 14.9749937057495,
+  "speed_lost": 0.774988174438477,
+  "speed_monotonic": true,
+  "status": [
+    "0.02 no order yet",
+    "0.32 accepted (20.0, 40.0): direct; hazards [] of 335.6 m",
+    "5.32 stopped at 5.32 s"
+  ],
+  "stopping_distance": 74.6676025390625,
+  "stopping_time": 10.6166666666671,
+  "turn_exit_speed": 14.200005531311,
+  "turn_exit_time": 0.516666666666665
+}

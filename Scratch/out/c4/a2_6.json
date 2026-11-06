@@ -1,0 +1,53 @@
+{
+  "activations": [
+    0.317,
+    6.017
+  ],
+  "arrival_time": 17.3166666666666,
+  "arrived": true,
+  "bow_to_path_last_over_5deg": 17.2833333333333,
+  "bow_to_travel_last_over_5deg": 17.2833333333333,
+  "contact": "",
+  "destination": [
+    221.393218994141,
+    -210.076477050781
+  ],
+  "end_time": 19.3333333333332,
+  "final_miss": 0.172385901212692,
+  "final_position": [
+    221.369277954102,
+    -209.90576171875
+  ],
+  "final_speed": 0.000106485043943394,
+  "focus_activated": 6.01666666666665,
+  "focus_received": 5.69999999999999,
+  "label": "c4",
+  "main_accel": 0.5,
+  "max_bow_to_path": 36.9119746899605,
+  "max_bow_to_travel": 175.496150949493,
+  "max_desired_speed_step": 13.2086925506592,
+  "max_desired_speed_step_time": 0.649999999999998,
+  "max_off_mesh": 0.374911546707153,
+  "max_stern_first_speed": 3.35971021652222,
+  "max_thrust_fraction": 0.999630188941956,
+  "min_hull_gap": 2.45113086700439,
+  "min_speed": 0.000106485043943394,
+  "profile_unchanged": true,
+  "retro": true,
+  "scenario": "a2_6",
+  "speed_at_activation": 5.36400270462036,
+  "speed_lost": 4.45993626117706,
+  "status": [
+    "0.02 no order yet",
+    "0.32 accepted (170.0, -90.0): direct; no hazard regions",
+    "6.02 planning (240.0, -201.0)",
+    "6.67 accepted (240.0, -201.0): route; hazards [] of 65.2 m; resolved to (221.39, -210.08), 20.70 m from the click (nearest navigable point; 1 candidates tested, 1 path tests)",
+    "23.33 arrived at (221.4, -210.1) at 23.33 s"
+  ],
+  "travel_turn_deg": 339.951599083939,
+  "turn_exit_speed": 6.47687101364136,
+  "turn_exit_time": 6.08333333333353,
+  "turn_min_speed": 0.502749145030975,
+  "turn_radius": 13.9761284865447,
+  "turn_sign_flips_last_10s": 0
+}

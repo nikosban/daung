@@ -1,0 +1,50 @@
+{
+  "activations": [
+    0.317
+  ],
+  "arrival_time": -1.0,
+  "arrived": false,
+  "bow_to_path_last_over_5deg": 11.6333333333335,
+  "bow_to_travel_last_over_5deg": 14.016666666667,
+  "contact": "static-contact stop (TestObstacle) at 14.35 s",
+  "destination": [
+    150.0,
+    0.0
+  ],
+  "end_time": 14.0333333333336,
+  "final_miss": 76.398078918457,
+  "final_position": [
+    73.9465560913086,
+    7.24849700927734
+  ],
+  "final_speed": 0.0,
+  "focus_activated": 0.316666666666667,
+  "focus_received": 0.0166666666666667,
+  "label": "c4",
+  "main_accel": 0.5,
+  "max_bow_to_path": 103.644070352766,
+  "max_bow_to_travel": 104.677389181729,
+  "max_desired_speed_step": 0.383068084716797,
+  "max_desired_speed_step_time": 9.35000000000006,
+  "max_off_mesh": 7.11419343948364,
+  "max_stern_first_speed": 0.838217973709106,
+  "max_thrust_fraction": 0.637645125389099,
+  "min_hull_gap": -1.49919128417969,
+  "min_speed": 0.0,
+  "profile_unchanged": true,
+  "retro": true,
+  "scenario": "route",
+  "speed_at_activation": 0.0277768336236477,
+  "speed_lost": 0.0,
+  "status": [
+    "0.02 no order yet",
+    "0.32 accepted (150.0, 0.0): route; no hazard regions",
+    "14.35 static-contact stop (TestObstacle) at 14.35 s"
+  ],
+  "travel_turn_deg": -10.4311227578111,
+  "turn_exit_speed": 4.08879661560059,
+  "turn_exit_time": 6.68333333333331,
+  "turn_min_speed": 3.9753851890564,
+  "turn_radius": 23.6724875113312,
+  "turn_sign_flips_last_10s": 1
+}

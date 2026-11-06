@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 OUT = Path(__file__).parent / "out"
+import os
+REPORT_SUBDIR = os.environ.get("REPORT_SUBDIR", "")  # Steering-consistency comparisons go to report/c4.
 labels = sys.argv[1:]
 
 ROWS = [
@@ -94,7 +96,7 @@ def final_leg(label, scenario, d):
             "leg_share_under_5deg": sum(a < 5.0 for a in angles) / len(angles), "leg_settled_under_5deg": settled}
 
 
-COLORS = {"main": "#888888", "c1": "#d9534f", "c2": "#f0ad4e", "c3": "#2a9d8f", "c3_15": "#1f6fd1", "c2_15": "#6f42c1"}
+COLORS = {"main": "#888888", "c1": "#d9534f", "c2": "#f0ad4e", "c3": "#2a9d8f", "c3_15": "#1f6fd1", "c2_15": "#6f42c1", "c4": "#1f6feb"}
 
 
 def svg(scenario, labels=labels, suffix=""):
@@ -153,8 +155,8 @@ def svg(scenario, labels=labels, suffix=""):
         out.append(f'<text x="{10 + i * 110}" y="{h + 20:.0f}" fill="{color}" font-family="sans-serif" font-size="14">■ {l}</text>')
     out.append(f'<text x="{w - 10:.0f}" y="{h + 20:.0f}" text-anchor="end" fill="#555" font-family="sans-serif" font-size="12">{scenario}: X right, Z down; bow ticks every 2 s; 10 m = {10 * scale:.0f} px</text>')
     out.append("</svg>")
-    report = OUT.parent / "report"
-    report.mkdir(exist_ok=True)
+    report = OUT.parent / "report" / REPORT_SUBDIR
+    report.mkdir(parents=True, exist_ok=True)
     (report / f"{scenario}{suffix}.svg").write_text("\n".join(out), encoding="utf-8")
 
 

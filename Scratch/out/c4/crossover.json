@@ -1,0 +1,90 @@
+{
+  "criterion": "lowest speed at which keel drag on a pure sideways velocity (keel_drag v^2) reaches the faded lateral thruster acceleration (thruster_limit x curve(v / max_speed))",
+  "crossover_speed": 5.39,
+  "keel_drag": 0.08,
+  "label": "c4",
+  "scenario": "crossover",
+  "table": [
+    [
+      0.0,
+      3.333,
+      0.0
+    ],
+    [
+      1.0,
+      3.144,
+      0.08
+    ],
+    [
+      2.0,
+      2.956,
+      0.32
+    ],
+    [
+      3.0,
+      2.767,
+      0.72
+    ],
+    [
+      4.0,
+      2.578,
+      1.28
+    ],
+    [
+      5.0,
+      2.389,
+      2.0
+    ],
+    [
+      6.0,
+      2.2,
+      2.88
+    ],
+    [
+      7.0,
+      2.011,
+      3.92
+    ],
+    [
+      8.0,
+      1.822,
+      5.12
+    ],
+    [
+      9.0,
+      1.633,
+      6.48
+    ],
+    [
+      10.0,
+      1.444,
+      8.0
+    ],
+    [
+      11.0,
+      1.256,
+      9.68
+    ],
+    [
+      12.0,
+      1.067,
+      11.52
+    ],
+    [
+      13.0,
+      0.878,
+      13.52
+    ],
+    [
+      14.0,
+      0.689,
+      15.68
+    ],
+    [
+      15.0,
+      0.5,
+      18.0
+    ]
+  ],
+  "thruster_limit": 3.33333333333333
+}

@@ -1,0 +1,18 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+Movement: received move (20.0, 40.0) at 0.017 s, due 0.317 s
+ERROR: NavigationServer navigation map query failed because it was made before first map synchronization.
+	NavigationServer 'map_changed' signal can be used to receive update notifications.
+	NavigationServer 'map_get_iteration_id()' can be used to check if a map has finished its newest iteration.
+   at: get_closest_point (modules/navigation_3d/nav_map_3d.cpp:197)
+   GDScript backtrace (most recent call first):
+       [0] record (res://Scratch/experiment.gd:209)
+       [1] after_tick (res://Scratch/experiment.gd:170)
+       [2] _physics_process (res://Scratch/experiment.gd:48)
+Movement: activated move (20.0, 40.0) at 0.317 s (0.300 s after receipt)
+Movement: plan for (20.0, 40.0) at 0.317 s: direct; hazards [] of 335.7 m; 1 rollouts, 1 predicted ticks, 0 skipped stretches, 234 queries (1117 µs over 1 ticks, worst tick 1117 µs)
+Movement: received stop at 5.000 s, due 5.300 s
+Movement: activated stop at 5.317 s (0.317 s after receipt)
+RESULT {"activations":[0.317,5.317],"arrival_time":5.31666666666679,"arrived":false,"contact":"","destination":[20.0,40.0],"end_time":5.31666666666679,"final_miss":227.404037475586,"final_position":[-207.404037475586,40.0],"final_speed":0.00940216798335314,"focus_activated":5.31666666666665,"focus_received":4.99999999999999,"label":"c4","main_accel":0.5,"max_off_mesh":0.0,"max_speed_drop_per_tick":0.0555555820465088,"max_thrust_fraction":1.00000004768372,"min_hull_gap":129.692626953125,"min_speed":0.00940216798335314,"peak_lateral_thrust":0.000000145704632359411,"peak_sternward_thrust":3.33333349227905,"profile_unchanged":true,"retro":true,"scenario":"brake","speed_at_activation":14.9444379806519,"speed_lost":1.72221565246582,"speed_monotonic":true,"status":["0.02 no order yet","0.32 accepted (20.0, 40.0): direct; hazards [] of 335.7 m","5.32 stopped at 5.32 s"],"stopping_distance":33.4710998535156,"stopping_time":5.31666666666679,"turn_exit_speed":13.222222328186,"turn_exit_time":0.516666666666665}
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)

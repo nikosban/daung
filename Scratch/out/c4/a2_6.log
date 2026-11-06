@@ -1,0 +1,22 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+Movement: received move (170.0, -90.0) at 0.017 s, due 0.317 s
+ERROR: NavigationServer navigation map query failed because it was made before first map synchronization.
+	NavigationServer 'map_changed' signal can be used to receive update notifications.
+	NavigationServer 'map_get_iteration_id()' can be used to check if a map has finished its newest iteration.
+   at: get_closest_point (modules/navigation_3d/nav_map_3d.cpp:197)
+   GDScript backtrace (most recent call first):
+       [0] record (res://Scratch/experiment.gd:209)
+       [1] after_tick (res://Scratch/experiment.gd:170)
+       [2] _physics_process (res://Scratch/experiment.gd:48)
+Movement: activated move (170.0, -90.0) at 0.317 s (0.300 s after receipt)
+Movement: plan for (170.0, -90.0) at 0.317 s: direct; no hazard regions (308 µs over 1 ticks, worst tick 308 µs)
+Movement: received move (240.0, -201.0) at 5.700 s, due 6.000 s
+Movement: activated move (240.0, -201.0) at 6.017 s (0.317 s after receipt)
+Movement: plan for (240.0, -201.0) at 6.667 s: route via (226.29, -145.31) (220.25, -199.00) (220.25, -203.00) (221.39, -210.08); hazards [] of 65.2 m; 2 rollouts, 2146 predicted ticks, 0 skipped stretches, 179 queries, held 9 ticks (43342 µs over 40 ticks, worst tick 1428 µs)
+Movement: destination resolution for (240.0, -201.0): resolved to (221.39, -210.08), 20.70 m from the click (nearest navigable point; 1 candidates tested, 1 path tests); 18 closest-point, 1 path, 179 physics queries
+  click (240.00, -201.00): inside a no-go zone, 18.63 m off the navigation mesh
+  accepted (221.39, -210.08) 20.70 m, nearest navigable point
+RESULT {"activations":[0.317,6.017],"arrival_time":17.3166666666666,"arrived":true,"bow_to_path_last_over_5deg":17.2833333333333,"bow_to_travel_last_over_5deg":17.2833333333333,"contact":"","destination":[221.393218994141,-210.076477050781],"end_time":19.3333333333332,"final_miss":0.172385901212692,"final_position":[221.369277954102,-209.90576171875],"final_speed":0.000106485043943394,"focus_activated":6.01666666666665,"focus_received":5.69999999999999,"label":"c4","main_accel":0.5,"max_bow_to_path":36.9119746899605,"max_bow_to_travel":175.496150949493,"max_desired_speed_step":13.2086925506592,"max_desired_speed_step_time":0.649999999999998,"max_off_mesh":0.374911546707153,"max_stern_first_speed":3.35971021652222,"max_thrust_fraction":0.999630188941956,"min_hull_gap":2.45113086700439,"min_speed":0.000106485043943394,"profile_unchanged":true,"retro":true,"scenario":"a2_6","speed_at_activation":5.36400270462036,"speed_lost":4.45993626117706,"status":["0.02 no order yet","0.32 accepted (170.0, -90.0): direct; no hazard regions","6.02 planning (240.0, -201.0)","6.67 accepted (240.0, -201.0): route; hazards [] of 65.2 m; resolved to (221.39, -210.08), 20.70 m from the click (nearest navigable point; 1 candidates tested, 1 path tests)","23.33 arrived at (221.4, -210.1) at 23.33 s"],"travel_turn_deg":339.951599083939,"turn_exit_speed":6.47687101364136,"turn_exit_time":6.08333333333353,"turn_min_speed":0.502749145030975,"turn_radius":13.9761284865447,"turn_sign_flips_last_10s":0}
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)
