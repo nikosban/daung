@@ -5,5 +5,6 @@
 [resource]
 script = ExtResource("1_budget")
 plan_time_per_tick = 1500
-plan_prediction_per_order = 120.0
 destination_candidates_per_order = 16
+path_recoveries_per_order = 2
+passage_searches_per_query = 4

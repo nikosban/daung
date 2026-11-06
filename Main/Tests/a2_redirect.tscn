@@ -1,0 +1,9 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Main/Tests/a2_redirect.gd" id="1_test"]
+[ext_resource type="PackedScene" uid="uid://c4o17ea3lltlq" path="res://Main/main.tscn" id="2_main"]
+
+[node name="A2RedirectTest" type="Node"]
+script = ExtResource("1_test")
+
+[node name="Main" parent="." instance=ExtResource("2_main")]

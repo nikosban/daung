@@ -1,12 +1,9 @@
 class_name RouteGuidance
 extends RefCounted
 ## Navigation plans as data, and the per-tick guidance that turns a plan into pilot targets (Task #46). Used the same
-## way by the real physics tick (ShipMovement) and by prediction (ManeuverRollout), so both fly identical guidance.
+## way by the real physics tick (ShipMovement) and by prediction (ManeuverCheck), so both fly identical guidance.
 
-enum Kind { DIRECT, ROUTE, DEPART }
-
-## Two times closer than this count as equal (float summation of physics deltas).
-const TIME_EPSILON := 1e-6
+enum Kind { DIRECT, ROUTE }
 
 
 ## A plan handed to the pilot: data only.
@@ -25,25 +22,16 @@ class Plan:
 	## Direct order course (radians).
 	var has_course := false
 	var course_yaw := 0.0
-	## Departure: world direction (zero = braking), the yaw it starts at (kept: no commanded turning) and the time
-	## after handoff at which route guidance takes over (s).
-	var depart_direction := Vector3.ZERO
-	var hold_yaw := 0.0
-	var switch_time := 0.0
 
 	func total_length() -> float:
 		return lengths[lengths.size() - 1]
 
 
-## Progress along a plan; advanced by guide() each tick (real flight and prediction alike). The caller adds each
-## tick's delta to time after the pilot step.
+## Progress along a plan; advanced by guide() each tick (real flight and prediction alike).
 class Follow:
 	var index := 1
 	var frozen := false
 	var frozen_course := 0.0
-	## Time since handoff (s).
-	var time := 0.0
-	var switched := false
 	## Arc length of the ship's projection on the route (m) and that projected point.
 	var s := 0.0
 	var point := Vector3.ZERO
@@ -91,18 +79,6 @@ static func guide(plan: Plan, follow: Follow, position: Vector3, yaw: float, tar
 		return
 	var total := plan.total_length()
 	var remaining := planar(position - follow.point).length() + (total - follow.s)
-	if plan.kind == Kind.DEPART and not follow.switched:
-		if follow.time >= plan.switch_time - TIME_EPSILON:
-			follow.switched = true
-		else:
-			# No commanded course: rotation stops at once without powered turning (Movement v3), so the hull keeps its
-			# heading and the whole thruster capacity goes to braking or translating.
-			targets.use_steer = true
-			targets.steer_direction = plan.depart_direction
-			targets.steer_distance = remaining
-			targets.has_course = false
-			targets.course_yaw = plan.hold_yaw
-			return
 	var aim_s := follow.s + plan.lookahead
 	var aim := point_from(plan, follow.index, minf(aim_s, total))
 	var to_aim := planar(aim - position)

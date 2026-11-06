@@ -36,6 +36,10 @@ class State:
 ## What the pilot steers toward this tick.
 class Targets:
 	var has_order := false
+	## Coast (Task #56): no thrust and no commanded turning this tick. The velocity carries over unchanged and rotation
+	## stops, as always without powered turning; nothing else is read. Used while a newly activated order has no
+	## verified guidance yet, so the previous order's steering is gone but the ship's momentum is not braked away.
+	var coast := false
 	## Arrival point: the order completes within arrival_tolerance of it at or below arrival_speed_tolerance.
 	var destination := Vector3.ZERO
 	## false: steer straight at the destination (the direct order). true: steer along steer_direction with the
@@ -73,6 +77,21 @@ class Output:
 static func step(profile: MovementProfile, state: State, targets: Targets, delta: float, out: Output) -> void:
 	var planar_velocity := Vector3(state.velocity.x, 0.0, state.velocity.z)
 	var speed := planar_velocity.length()
+	if targets.coast:
+		state.velocity = planar_velocity
+		state.turn_rate = 0.0
+		state.planar_fraction_prev = 0.0
+		out.arrived = false
+		out.main_command = 0.0
+		out.thruster_command = Vector3.ZERO
+		out.target_yaw = state.yaw
+		out.turn_acceleration = 0.0
+		out.rudder_multiplier = profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
+		out.turn_rate_limit = 0.0
+		out.shared_scale = 1.0
+		out.desired_speed = speed
+		out.planned_braking = 0.0
+		return
 	var to_destination := targets.destination - state.position
 	to_destination.y = 0.0
 	var distance := to_destination.length()
