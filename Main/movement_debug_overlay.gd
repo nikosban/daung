@@ -5,11 +5,13 @@ extends CanvasLayer
 ## with its reason, arrived, stopped or static-contact stop), and the reaction-delay queue (physics clock, pending count, next
 ## pending command and its due time, last receipt and activation times). Reads Movement only; Movement never calls it. Hidden until F3.
 ## F3 also turns the world-space movement trail on and off with it (a fresh trace each time it turns on).
-## F3 also shows the debug destination marker at the latest received right-click (Task #38): it represents receipt, not
-## activation, and is forgotten once the ship has no active order and no pending command. Never changes Movement's queue.
+## F3 also shows the debug destination marker where the ship will go (Task #38, owner decision in PR #55): at the latest
+## received right-click from its receipt, and at the resolved destination once that click's order has been planned to a
+## different point (Task #54). It is forgotten once the ship has no active order and no pending command. Never changes
+## Movement's queue.
 ## F3 also shows and hides the red collision-shape outlines (Task #44).
 
-## Display height of the destination marker above the clicked XZ (rendering detail, not motion data).
+## Display height of the destination marker above its XZ (rendering detail, not motion data).
 const MARKER_DISPLAY_HEIGHT := 0.1
 
 @export var ship: ShipMovement
@@ -54,6 +56,7 @@ func _process(_delta: float) -> void:
 		_update_marker()
 	if not visible:
 		return
+	_update_marker()
 	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
 	var thruster := ship.get_thruster_command()
 	var destination := ship.get_destination()
@@ -64,10 +67,19 @@ func _process(_delta: float) -> void:
 		ship.get_desired_speed(), ship.get_planned_braking(),
 		ship.get_main_command(),
 		thruster.length(), thruster.x, thruster.z,
-		"active destination (%.1f, %.1f)" % [destination.x, destination.z] if ship.has_order() else "no active order",
+		_destination_text(destination) if ship.has_order() else "no active order",
 		ship.get_order_status(),
 		ship.get_clock(), ship.get_pending_count(), _next_pending_text(), _time_text(ship.get_last_received_time()), _time_text(ship.get_last_activated_time()),
 	]
+
+
+## The active destination and, when it differs (Task #54: a resolved destination), the requested click.
+func _destination_text(destination: Vector3) -> String:
+	var requested := ship.get_requested_destination()
+	var text := "active destination (%.1f, %.1f)" % [destination.x, destination.z]
+	if Vector2(requested.x - destination.x, requested.z - destination.z).length() > 0.01:
+		text += "  requested (%.1f, %.1f)" % [requested.x, requested.z]
+	return text
 
 
 func _next_pending_text() -> String:
@@ -86,4 +98,14 @@ func _time_text(time: float) -> String:
 func _update_marker() -> void:
 	destination_marker.visible = visible and _has_request
 	if destination_marker.visible:
-		destination_marker.global_position = Vector3(_requested_position.x, MARKER_DISPLAY_HEIGHT, _requested_position.z)
+		var target := _marker_target()
+		destination_marker.global_position = Vector3(target.x, MARKER_DISPLAY_HEIGHT, target.z)
+
+
+## Where the ship will go for the latest click: its resolved destination once the active order is that click's and
+## nothing newer is pending (Task #54), otherwise the click itself.
+func _marker_target() -> Vector3:
+	var requested := ship.get_requested_destination()
+	if ship.has_order() and ship.get_pending_count() == 0 and Vector2(requested.x - _requested_position.x, requested.z - _requested_position.z).length() <= 0.01:
+		return ship.get_destination()
+	return _requested_position
