@@ -1,0 +1,48 @@
+{
+  "activations": [
+    0.317,
+    5.317
+  ],
+  "arrival_time": 27.4999999999994,
+  "arrived": true,
+  "bow_to_path_last_over_5deg": 14.4333333333335,
+  "bow_to_travel_last_over_5deg": 14.1500000000002,
+  "contact": "",
+  "destination": [
+    -245.392211914063,
+    40.0
+  ],
+  "end_time": 29.516666666666,
+  "final_miss": 0.0835912078619003,
+  "final_position": [
+    -245.475784301758,
+    39.9982261657715
+  ],
+  "final_speed": 0.000103427017165814,
+  "focus_activated": 5.31666666666665,
+  "focus_received": 4.99999999999999,
+  "forward_overshoot_past_order_point": 67.0691223144531,
+  "label": "main",
+  "main_accel": 0.5,
+  "max_bow_to_path": 179.99791497107,
+  "max_bow_to_travel": 137.427968667022,
+  "max_off_mesh": 0.0,
+  "max_thrust_fraction": 0.999999976158142,
+  "min_hull_gap": 85.7551498413086,
+  "min_speed": 0.000103427017165814,
+  "profile_unchanged": true,
+  "retro": true,
+  "scenario": "turn180",
+  "speed_at_activation": 14.9722156524658,
+  "speed_lost": 14.970780082047,
+  "status": [
+    "0.02 no order yet",
+    "0.32 accepted (140.0, 40.0): direct; hazards [] of 335.7 m",
+    "5.32 accepted (-245.4, 40.0): direct; no hazard regions",
+    "32.82 arrived at (-245.4, 40.0) at 32.82 s"
+  ],
+  "travel_turn_deg": 181.222998684762,
+  "turn_exit_speed": 0.512490749359131,
+  "turn_exit_time": 9.20000000000032,
+  "turn_sign_flips_last_10s": 0
+}

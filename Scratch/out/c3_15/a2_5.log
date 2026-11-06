@@ -1,0 +1,22 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+Movement: received move (170.0, -90.0) at 0.017 s, due 0.317 s
+ERROR: NavigationServer navigation map query failed because it was made before first map synchronization.
+	NavigationServer 'map_changed' signal can be used to receive update notifications.
+	NavigationServer 'map_get_iteration_id()' can be used to check if a map has finished its newest iteration.
+   at: get_closest_point (modules/navigation_3d/nav_map_3d.cpp:197)
+   GDScript backtrace (most recent call first):
+       [0] record (res://Scratch/experiment.gd:209)
+       [1] after_tick (res://Scratch/experiment.gd:170)
+       [2] _physics_process (res://Scratch/experiment.gd:48)
+Movement: activated move (170.0, -90.0) at 0.317 s (0.300 s after receipt)
+Movement: plan for (170.0, -90.0) at 0.317 s: direct; no hazard regions (309 µs over 1 ticks, worst tick 309 µs)
+Movement: received move (240.0, -201.0) at 4.700 s, due 5.000 s
+Movement: activated move (240.0, -201.0) at 5.017 s (0.317 s after receipt)
+Movement: order to (240.0, -201.0) declined at 7.283 s: maneuver planning failed: no safe maneuver found within 120 s of predicted flight (route: centre enters the no-go zone at (223.6, -193.3)) (189713 µs over 137 ticks, worst tick 1427 µs)
+Movement: destination resolution for (240.0, -201.0): resolved to (221.39, -210.08), 20.70 m from the click (nearest navigable point; 1 candidates tested, 1 path tests); 18 closest-point, 1 path, 617 physics queries
+  click (240.00, -201.00): inside a no-go zone, 18.63 m off the navigation mesh
+  accepted (221.39, -210.08) 20.70 m, nearest navigable point
+RESULT {"activations":[0.317,5.017],"arrival_time":-1.0,"arrived":false,"bow_to_path_last_over_5deg":1.59999999999999,"bow_to_travel_last_over_5deg":1.59999999999999,"contact":"","destination":[240.0,-201.0],"end_time":2.56666666666666,"final_miss":56.8491744995117,"final_position":[226.762542724609,-145.713485717773],"final_speed":0.00950652174651623,"focus_activated":5.01666666666665,"focus_received":4.69999999999999,"label":"c3_15","main_accel":1.5,"max_bow_to_path":25.2524234276621,"max_bow_to_travel":142.73133734997,"max_off_mesh":0.376133114099503,"max_thrust_fraction":0.952282762527466,"min_hull_gap":2.45113086700439,"min_speed":0.00950652174651623,"profile_unchanged":true,"retro":true,"scenario":"a2_5","speed_at_activation":5.29136991500854,"speed_lost":5.28186339326203,"status":["0.02 no order yet","0.32 accepted (170.0, -90.0): direct; no hazard regions","5.02 planning (240.0, -201.0)","7.28 declined (240.0, -201.0): maneuver planning failed: no safe maneuver found within 120 s of predicted flight (route: centre enters the no-go zone at (223.6, -193.3))"],"travel_turn_deg":-6.80243656048154,"turn_exit_speed":-1.0,"turn_exit_time":-1.0,"turn_min_speed":1.82649493217468,"turn_radius":38.787751687808,"turn_sign_flips_last_10s":0}
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)

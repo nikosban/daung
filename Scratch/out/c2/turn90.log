@@ -1,0 +1,19 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+Movement: received move (20.0, 40.0) at 0.017 s, due 0.317 s
+ERROR: NavigationServer navigation map query failed because it was made before first map synchronization.
+	NavigationServer 'map_changed' signal can be used to receive update notifications.
+	NavigationServer 'map_get_iteration_id()' can be used to check if a map has finished its newest iteration.
+   at: get_closest_point (modules/navigation_3d/nav_map_3d.cpp:197)
+   GDScript backtrace (most recent call first):
+       [0] record (res://Scratch/experiment.gd:209)
+       [1] after_tick (res://Scratch/experiment.gd:170)
+       [2] _physics_process (res://Scratch/experiment.gd:48)
+Movement: activated move (20.0, 40.0) at 0.317 s (0.300 s after receipt)
+Movement: plan for (20.0, 40.0) at 0.317 s: direct; hazards [] of 335.7 m; 1 rollouts, 1 predicted ticks, 0 skipped stretches, 234 queries (1156 µs over 1 ticks, worst tick 1156 µs)
+Movement: received move (-245.6, 160.0) at 5.000 s, due 5.300 s
+Movement: activated move (-245.6, 160.0) at 5.317 s (0.317 s after receipt)
+Movement: plan for (-245.6, 160.0) at 5.317 s: direct; no hazard regions (435 µs over 1 ticks, worst tick 435 µs)
+RESULT {"activations":[0.317,5.317],"arrival_time":29.366666666666,"arrived":true,"bow_to_path_last_over_5deg":8.71666666666696,"bow_to_travel_last_over_5deg":29.3333333333327,"contact":"","destination":[-245.624206542969,160.0],"drift_past_destination_line":80.5457153320313,"end_time":31.3833333333325,"final_miss":0.0434596575796604,"final_position":[-245.660736083984,159.976455688477],"final_speed":0.000107047591882292,"focus_activated":5.31666666666665,"focus_received":4.99999999999999,"label":"c2","main_accel":0.5,"max_bow_to_path":92.2646541766334,"max_bow_to_travel":124.507231512217,"max_off_mesh":0.0,"max_thrust_fraction":1.00000004768372,"min_hull_gap":126.83332824707,"min_speed":0.000107047591882292,"profile_unchanged":true,"retro":true,"scenario":"turn90","speed_at_activation":14.9957189559937,"speed_lost":10.0466604232788,"status":["0.02 no order yet","0.32 accepted (20.0, 40.0): direct; hazards [] of 335.7 m","5.32 accepted (-245.6, 160.0): direct; no hazard regions","34.68 arrived at (-245.6, 160.0) at 34.68 s"],"travel_turn_deg":196.401015763603,"turn_exit_speed":5.25224018096924,"turn_exit_time":23.0999999999997,"turn_min_speed":4.9551887512207,"turn_radius":57.764899563533,"turn_sign_flips_last_10s":0}
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)

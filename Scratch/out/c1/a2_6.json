@@ -1,0 +1,47 @@
+{
+  "activations": [
+    0.317,
+    6.017
+  ],
+  "arrival_time": -1.0,
+  "arrived": false,
+  "bow_to_path_last_over_5deg": 1.63333333333333,
+  "bow_to_travel_last_over_5deg": 1.63333333333333,
+  "contact": "",
+  "destination": [
+    240.0,
+    -201.0
+  ],
+  "end_time": 3.91666666666676,
+  "final_miss": 71.9347763061523,
+  "final_position": [
+    212.180892944336,
+    -134.662155151367
+  ],
+  "final_speed": 0.00937013514339924,
+  "focus_activated": 6.01666666666665,
+  "focus_received": 5.69999999999999,
+  "label": "c1",
+  "main_accel": 0.5,
+  "max_bow_to_path": 45.0953814289037,
+  "max_bow_to_travel": 109.82545302333,
+  "max_off_mesh": 0.149371132254601,
+  "max_thrust_fraction": 0.953073620796204,
+  "min_hull_gap": 2.45113086700439,
+  "min_speed": 0.00937013514339924,
+  "profile_unchanged": true,
+  "retro": true,
+  "scenario": "a2_6",
+  "speed_at_activation": 7.79025888442993,
+  "speed_lost": 7.78088874928653,
+  "status": [
+    "0.02 no order yet",
+    "0.32 accepted (170.0, -90.0): direct; no hazard regions",
+    "6.02 planning (240.0, -201.0)",
+    "7.67 declined (240.0, -201.0): maneuver planning failed: no safe maneuver found within 120 s of predicted flight (route: centre enters the no-go zone at (205.9, -131.2))"
+  ],
+  "travel_turn_deg": 0.00000611435068429774,
+  "turn_exit_speed": -1.0,
+  "turn_exit_time": -1.0,
+  "turn_sign_flips_last_10s": 0
+}

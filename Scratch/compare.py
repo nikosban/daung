@@ -56,6 +56,11 @@ def table():
         lines.append("| metric | " + " | ".join(labels) + " |")
         lines.append("|---|" + "---|" * len(labels))
         data = [load(l, scenario) for l in labels]
+        if scenario in ("turn90", "turn180", "route", "clear"):
+            for l, d in zip(labels, data):
+                if d:
+                    d.update(final_leg(l, scenario, d))
+            keys = keys + ["leg_max_bow_travel", "leg_mean_bow_travel", "leg_share_under_5deg", "leg_settled_under_5deg"]
         for key in keys + ["max_thrust_fraction", "profile_unchanged"]:
             if all(d is None or key not in d for d in data):
                 continue
@@ -67,10 +72,32 @@ def table():
     return "\n".join(lines)
 
 
-COLORS = {"main": "#888888", "c1": "#d9534f", "c2": "#f0ad4e", "c3": "#2a9d8f", "c3_15": "#6f42c1", "c2_15": "#6f42c1"}
+def final_leg(label, scenario, d):
+    """Bow-to-travel on the leg after the turn exit (route/clear: after activation), order active, speed > 2 m/s:
+    max and mean |angle|, share of that time under 5 deg, and the time after the exit from which it stays under 5 deg
+    for the rest of the leg (n/a if never)."""
+    path = OUT / label / f"{scenario}.csv"
+    with path.open() as f:
+        rows = list(csv.DictReader(f))
+    start = d["focus_activated"] + (d.get("turn_exit_time", 0.0) if scenario.startswith("turn") else 0.0)
+    leg = [r for r in rows if float(r["t"]) >= start and r["order"] == "true" and float(r["speed"]) > 2.0
+           and r["bow_travel"] != "nan"]
+    if not leg:
+        return {}
+    angles = [abs(float(r["bow_travel"])) for r in leg]
+    settled = -1.0
+    for i in range(len(leg)):
+        if all(a < 5.0 for a in angles[i:]):
+            settled = float(leg[i]["t"]) - start
+            break
+    return {"leg_max_bow_travel": max(angles), "leg_mean_bow_travel": sum(angles) / len(angles),
+            "leg_share_under_5deg": sum(a < 5.0 for a in angles) / len(angles), "leg_settled_under_5deg": settled}
 
 
-def svg(scenario):
+COLORS = {"main": "#888888", "c1": "#d9534f", "c2": "#f0ad4e", "c3": "#2a9d8f", "c3_15": "#1f6fd1", "c2_15": "#6f42c1"}
+
+
+def svg(scenario, labels=labels, suffix=""):
     traces = {}
     for l in labels:
         path = OUT / l / f"{scenario}.csv"
@@ -128,7 +155,7 @@ def svg(scenario):
     out.append("</svg>")
     report = OUT.parent / "report"
     report.mkdir(exist_ok=True)
-    (report / f"{scenario}.svg").write_text("\n".join(out), encoding="utf-8")
+    (report / f"{scenario}{suffix}.svg").write_text("\n".join(out), encoding="utf-8")
 
 
 def asteroid_positions():
@@ -142,5 +169,9 @@ ASTEROIDS = [(83, 0)] + [(215 + x, -170 + z) for x, z in [(-34, -22), (25, -31),
 
 if __name__ == "__main__":
     print(table())
+    stages = [l for l in labels if l in ("main", "c1", "c2", "c3")]
     for s in ["turn90", "turn180", "crab10", "route", "clear", "a2_5", "a2_6", "brake", "arrive"]:
-        svg(s)
+        svg(s, stages)
+    sensitivity = [l for l in labels if l in ("c2", "c2_15", "c3", "c3_15")]
+    for s in ["turn90", "turn180", "route"]:
+        svg(s, sensitivity, "_sensitivity")

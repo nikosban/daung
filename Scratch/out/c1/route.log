@@ -1,0 +1,16 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+Movement: received move (150.0, 0.0) at 0.017 s, due 0.317 s
+ERROR: NavigationServer navigation map query failed because it was made before first map synchronization.
+	NavigationServer 'map_changed' signal can be used to receive update notifications.
+	NavigationServer 'map_get_iteration_id()' can be used to check if a map has finished its newest iteration.
+   at: get_closest_point (modules/navigation_3d/nav_map_3d.cpp:197)
+   GDScript backtrace (most recent call first):
+       [0] record (res://Scratch/experiment.gd:209)
+       [1] after_tick (res://Scratch/experiment.gd:170)
+       [2] _physics_process (res://Scratch/experiment.gd:48)
+Movement: activated move (150.0, 0.0) at 0.317 s (0.300 s after receipt)
+Movement: plan for (150.0, 0.0) at 0.317 s: route via (0.00, 0.00) (80.25, 19.50) (85.50, 19.50) (150.00, 0.00); no hazard regions (399 µs over 1 ticks, worst tick 399 µs)
+RESULT {"activations":[0.317],"arrival_time":27.0499999999997,"arrived":true,"bow_to_path_last_over_5deg":27.0166666666664,"bow_to_travel_last_over_5deg":27.0166666666664,"contact":"","destination":[150.0,0.0],"end_time":29.0666666666663,"final_miss":0.0637310296297073,"final_position":[149.94465637207,0.0316026471555233],"final_speed":0.000107904263131786,"focus_activated":0.316666666666667,"focus_received":0.0166666666666667,"label":"c1","main_accel":0.5,"max_bow_to_path":103.644070352766,"max_bow_to_travel":153.972462685977,"max_off_mesh":0.21005617082119,"max_thrust_fraction":0.999966645240784,"min_hull_gap":7.08129787445068,"min_speed":0.000107904263131786,"profile_unchanged":true,"retro":true,"scenario":"route","speed_at_activation":0.0277777779847384,"speed_lost":0.0,"status":["0.02 no order yet","0.32 accepted (150.0, 0.0): route; no hazard regions","27.37 arrived at (150.0, 0.0) at 27.37 s"],"travel_turn_deg":-223.837436498418,"turn_exit_speed":4.11622285842896,"turn_exit_time":24.5333333333332,"turn_min_speed":1.40487313270569,"turn_radius":18.5410946173752,"turn_sign_flips_last_10s":1}
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)

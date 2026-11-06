@@ -1,0 +1,16 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+Movement: received move (60.0, -40.0) at 0.017 s, due 0.317 s
+ERROR: NavigationServer navigation map query failed because it was made before first map synchronization.
+	NavigationServer 'map_changed' signal can be used to receive update notifications.
+	NavigationServer 'map_get_iteration_id()' can be used to check if a map has finished its newest iteration.
+   at: get_closest_point (modules/navigation_3d/nav_map_3d.cpp:197)
+   GDScript backtrace (most recent call first):
+       [0] record (res://Scratch/experiment.gd:209)
+       [1] after_tick (res://Scratch/experiment.gd:170)
+       [2] _physics_process (res://Scratch/experiment.gd:48)
+Movement: activated move (60.0, -40.0) at 0.317 s (0.300 s after receipt)
+Movement: plan for (60.0, -40.0) at 0.317 s: direct; no hazard regions (372 µs over 1 ticks, worst tick 372 µs)
+RESULT {"activations":[0.317],"arrival_time":12.3833333333335,"arrived":true,"bow_to_path_last_over_5deg":6.91666666666665,"bow_to_travel_last_over_5deg":12.3500000000002,"contact":"","destination":[60.0,-40.0],"end_time":14.3833333333336,"final_miss":2.02892541885376,"final_position":[61.7933311462402,-40.9489479064941],"final_speed":0.000107859683339484,"focus_activated":0.316666666666667,"focus_received":0.0166666666666667,"label":"main","main_accel":0.5,"max_bow_to_path":56.3003033472151,"max_bow_to_travel":45.2219789851699,"max_off_mesh":0.0,"max_thrust_fraction":0.999999976158142,"min_hull_gap":35.3849296569824,"min_speed":0.000107859683339484,"profile_unchanged":true,"retro":true,"scenario":"clear","speed_at_activation":0.0330932848155499,"speed_lost":0.0,"status":["0.02 no order yet","0.32 accepted (60.0, -40.0): direct; no hazard regions","12.70 arrived at (60.0, -40.0) at 12.70 s"],"travel_turn_deg":17.4722017559499,"turn_exit_speed":6.03599834442139,"turn_exit_time":3.04999999999999,"turn_min_speed":4.30862140655518,"turn_radius":145.91259677826,"turn_sign_flips_last_10s":2}
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)

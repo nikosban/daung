@@ -1,0 +1,43 @@
+{
+  "activations": [
+    0.317
+  ],
+  "arrival_time": 4.78333333333332,
+  "arrived": true,
+  "contact": "",
+  "destination": [
+    -190.0,
+    40.0
+  ],
+  "displacement": 10.4654235839844,
+  "end_time": 6.79999999999998,
+  "final_miss": 0.465882927179337,
+  "final_position": [
+    -189.534118652344,
+    40.0012130737305
+  ],
+  "final_speed": 0.000104527811345179,
+  "focus_activated": 0.316666666666667,
+  "focus_received": 0.0166666666666667,
+  "label": "main",
+  "main_accel": 0.5,
+  "max_line_deviation": 0.0118560791015625,
+  "max_off_mesh": 0.0,
+  "max_thrust_fraction": 0.567448103427887,
+  "min_hull_gap": 121.963180541992,
+  "min_speed": 0.000104527811345179,
+  "peak_speed": 3.75060796737671,
+  "profile_unchanged": true,
+  "retro": true,
+  "scenario": "crab10",
+  "speed_at_activation": 0.0277777779847384,
+  "speed_lost": 0.0,
+  "status": [
+    "0.02 no order yet",
+    "0.32 accepted (-190.0, 40.0): direct; no hazard regions",
+    "5.10 arrived at (-190.0, 40.0) at 5.10 s"
+  ],
+  "turn_exit_speed": 0.861112296581268,
+  "turn_exit_time": 0.500000000000001,
+  "yaw_change": -11.8042237716477
+}
