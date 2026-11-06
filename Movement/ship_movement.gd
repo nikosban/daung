@@ -47,9 +47,6 @@ var _destination := Vector3.ZERO
 ## The requested click of the active or last move (Task #54); _destination becomes the resolved point once planned.
 var _requested := Vector3.ZERO
 var _has_order := false
-## Course heading of the current order (yaw in radians), set by move_to(); no course for a zero-length order.
-var _course_yaw := 0.0
-var _has_course := false
 ## Turn rate in rad/s (per ship); zero whenever powered turning is not requested.
 var _turn_rate := 0.0
 ## Previous tick's planar demand fraction on the directional thrusters (0–1). It measures last tick's actual
@@ -239,12 +236,12 @@ func _physics_process(delta: float) -> void:
 	_pilot_state.planar_fraction_prev = _planar_fraction_prev
 	_pilot_targets.has_order = _has_order and _job == null
 	if _plan != null and _has_order:
-		RouteGuidance.guide(_plan, _follow, global_position, rotation.y, _pilot_targets)
+		var pursuit := RouteGuidance.pursuit_lookahead(profile, _probe.length, Vector2(velocity.x, velocity.z).length())
+		RouteGuidance.guide(_plan, _follow, global_position, rotation.y, pursuit, _pilot_targets)
 	else:
 		_pilot_targets.destination = _destination
 		_pilot_targets.use_steer = false
-		_pilot_targets.has_course = _has_course
-		_pilot_targets.course_yaw = _course_yaw
+		_pilot_targets.has_course = false
 		_pilot_targets.bend_from = 0
 		_pilot_targets.bend_radii = PackedFloat32Array()
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
@@ -302,11 +299,6 @@ func _activate(command: Dictionary) -> void:
 		_destination = Vector3(world_position.x, global_position.y, world_position.z)
 		_requested = _destination
 		_has_order = true
-		var course := _destination - global_position
-		course.y = 0.0
-		_has_course = course != Vector3.ZERO
-		if _has_course:
-			_course_yaw = atan2(-course.x, -course.z)
 		_end_navigation()
 		_job = Navigator.start_job(self, _probe, world_position)
 		_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
@@ -334,17 +326,10 @@ func _take_plan() -> void:
 	_order_status = "accepted (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, ["direct", "route", "departure"][job.plan.kind], job.summary.get_slice(";", 0)]
 	if job.resolution != "":
 		_order_status += "; %s" % job.resolution
-	if job.plan.kind == RouteGuidance.Kind.DIRECT:
-		# The direct order keeps its course from the ship's position now (the activation tick when planning took one
-		# tick, as before Task #46).
-		var course := _destination - global_position
-		course.y = 0.0
-		_has_course = course != Vector3.ZERO
-		if _has_course:
-			_course_yaw = atan2(-course.x, -course.z)
-	else:
-		_plan = job.plan
-		_follow = RouteGuidance.Follow.new()
+	# Task 28 scratch (#59): every plan, the direct one included, is followed through RouteGuidance (pursuit bearing);
+	# a direct plan's path starts at the ship's position now.
+	_plan = job.plan
+	_follow = RouteGuidance.start_follow(_plan, global_position)
 	var route := ""
 	if job.plan.kind != RouteGuidance.Kind.DIRECT:
 		var points: Array[String] = []

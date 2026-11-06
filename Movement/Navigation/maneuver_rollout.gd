@@ -82,8 +82,6 @@ var _motions := PackedVector3Array()
 var _dyaws := PackedFloat32Array()
 var _sweeps := PackedFloat32Array()
 var _sweep := 0.0
-var _direct_has_course := false
-var _direct_course := 0.0
 ## No-go check (Task #48): the navigation map, its cell size and whether the predicted centre has been on the mesh.
 var _map: RID
 var _cell := 0.25
@@ -122,10 +120,8 @@ func _tick() -> int:
 		return FAIL
 	if wait_ticks > 0:
 		return _wait_tick()
-	RouteGuidance.guide(plan, follow, state.position, state.yaw, _targets)
-	if plan.kind == RouteGuidance.Kind.DIRECT:
-		_targets.has_course = _direct_has_course
-		_targets.course_yaw = _direct_course
+	var pursuit := RouteGuidance.pursuit_lookahead(_profile, _probe.length, Vector2(state.velocity.x, state.velocity.z).length())
+	RouteGuidance.guide(plan, follow, state.position, state.yaw, pursuit, _targets)
 	_targets.has_order = not _arrived
 	var position := state.position
 	var yaw := state.yaw
@@ -233,13 +229,9 @@ func _centre_allowed() -> bool:
 
 
 ## Starts following the plan from the current predicted state, as ShipMovement does at handoff: fresh route
-## progress, and a direct plan's course from here to the destination.
+## progress, and a direct plan's path from here to the destination (Task 28 scratch, #59: the same pursuit bearing).
 func _start_plan() -> void:
-	follow = RouteGuidance.Follow.new()
-	RouteGuidance.track(plan, follow, state.position)
-	var course := RouteGuidance.planar(plan.destination - state.position)
-	_direct_has_course = course != Vector3.ZERO
-	_direct_course = atan2(-course.x, -course.z) if _direct_has_course else 0.0
+	follow = RouteGuidance.start_follow(plan, state.position)
 
 
 ## Whether the predicted ship follows the route as the re-entry assumption describes: within the arrival tolerance

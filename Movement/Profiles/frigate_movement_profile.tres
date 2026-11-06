@@ -20,3 +20,4 @@ max_turn_rate_at_max_speed = 55.0
 rudder_curve = SubResource("Curve_rudder")
 directional_authority_curve = SubResource("Curve_directional")
 keel_drag = 0.08
+pursuit_lookahead_hull_lengths = 2.0

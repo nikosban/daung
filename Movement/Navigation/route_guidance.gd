@@ -39,8 +39,9 @@ class Plan:
 ## tick's delta to time after the pilot step.
 class Follow:
 	var index := 1
-	var frozen := false
-	var frozen_course := 0.0
+	## Task 28 scratch (#59): where the ship was when it began following the plan; a direct plan's path runs from here
+	## to the destination.
+	var start := Vector3.ZERO
 	## Time since handoff (s).
 	var time := 0.0
 	var switched := false
@@ -76,18 +77,62 @@ static func make_plan(kind: int, route: PackedVector3Array, destination: Vector3
 	return plan
 
 
+## Task 28 scratch (#59): fresh progress for a plan the ship begins to follow at this position (real flight and
+## prediction alike).
+static func start_follow(plan: Plan, position: Vector3) -> Follow:
+	var follow := Follow.new()
+	follow.start = planar(position)
+	track(plan, follow, position)
+	return follow
+
+
+## Task 28 scratch (#59): the pursuit lookahead (m) at a planar speed: pursuit_lookahead_hull_lengths hull lengths plus
+## the straight-line stopping distance with the profile's actual sternward braking (the retro cap without retro
+## thrusters).
+static func pursuit_lookahead(profile: MovementProfile, hull_length: float, speed: float) -> float:
+	var thruster_limit := profile.thruster_strength / profile.mass
+	var stopping := minf(thruster_limit, ShipPilot.sternward_limit_of(profile, thruster_limit))
+	return profile.pursuit_lookahead_hull_lengths * hull_length + speed * speed / (2.0 * stopping)
+
+
+## Task 28 scratch (#59): the pure-pursuit bearing (unit planar direction, zero if none). The ship's projection on the
+## path (a direct plan: from follow.start to the destination; otherwise the route) is advanced by the lookahead and the
+## bow aims at that point; once it reaches the path's end, the bow takes the final segment's direction, so the bearing
+## never flips back toward the destination point.
+static func pursuit_bearing(plan: Plan, follow: Follow, position: Vector3, lookahead: float) -> Vector3:
+	if plan.kind == Kind.DIRECT:
+		var segment := planar(plan.destination - follow.start)
+		var length := segment.length()
+		if length <= 0.0:
+			return Vector3.ZERO
+		var along := segment / length
+		var s := clampf(planar(position - follow.start).dot(along), 0.0, length)
+		if s + lookahead >= length:
+			return along
+		var to_point := planar(follow.start + along * (s + lookahead) - position)
+		return to_point.normalized() if to_point.length_squared() > 0.0 else along
+	var total := plan.total_length()
+	var n := plan.route.size()
+	var last := planar(plan.route[n - 1] - plan.route[n - 2]).normalized()
+	if follow.s + lookahead >= total:
+		return last
+	var to_aim := planar(point_from(plan, follow.index, follow.s + lookahead) - position)
+	return to_aim.normalized() if to_aim.length_squared() > 0.0 else last
+
+
 ## Fills the pilot targets for this tick from a plan and the ship's planar position and yaw, advancing the follow
-## state.
-static func guide(plan: Plan, follow: Follow, position: Vector3, yaw: float, targets: ShipPilot.Targets) -> void:
+## state. Task 28 scratch (#59): the course is the pure-pursuit bearing for a lookahead of pursuit metres.
+static func guide(plan: Plan, follow: Follow, position: Vector3, _yaw: float, pursuit: float, targets: ShipPilot.Targets) -> void:
 	targets.destination = plan.destination
 	targets.bend_lengths = plan.lengths
 	targets.bend_radii = plan.corner_radii
 	targets.bend_from = plan.route.size()
 	track(plan, follow, position)
 	if plan.kind == Kind.DIRECT:
+		var bearing := pursuit_bearing(plan, follow, position, pursuit)
 		targets.use_steer = false
-		targets.has_course = plan.has_course
-		targets.course_yaw = plan.course_yaw
+		targets.has_course = bearing != Vector3.ZERO
+		targets.course_yaw = atan2(-bearing.x, -bearing.z)
 		return
 	var total := plan.total_length()
 	var remaining := planar(position - follow.point).length() + (total - follow.s)
@@ -103,26 +148,20 @@ static func guide(plan: Plan, follow: Follow, position: Vector3, yaw: float, tar
 			targets.has_course = false
 			targets.course_yaw = plan.hold_yaw
 			return
+	# Task 28 scratch (#59): the bow follows the pure-pursuit bearing; the desired velocity still steers at the plan's
+	# own (navigation) lookahead point and, once that reaches the destination, flies the ordinary direct arrival.
+	var bearing := pursuit_bearing(plan, follow, position, pursuit)
+	targets.has_course = bearing != Vector3.ZERO
+	targets.course_yaw = atan2(-bearing.x, -bearing.z)
 	var aim_s := follow.s + plan.lookahead
 	var aim := point_from(plan, follow.index, minf(aim_s, total))
 	var to_aim := planar(aim - position)
-	if aim_s >= total and not follow.frozen:
-		# The final approach keeps the heading the hull has when it begins: no turning is left to share the thrusters
-		# with the arrival braking, and arrival ends rotation anyway (no final alignment).
-		follow.frozen = true
-		follow.frozen_course = yaw
-	if follow.frozen:
-		# Final approach: the aim has reached the destination, so the pilot flies the ordinary direct arrival to it
-		# (straight distance, sideways drift included) holding the heading it had when the approach began.
+	if aim_s >= total:
 		targets.use_steer = false
-		targets.has_course = true
-		targets.course_yaw = follow.frozen_course
 		return
 	targets.use_steer = true
 	targets.steer_direction = to_aim.normalized() if to_aim.length_squared() > 0.0 else Vector3.ZERO
 	targets.steer_distance = remaining
-	targets.has_course = to_aim.length_squared() > 0.0
-	targets.course_yaw = atan2(-to_aim.x, -to_aim.z)
 	# Upcoming interior route corners (the pilot caps the speed for each).
 	targets.bend_from = follow.index
 	targets.bend_s = follow.s

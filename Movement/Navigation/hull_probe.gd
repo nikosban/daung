@@ -12,6 +12,8 @@ extends RefCounted
 ## Only BoxShape3D hulls are supported (the only hull today); others log an error and fail every test.
 
 var reach := 0.0
+## Task 28 scratch (#59): the hull box's length along the bow (m), for the pursuit lookahead.
+var length := 0.0
 ## Smallest planar half extent of the hull (m): route sampling and coarse-segment spacing.
 var half_width := 0.0
 ## Shape queries made since the counter was last reset (evidence and cost reports).
@@ -41,6 +43,7 @@ func _init(body: CollisionObject3D, collision_shape: CollisionShape3D) -> void:
 	var corner_z := absf(_offset.origin.z) + half.z
 	reach = Vector2(corner_x, corner_z).length()
 	half_width = minf(half.x, half.z)
+	length = _size.z
 	_exclude = [body.get_rid()]
 	_mask = body.collision_mask
 	_space = body.get_world_3d().direct_space_state
