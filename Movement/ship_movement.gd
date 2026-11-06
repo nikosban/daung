@@ -8,9 +8,11 @@ extends CharacterBody3D
 ## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
 ## velocity within pilot_response_time. The main engine supplies the useful part along the bow; the
 ## directional thrusters supply the rest. Their sideways acceleration (thruster_strength / mass) and bow-forward acceleration
-## (forward_directional_acceleration, below the main engine) fade with actual speed (profile.directional_thrust_curve); sternward they keep the full rating. Within their share, braking against the
-## actual travel is served before sideways correction, and the approach is planned with the braking the thrusters
-## can actually deliver against the travel direction. Turning demand is computed first, so the approach speed is planned
+## (forward_directional_acceleration for thrust that pushes the ship forward, below the main engine) fade with actual
+## speed (profile.directional_thrust_curve); sternward, and bow-forward when braking stern-first motion, they keep their
+## physical rating. Within their share, per hull axis, braking against the velocity comes first, sideways maneuvering
+## second and forward assistance last, and the approach is planned with the braking the thrusters can actually deliver
+## against the travel direction. Turning demand is computed first, so the approach speed is planned
 ## with the braking that sharing will leave. The pilot also steers the hull toward the order's course heading
 ## (set once by move_to(), toward the destination) with bounded angular acceleration whose authority grows
 ## with actual speed (zero at rest), and a turn-rate limit that also follows speed (zero at rest). Planar
