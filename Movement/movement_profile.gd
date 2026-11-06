@@ -9,6 +9,10 @@ extends Resource
 @export_range(0.1, 100.0, 0.1, "suffix:m/s²") var main_acceleration: float = 12.0
 ## Directional thruster strength in thrust units (m/s² × mass). One budget for any planar direction.
 @export_range(1.0, 600.0, 1.0) var thruster_strength: float = 60.0
+## Task 28 scratch (#59): directional-thruster authority multiplier (output, 0–1) against actual planar speed as a
+## fraction of max_speed (input, 0–1). It scales lateral and bow-forward directional thrust; sternward braking keeps the
+## full thruster_strength / mass (then the retro cap). Null = 1 everywhere (no fade).
+@export var directional_authority_curve: Curve
 ## Hard cap on the planar speed.
 @export_range(1.0, 150.0, 0.1, "suffix:m/s") var max_speed: float = 15.0
 ## Time the pilot takes to close the gap between desired and actual velocity.

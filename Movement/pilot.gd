@@ -78,6 +78,9 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	var distance := to_destination.length()
 	var thruster_limit := profile.thruster_strength / profile.mass
 	var sternward_limit := sternward_limit_of(profile, thruster_limit)
+	# Task 28 scratch (#59): lateral and bow-forward directional thrust fade with actual speed; sternward braking keeps
+	# the full thruster_limit (then the retro cap).
+	var directional_limit := directional_limit_of(profile, thruster_limit, speed)
 	var bow := state.bow
 	var has_order := targets.has_order
 
@@ -128,12 +131,14 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	# braking curve sqrt(2 a d) by a·response time. Subtracting that lag makes the request exactly the planned
 	# braking while the ship is on the curve, so braking starts in time to stop at the destination (clamped at
 	# zero within a·response time² / 2 of it).
-	var _planned_braking := thruster_limit / (1.0 + turn_fraction)
 	var travel := Vector3.ZERO
 	if speed > 0.0:
 		travel = planar_velocity / speed
 	elif steer_distance > 0.0:
 		travel = steer_direction
+	# Task 28 scratch (#59): the braking available along -travel inside the thrust envelope (full sternward, faded
+	# lateral). A straight-line stop (travel along the bow) keeps the full thruster_limit.
+	var _planned_braking := envelope_reach(-travel, bow, thruster_limit, directional_limit) / (1.0 + turn_fraction)
 	var sternward_share := travel.dot(bow)
 	if sternward_share > 0.0:
 		_planned_braking = minf(_planned_braking, sternward_limit / sternward_share)
@@ -154,7 +159,10 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 				var radius := targets.bend_radii[j]
 				if radius > 0.0:
 					var to_bend := maxf(targets.bend_lengths[j] - targets.bend_s, 0.0)
-					var bend_speed := sqrt(bend_braking * radius + 2.0 * bend_braking * to_bend) - bend_lag
+					# Task 28 scratch (#59): the curve is held with the faded lateral authority at the bend speed itself
+					# (half of it beside full turning demand); the approach braking stays sternward.
+					var hold := bend_hold_speed(profile, thruster_limit, radius)
+					var bend_speed := sqrt(hold * hold + 2.0 * bend_braking * to_bend) - bend_lag
 					desired_speed = minf(desired_speed, maxf(bend_speed, 0.0))
 		desired = steer_direction * desired_speed
 	var _desired_speed := desired.length()
@@ -166,15 +174,20 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	if planar_velocity.dot(bow) >= 0.0:
 		_main_command = clampf(requested.dot(bow), 0.0, profile.main_acceleration)
 
-	# Planar demand on the directional thrusters, as a fraction of their rating.
+	# Planar demand on the directional thrusters, as a fraction of their rating. Task 28 scratch (#59): the rating is the
+	# speed-dependent envelope (full sternward, faded lateral and bow-forward), so the fraction is the request's
+	# envelope norm.
 	var thruster_request := requested - bow * _main_command
-	var planar_fraction := minf(thruster_request.length() / thruster_limit, 1.0)
+	var request_norm := envelope_norm(thruster_request, bow, thruster_limit, directional_limit)
+	var planar_fraction := minf(request_norm, 1.0)
 
 	# One shared capacity: when the two fractions exceed it, both are scaled down proportionally.
 	var _shared_scale := 1.0
 	if planar_fraction + turn_fraction > 1.0:
 		_shared_scale = 1.0 / (planar_fraction + turn_fraction)
-	var _thruster_command := thruster_request.normalized() * planar_fraction * _shared_scale * thruster_limit
+	var _thruster_command := Vector3.ZERO
+	if request_norm > 0.0:
+		_thruster_command = thruster_request * (planar_fraction * _shared_scale / request_norm)
 	var _turn_acceleration := signf(turn_request) * turn_fraction * _shared_scale * turn_limit
 	# Retro rule on the applied thrust: remove only the sternward excess; the removed capacity is not reallocated.
 	var sternward := -_thruster_command.dot(bow)
@@ -203,6 +216,45 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 ## Unit planar bow for a yaw (0 = −Z, positive = counter-clockwise seen from above).
 static func bow_of(yaw: float) -> Vector3:
 	return Vector3(-sin(yaw), 0.0, -cos(yaw))
+
+
+## Task 28 scratch (#59): lateral and bow-forward directional-thruster acceleration (m/s²) at a planar speed.
+static func directional_limit_of(profile: MovementProfile, thruster_limit: float, speed: float) -> float:
+	if profile.directional_authority_curve == null:
+		return thruster_limit
+	return thruster_limit * clampf(profile.directional_authority_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0)), 0.0, 1.0)
+
+
+## Task 28 scratch (#59): a planar thrust's size relative to the thruster envelope (1 = on its edge). The envelope is an
+## ellipse in the bow frame: semi-axis thruster_limit sternward, directional_limit bow-forward and sideways. No
+## direction exceeds thruster_limit, so a diagonal never gets more than the straight rating.
+static func envelope_norm(thrust: Vector3, bow: Vector3, thruster_limit: float, directional_limit: float) -> float:
+	var axial := thrust.dot(bow)
+	var lateral := thrust.dot(Vector3(-bow.z, 0.0, bow.x))
+	var axial_limit := directional_limit if axial > 0.0 else thruster_limit
+	if directional_limit <= 0.0:
+		return INF if absf(lateral) > 0.0 or axial > 0.0 else absf(axial) / axial_limit
+	return sqrt(pow(axial / axial_limit, 2.0) + pow(lateral / directional_limit, 2.0))
+
+
+## Task 28 scratch (#59): the largest acceleration along a unit direction inside the thruster envelope (m/s²).
+static func envelope_reach(direction: Vector3, bow: Vector3, thruster_limit: float, directional_limit: float) -> float:
+	var norm := envelope_norm(direction, bow, thruster_limit, directional_limit)
+	return thruster_limit if norm <= 0.0 else 1.0 / norm
+
+
+## Task 28 scratch (#59): the speed at which a bend of this radius can be held with half the faded lateral authority at
+## that same speed (v² = a(v) / 2 · radius; bisection, the left side grows and the right side shrinks with v).
+static func bend_hold_speed(profile: MovementProfile, thruster_limit: float, radius: float) -> float:
+	var lo := 0.0
+	var hi := profile.max_speed
+	for _i in 16:
+		var v := (lo + hi) * 0.5
+		if v * v <= directional_limit_of(profile, thruster_limit, v) * 0.5 * radius:
+			lo = v
+		else:
+			hi = v
+	return lo
 
 
 ## Largest sternward directional-thruster acceleration (m/s²): unlimited with retro thrusters.
