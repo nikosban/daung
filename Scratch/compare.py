@@ -96,7 +96,7 @@ def final_leg(label, scenario, d):
             "leg_share_under_5deg": sum(a < 5.0 for a in angles) / len(angles), "leg_settled_under_5deg": settled}
 
 
-COLORS = {"main": "#888888", "c1": "#d9534f", "c2": "#f0ad4e", "c3": "#2a9d8f", "c3_15": "#1f6fd1", "c2_15": "#6f42c1", "c4": "#1f6feb"}
+COLORS = {"main": "#888888", "c1": "#d9534f", "c2": "#f0ad4e", "c3": "#2a9d8f", "c3_15": "#1f6fd1", "c2_15": "#6f42c1", "c4": "#1f6feb", "c5": "#e8590c"}
 
 
 def svg(scenario, labels=labels, suffix=""):
