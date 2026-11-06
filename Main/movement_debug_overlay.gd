@@ -60,9 +60,9 @@ func _process(_delta: float) -> void:
 	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
 	var thruster := ship.get_thruster_command()
 	var destination := ship.get_destination()
-	_label.text = "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°  course %7.1f°\nturn rate %7.1f / %5.1f °/s  turn accel %7.1f °/s²  rudder %4.2f×  shared %4.2f\ndesired %6.2f m/s  planned braking %5.2f m/s²\nforward: main engine %5.3f m/s²  forward thrusters %5.3f m/s² (limit %5.3f)\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)  sideways %5.2f m/s²  directional effectiveness %4.2f×\n%s\norder: %s\nclock %7.2f s  pending %d%s  last received %s  last activated %s" % [
+	_label.text = "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°  course %7.1f°  steering target %7.1f°  bow–travel %5.1f° (max %5.1f°)\nturn rate %7.1f / %5.1f °/s  turn accel %7.1f °/s²  rudder %4.2f×  shared %4.2f\ndesired %6.2f m/s  planned braking %5.2f m/s²\nforward: main engine %5.3f m/s²  forward thrusters %5.3f m/s² (limit %5.3f)\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)  sideways %5.2f m/s²  directional effectiveness %4.2f×\n%s\norder: %s\nclock %7.2f s  pending %d%s  last received %s  last activated %s" % [
 		velocity.length(), velocity.x, velocity.z,
-		ship.get_heading(), ship.get_target_heading(),
+		ship.get_heading(), ship.get_course_heading(), ship.get_target_heading(), ship.get_bow_travel_angle(), ship.get_max_bow_angle(),
 		ship.get_turn_rate(), ship.get_turn_rate_limit(), ship.get_turn_acceleration(), ship.get_rudder_multiplier(), ship.get_shared_scale(),
 		ship.get_desired_speed(), ship.get_planned_braking(),
 		ship.get_main_command(), maxf(thruster.dot(-ship.global_basis.z.normalized()), 0.0), ship.profile.forward_directional_acceleration * ship.get_directional_effectiveness(),

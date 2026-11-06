@@ -12,6 +12,11 @@ _limits = [0.0, 1.0, 0.0, 15.0]
 _data = [Vector2(0, 1), 0.0, -0.05, 0, 1, Vector2(5, 0.75), -0.05, -0.05, 1, 1, Vector2(10, 0.5), -0.05, -0.05, 1, 1, Vector2(15, 0.25), -0.05, 0.0, 1, 0]
 point_count = 4
 
+[sub_resource type="Curve" id="Curve_bow_alignment"]
+_limits = [0.0, 180.0, 0.0, 15.0]
+_data = [Vector2(0, 180), 0.0, -18.0, 0, 1, Vector2(5, 90), -18.0, -9.0, 1, 1, Vector2(10, 45), -9.0, -3.0, 1, 1, Vector2(15, 30), -3.0, 0.0, 1, 0]
+point_count = 4
+
 [resource]
 script = ExtResource("1_profile")
 mass = 12.0
@@ -19,5 +24,6 @@ main_acceleration = 0.5
 thruster_strength = 40.0
 max_turn_rate_at_max_speed = 55.0
 rudder_curve = SubResource("Curve_rudder")
+bow_alignment_curve = SubResource("Curve_bow_alignment")
 directional_thrust_curve = SubResource("Curve_directional")
 forward_directional_acceleration = 0.25

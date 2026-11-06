@@ -72,6 +72,11 @@ class Output:
 	## allocated within (0–1).
 	var thruster_request := Vector3.ZERO
 	var planar_share := 0.0
+	## Bow alignment: the order's course yaw, the largest commanded bow-to-travel angle at the actual speed (radians,
+	## PI = unrestricted) and the actual angle between bow and travel direction (radians, 0–PI; 0 at rest).
+	var course_yaw := 0.0
+	var max_bow_angle := PI
+	var bow_travel_angle := 0.0
 
 
 ## One pilot tick. Sets out.arrived when the active order completes this tick; the caller then ends its order.
@@ -114,7 +119,12 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	var _rudder_multiplier := profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
 	var turn_limit := deg_to_rad(profile.turn_authority / profile.mass) * _rudder_multiplier
 	var _turn_rate_limit := deg_to_rad(profile.max_turn_rate_at_max_speed) * _rudder_multiplier / profile.rudder_curve.sample(1.0)
-	var _target_yaw := targets.course_yaw
+	# Bow alignment: while the ship moves bow-first, the steering target is the course heading limited to
+	# bow_alignment_curve(actual speed) either side of the actual travel direction, recalculated every tick, so the hull
+	# leads a turn by at most that angle and the turn finishes as the trajectory follows. Stern-first motion and a
+	# standstill are not limited. Only the target is limited: the hull and the velocity are never moved into line.
+	var _max_bow_angle := alignment_limit_of(profile, speed)
+	var _target_yaw := aligned_target(targets.course_yaw, planar_velocity, bow, _max_bow_angle)
 	var turn_request := 0.0
 	var turn_fraction := 0.0
 	if has_order and targets.has_course and turn_limit > 0.0:
@@ -223,12 +233,29 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	out.planned_braking = _planned_braking
 	out.directional_effectiveness = _effectiveness
 	out.thruster_request = thruster_request
+	out.course_yaw = targets.course_yaw
+	out.max_bow_angle = _max_bow_angle
+	out.bow_travel_angle = acos(clampf(bow.dot(planar_velocity / speed), -1.0, 1.0)) if speed > 0.0 else 0.0
 	out.planar_share = _planar_share
 
 
 ## Unit planar bow for a yaw (0 = −Z, positive = counter-clockwise seen from above).
 static func bow_of(yaw: float) -> Vector3:
 	return Vector3(-sin(yaw), 0.0, -cos(yaw))
+
+
+## Largest commanded angle (radians, 0–PI) between bow and travel direction at an actual planar speed in m/s.
+static func alignment_limit_of(profile: MovementProfile, speed: float) -> float:
+	return deg_to_rad(clampf(profile.bow_alignment_curve.sample(speed), 0.0, 180.0))
+
+
+## Steering target (yaw in radians): the course yaw limited to max_angle either side of the travel direction while the
+## velocity has a bow-first component; otherwise (stern-first, sideways or at rest) the course yaw itself.
+static func aligned_target(course_yaw: float, velocity: Vector3, bow: Vector3, max_angle: float) -> float:
+	if velocity.dot(bow) <= 0.0 or max_angle >= PI:
+		return course_yaw
+	var travel_yaw := atan2(-velocity.x, -velocity.z)
+	return travel_yaw + clampf(wrapf(course_yaw - travel_yaw, -PI, PI), -max_angle, max_angle)
 
 
 ## Directional-thruster effectiveness (0–1) at an actual planar speed in m/s, from the profile's curve.

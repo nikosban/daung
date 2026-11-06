@@ -7,7 +7,8 @@ extends CharacterBody3D
 ## Each physics tick the pilot computes a desired velocity toward the destination that falls with the
 ## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
 ## velocity within pilot_response_time. The main engine supplies the useful part along the bow; the
-## directional thrusters supply the rest. Their sideways acceleration (thruster_strength / mass) and bow-forward acceleration
+## directional thrusters supply the rest. While the ship moves bow-first, the steering target is the course limited to
+## profile.bow_alignment_curve (actual speed) either side of the travel direction (bow alignment). Their sideways acceleration (thruster_strength / mass) and bow-forward acceleration
 ## (forward_directional_acceleration for thrust that pushes the ship forward, below the main engine) fade with actual
 ## speed (profile.directional_thrust_curve); sternward, and bow-forward when braking stern-first motion, they keep their
 ## physical rating. Within their share, per hull axis, braking against the velocity comes first, sideways maneuvering
@@ -78,7 +79,7 @@ var _order_status := "no order yet"
 
 func _ready() -> void:
 	if not _profile_valid():
-		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0), a rudder curve above 0 at full speed, a directional thrust curve and forward_directional_acceleration at least 0; the ship will not move.")
+		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0), a rudder curve above 0 at full speed, a directional thrust curve, forward_directional_acceleration at least 0 and a bow alignment curve; the ship will not move.")
 		set_physics_process(false)
 		return
 	var hull: CollisionShape3D = null
@@ -150,9 +151,25 @@ func get_heading() -> float:
 	return rad_to_deg(rotation.y)
 
 
-## Course heading of the current order in degrees (same convention as get_heading()).
+## Steering target in degrees (same convention as get_heading()): the course heading, limited by bow alignment while
+## the ship moves bow-first.
 func get_target_heading() -> float:
-	return rad_to_deg(_pilot_out.target_yaw)
+	return rad_to_deg(wrapf(_pilot_out.target_yaw, -PI, PI))
+
+
+## Course heading the pilot was given last tick in degrees (the order's course, or route guidance's).
+func get_course_heading() -> float:
+	return rad_to_deg(wrapf(_pilot_out.course_yaw, -PI, PI))
+
+
+## Actual angle between bow and travel direction in degrees (0–180; 0 at rest), at the start of last tick.
+func get_bow_travel_angle() -> float:
+	return rad_to_deg(_pilot_out.bow_travel_angle)
+
+
+## Largest commanded bow-to-travel angle at last tick's actual speed in degrees (180 = unrestricted).
+func get_max_bow_angle() -> float:
+	return rad_to_deg(_pilot_out.max_bow_angle)
 
 
 ## Current turn rate in °/s (positive = counter-clockwise).
@@ -397,4 +414,4 @@ func _profile_valid() -> bool:
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
 		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 \
 		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.no_go_tolerance >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0 \
-		and profile.directional_thrust_curve != null and profile.forward_directional_acceleration >= 0.0
+		and profile.directional_thrust_curve != null and profile.forward_directional_acceleration >= 0.0 		and profile.bow_alignment_curve != null

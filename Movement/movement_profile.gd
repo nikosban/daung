@@ -35,6 +35,12 @@ extends Resource
 ## Rudder multiplier (output, 0–2) against actual planar speed as a fraction of max_speed (input, 0–1).
 ## Zero at rest means no turning in place.
 @export var rudder_curve: Curve
+## Bow alignment: the largest angle (output, degrees 0–180; 180 = unrestricted) the pilot may command between the bow
+## and the actual travel direction, against the actual planar speed in m/s (input; the curve's domain is m/s, speeds
+## past its end points use those points' values). While the ship moves bow-first, the steering target is the course
+## heading limited to this angle either side of the travel direction, recalculated every tick. It limits the target only,
+## never the hull or the velocity. Required.
+@export var bow_alignment_curve: Curve
 ## Equipment: does this hull have thrusters pointing forward, so it can brake along its own axis? If not, the
 ## directional thrusters' acceleration toward the stern is limited (see no_retro_braking_effectiveness).
 @export var retro_thrusters: bool = true
