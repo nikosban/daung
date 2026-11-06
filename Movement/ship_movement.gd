@@ -7,7 +7,10 @@ extends CharacterBody3D
 ## Each physics tick the pilot computes a desired velocity toward the destination that falls with the
 ## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
 ## velocity within pilot_response_time. The main engine supplies the useful part along the bow; the
-## directional thrusters supply the rest. Turning demand is computed first, so the approach speed is planned
+## directional thrusters supply the rest. Their sideways and bow-forward acceleration fades with actual speed
+## (profile.directional_thrust_curve); sternward they keep the full rating. Within their share, braking against the
+## actual travel is served before sideways correction, and the approach is planned with the braking the thrusters
+## can actually deliver against the travel direction. Turning demand is computed first, so the approach speed is planned
 ## with the braking that sharing will leave. The pilot also steers the hull toward the order's course heading
 ## (set once by move_to(), toward the destination) with bounded angular acceleration whose authority grows
 ## with actual speed (zero at rest), and a turn-rate limit that also follows speed (zero at rest). Planar
@@ -73,7 +76,7 @@ var _order_status := "no order yet"
 
 func _ready() -> void:
 	if not _profile_valid():
-		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0) and a rudder curve above 0 at full speed; the ship will not move.")
+		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0), a rudder curve above 0 at full speed and a directional thrust curve; the ship will not move.")
 		set_physics_process(false)
 		return
 	var hull: CollisionShape3D = null
@@ -180,10 +183,16 @@ func get_desired_speed() -> float:
 	return _pilot_out.desired_speed
 
 
-## Last planar braking acceleration the pilot planned its approach with, in m/s²: a_t / (1 + turn fraction),
-## further limited by the retro rule when the hull has no retro thrusters.
+## Last planar braking acceleration the pilot planned its approach with, in m/s²: the thruster envelope's reach
+## against the travel direction / (1 + turn fraction), further limited by the retro rule when the hull has no retro
+## thrusters.
 func get_planned_braking() -> float:
 	return _pilot_out.planned_braking
+
+
+## Last directional-thruster effectiveness (0–1) sampled from the profile's curve at the actual speed.
+func get_directional_effectiveness() -> float:
+	return _pilot_out.directional_effectiveness
 
 
 ## Last main-engine acceleration along the bow, 0 to main_acceleration, in m/s².
@@ -191,7 +200,8 @@ func get_main_command() -> float:
 	return _pilot_out.main_command
 
 
-## Last directional thruster acceleration (world XZ), magnitude up to thruster_strength / mass, in m/s².
+## Last directional thruster acceleration (world XZ) in m/s²: up to thruster_strength / mass sternward, and up to
+## that x the directional effectiveness sideways and bow-forward.
 func get_thruster_command() -> Vector3:
 	return _pilot_out.thruster_command
 
@@ -384,4 +394,5 @@ func _profile_valid() -> bool:
 		and profile.thruster_strength > 0.0 and profile.max_speed > 0.0 and profile.pilot_response_time > 0.0 \
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
 		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 \
-		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.no_go_tolerance >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0
+		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.no_go_tolerance >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0 \
+		and profile.directional_thrust_curve != null

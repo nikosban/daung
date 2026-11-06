@@ -67,6 +67,7 @@ class Output:
 	var shared_scale := 1.0
 	var desired_speed := 0.0
 	var planned_braking := 0.0
+	var directional_effectiveness := 1.0
 
 
 ## One pilot tick. Sets out.arrived when the active order completes this tick; the caller then ends its order.
@@ -78,6 +79,10 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	var distance := to_destination.length()
 	var thruster_limit := profile.thruster_strength / profile.mass
 	var sternward_limit := sternward_limit_of(profile, thruster_limit)
+	# Speed-dependent directional thrust: sideways and bow-forward (repositioning) acceleration is limited to
+	# thruster_limit x effectiveness at the actual planar speed; sternward thrust keeps the full thruster_limit.
+	var _effectiveness := effectiveness_of(profile, speed)
+	var repositioning_limit := thruster_limit * _effectiveness
 	var bow := state.bow
 	var has_order := targets.has_order
 
@@ -119,8 +124,9 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 		state.turn_rate = 0.0
 
 	# Desired velocity: along the steering direction at the speed the thrusters can still stop from, capped. The
-	# braking it plans with is what proportional sharing leaves a saturated planar demand beside this
-	# tick's turning demand: a_t / (1 + turn fraction).
+	# braking it plans with is the thruster envelope's reach against the travel direction at the actual speed (full
+	# thruster_limit when that is sternward, the faded repositioning limit sideways or bow-forward), times the share
+	# proportional sharing leaves a saturated planar demand beside this tick's turning demand: 1 / (1 + turn fraction).
 	# Without retro thrusters, stopping the velocity takes acceleration along its reverse, whose sternward share
 	# is (travel direction · bow); the retro rule then allows at most sternward_limit / share. At a standstill
 	# the travel direction is the steering direction.
@@ -128,12 +134,14 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	# braking curve sqrt(2 a d) by a·response time. Subtracting that lag makes the request exactly the planned
 	# braking while the ship is on the curve, so braking starts in time to stop at the destination (clamped at
 	# zero within a·response time² / 2 of it).
-	var _planned_braking := thruster_limit / (1.0 + turn_fraction)
 	var travel := Vector3.ZERO
 	if speed > 0.0:
 		travel = planar_velocity / speed
 	elif steer_distance > 0.0:
 		travel = steer_direction
+	var _planned_braking := thruster_limit / (1.0 + turn_fraction)
+	if travel != Vector3.ZERO:
+		_planned_braking = reach_of(-travel, bow, thruster_limit, repositioning_limit) / (1.0 + turn_fraction)
 	var sternward_share := travel.dot(bow)
 	if sternward_share > 0.0:
 		_planned_braking = minf(_planned_braking, sternward_limit / sternward_share)
@@ -148,13 +156,16 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 		# line) share, which would only shrink once the turn has begun.
 		var last_bend := targets.bend_radii.size() - 1
 		if targets.bend_from < last_bend:
+			# The curve itself is held sideways, so its speed is also limited by half the repositioning limit at that
+			# speed (v² = a_t · effectiveness(v) / 2 · radius).
 			var bend_braking := minf(braking, thruster_limit / 2.0)
 			var bend_lag := bend_braking * profile.pilot_response_time
 			for j in range(targets.bend_from, last_bend):
 				var radius := targets.bend_radii[j]
 				if radius > 0.0:
 					var to_bend := maxf(targets.bend_lengths[j] - targets.bend_s, 0.0)
-					var bend_speed := sqrt(bend_braking * radius + 2.0 * bend_braking * to_bend) - bend_lag
+					var hold := minf(bend_braking * radius, bend_hold_speed_squared(profile, thruster_limit / 2.0, radius))
+					var bend_speed := sqrt(hold + 2.0 * bend_braking * to_bend) - bend_lag
 					desired_speed = minf(desired_speed, maxf(bend_speed, 0.0))
 		desired = steer_direction * desired_speed
 	var _desired_speed := desired.length()
@@ -166,15 +177,16 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	if planar_velocity.dot(bow) >= 0.0:
 		_main_command = clampf(requested.dot(bow), 0.0, profile.main_acceleration)
 
-	# Planar demand on the directional thrusters, as a fraction of their rating.
+	# Planar demand on the directional thrusters, as a fraction of their speed-dependent envelope (1 = on its edge).
 	var thruster_request := requested - bow * _main_command
-	var planar_fraction := minf(thruster_request.length() / thruster_limit, 1.0)
+	var planar_fraction := minf(envelope_norm(thruster_request, bow, thruster_limit, repositioning_limit), 1.0)
 
-	# One shared capacity: when the two fractions exceed it, both are scaled down proportionally.
+	# One shared capacity: when the two fractions exceed it, both are scaled down proportionally. The planar share is
+	# then filled braking first (see allocate()).
 	var _shared_scale := 1.0
 	if planar_fraction + turn_fraction > 1.0:
 		_shared_scale = 1.0 / (planar_fraction + turn_fraction)
-	var _thruster_command := thruster_request.normalized() * planar_fraction * _shared_scale * thruster_limit
+	var _thruster_command := allocate(thruster_request, travel if speed > 0.0 else Vector3.ZERO, planar_fraction * _shared_scale, bow, thruster_limit, repositioning_limit)
 	var _turn_acceleration := signf(turn_request) * turn_fraction * _shared_scale * turn_limit
 	# Retro rule on the applied thrust: remove only the sternward excess; the removed capacity is not reallocated.
 	var sternward := -_thruster_command.dot(bow)
@@ -198,11 +210,78 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	out.shared_scale = _shared_scale
 	out.desired_speed = _desired_speed
 	out.planned_braking = _planned_braking
+	out.directional_effectiveness = _effectiveness
 
 
 ## Unit planar bow for a yaw (0 = −Z, positive = counter-clockwise seen from above).
 static func bow_of(yaw: float) -> Vector3:
 	return Vector3(-sin(yaw), 0.0, -cos(yaw))
+
+
+## Directional-thruster effectiveness (0–1) at an actual planar speed in m/s, from the profile's curve.
+static func effectiveness_of(profile: MovementProfile, speed: float) -> float:
+	return clampf(profile.directional_thrust_curve.sample(speed), 0.0, 1.0)
+
+
+## A planar thruster acceleration's size relative to the directional-thruster envelope (1 = on its edge). In the bow
+## frame the envelope is a half-ellipse toward the stern (semi-axes thruster_limit sternward and repositioning_limit
+## sideways) joined to a half-circle of radius repositioning_limit toward the bow. No direction exceeds thruster_limit.
+static func envelope_norm(thrust: Vector3, bow: Vector3, thruster_limit: float, repositioning_limit: float) -> float:
+	var axial := thrust.dot(bow)
+	var lateral := thrust.dot(Vector3(-bow.z, 0.0, bow.x))
+	if repositioning_limit <= 0.0:
+		return INF if lateral != 0.0 or axial > 0.0 else -axial / thruster_limit
+	var axial_limit := repositioning_limit if axial > 0.0 else thruster_limit
+	return sqrt((axial / axial_limit) ** 2 + (lateral / repositioning_limit) ** 2)
+
+
+## The largest thruster acceleration (m/s²) along a unit planar direction inside the envelope.
+static func reach_of(direction: Vector3, bow: Vector3, thruster_limit: float, repositioning_limit: float) -> float:
+	return 1.0 / envelope_norm(direction, bow, thruster_limit, repositioning_limit)
+
+
+## Thruster command for a request within a share of the envelope (capacity, 0–1), braking first. The braking part is
+## the request's component against the actual travel direction (zero vector at rest); it gets the share first, then the
+## rest of the request (sideways correction or acceleration) is scaled down until the sum fits. Nothing is scaled up,
+## so the command never exceeds the request or the share.
+static func allocate(request: Vector3, travel: Vector3, capacity: float, bow: Vector3, thruster_limit: float, repositioning_limit: float) -> Vector3:
+	var norm := envelope_norm(request, bow, thruster_limit, repositioning_limit)
+	if norm <= capacity:
+		return request
+	var against := request.dot(travel)
+	if against >= 0.0:
+		return request * (capacity / norm)
+	var braking := travel * against
+	var braking_norm := envelope_norm(braking, bow, thruster_limit, repositioning_limit)
+	if braking_norm >= capacity:
+		return braking * (capacity / braking_norm)
+	# The envelope norm is convex along the line braking + k · correction, so the largest fitting k is found by bisection.
+	var correction := request - braking
+	var low := 0.0
+	var high := 1.0
+	for _i in 20:
+		var k := (low + high) * 0.5
+		if envelope_norm(braking + correction * k, bow, thruster_limit, repositioning_limit) <= capacity:
+			low = k
+		else:
+			high = k
+	return braking + correction * low
+
+
+## Squared speed (m²/s²) at which a bend of this radius can be held with hold_limit x effectiveness at that speed as the
+## sideways acceleration: v² = hold_limit · effectiveness(v) · radius, by bisection over 0–max_speed.
+static func bend_hold_speed_squared(profile: MovementProfile, hold_limit: float, radius: float) -> float:
+	var low := 0.0
+	var high := profile.max_speed
+	if high * high <= hold_limit * effectiveness_of(profile, high) * radius:
+		return high * high
+	for _i in 16:
+		var v := (low + high) * 0.5
+		if v * v <= hold_limit * effectiveness_of(profile, v) * radius:
+			low = v
+		else:
+			high = v
+	return low * low
 
 
 ## Largest sternward directional-thruster acceleration (m/s²): unlimited with retro thrusters.
