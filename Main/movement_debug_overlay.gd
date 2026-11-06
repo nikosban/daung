@@ -64,10 +64,19 @@ func _process(_delta: float) -> void:
 		ship.get_desired_speed(), ship.get_planned_braking(),
 		ship.get_main_command(),
 		thruster.length(), thruster.x, thruster.z,
-		"active destination (%.1f, %.1f)" % [destination.x, destination.z] if ship.has_order() else "no active order",
+		_destination_text(destination) if ship.has_order() else "no active order",
 		ship.get_order_status(),
 		ship.get_clock(), ship.get_pending_count(), _next_pending_text(), _time_text(ship.get_last_received_time()), _time_text(ship.get_last_activated_time()),
 	]
+
+
+## The active destination and, when it differs (Task #54: a resolved destination), the requested click.
+func _destination_text(destination: Vector3) -> String:
+	var requested := ship.get_requested_destination()
+	var text := "active destination (%.1f, %.1f)" % [destination.x, destination.z]
+	if Vector2(requested.x - destination.x, requested.z - destination.z).length() > 0.01:
+		text += "  requested (%.1f, %.1f)" % [requested.x, requested.z]
+	return text
 
 
 func _next_pending_text() -> String:

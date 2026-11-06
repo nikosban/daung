@@ -85,7 +85,15 @@ class Job:
 	var summary := ""
 	var used_usec := 0
 	var ticks := 0
+	## The requested click (Y at the ship) and, once DONE, the destination the plan leads to (the click, or the
+	## resolved candidate, Task #54).
 	var click := Vector3.ZERO
+	var destination := Vector3.ZERO
+	## Destination resolution (Task #54): a short summary when the click was replaced, and every tested candidate.
+	var resolution := ""
+	var resolution_log := PackedStringArray()
+	## Largest wall-clock time this job used in one physics tick (µs; evidence for the shared allowance).
+	var worst_tick_usec := 0
 	var _ship: ShipMovement
 	var _probe: HullProbe
 	var _profile: MovementProfile
@@ -94,14 +102,16 @@ class Job:
 	var _last_frame := -1
 	var _holding := false
 	var _held_frames := 0
+	var _tick_usec := 0
 
 	func _init(ship: ShipMovement, probe: HullProbe, p_click: Vector3) -> void:
 		_ship = ship
 		_probe = probe
 		_profile = ship.profile
 		click = Vector3(p_click.x, ship.global_position.y, p_click.z)
+		destination = click
 		probe.queries = 0
-		_route = RoutePlanner.new(ship.get_world_3d().navigation_map, probe, _profile, click, ship.get_pilot_state)
+		_route = RoutePlanner.new(ship.get_world_3d().navigation_map, probe, _profile, click, ship.get_pilot_state, Navigator.BUDGET.destination_candidates_per_order)
 
 	func cancel() -> void:
 		if status == Status.PENDING:
@@ -124,13 +134,14 @@ class Job:
 		if frame != _last_frame:
 			_last_frame = frame
 			ticks += 1
+			_tick_usec = 0
 		if _maneuver == null:
 			match _route.run(clock):
 				RoutePlanner.BASELINE:
 					var direct := RouteGuidance.Plan.new()
 					direct.destination = click
 					_finish(direct, _route.note)
-				RoutePlanner.UNREACHABLE:
+				RoutePlanner.DECLINED:
 					_decline(_route.note)
 				RoutePlanner.ROUTE:
 					if _route.needs_prediction:
@@ -139,7 +150,7 @@ class Job:
 						_finish(_route.primary_plan, "no hazard regions")
 		if _holding:
 			_hand_over()
-			used_usec += Time.get_ticks_usec() - start
+			_add_time(start)
 			return
 		if status == Status.PENDING and _maneuver != null:
 			match _maneuver.run(clock):
@@ -151,10 +162,16 @@ class Job:
 					_finish_maneuver()
 				ManeuverPlanner.FAIL:
 					if _maneuver.exhausted:
-						_decline("no safe maneuver found within %.0f s of predicted flight (route: %s)" % [Navigator.BUDGET.plan_prediction_per_order, _maneuver.failure])
+						_decline("maneuver planning failed: no safe maneuver found within %.0f s of predicted flight (route: %s)" % [Navigator.BUDGET.plan_prediction_per_order, _maneuver.failure])
 					else:
-						_decline("no safe maneuver found (route: %s)" % _maneuver.failure)
-		used_usec += Time.get_ticks_usec() - start
+						_decline("maneuver planning failed: no safe maneuver found (route: %s)" % _maneuver.failure)
+		_add_time(start)
+
+	func _add_time(start: int) -> void:
+		var used := Time.get_ticks_usec() - start
+		used_usec += used
+		_tick_usec += used
+		worst_tick_usec = maxi(worst_tick_usec, _tick_usec)
 
 	## A held plan: wait for its handoff frame, then hand it over if the ship is in the predicted state, or search
 	## again from the actual state.
@@ -179,7 +196,16 @@ class Job:
 		plan = p_plan
 		status = Status.DONE
 		summary = note
+		destination = p_plan.destination
+		resolution = _route.resolution
+		resolution_log = _route.resolution_log
 
 	func _decline(note: String) -> void:
 		status = Status.DECLINED
 		reason = note
+		resolution = _route.resolution
+		resolution_log = _route.resolution_log
+
+	## Destination-resolution query counts (Task #54): closest-point, path and physics (hull) queries of this job.
+	func query_text() -> String:
+		return "%d closest-point, %d path, %d physics queries" % [_route.closest_queries, _route.path_queries, _probe.queries]

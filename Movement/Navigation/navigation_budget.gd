@@ -10,3 +10,7 @@ extends Resource
 ## reaches it is declined. Counted in predicted time, not wall-clock time, so the same order from the same state always
 ## gets the same result on any machine.
 @export_range(10.0, 600.0, 1.0, "suffix:s") var plan_prediction_per_order: float = 120.0
+## Destination resolution (Task #54): path-query tests one order's search may make before it ends as "search
+## exhausted". Candidates rejected by the arrival-allowance and hull checks do not count; the search horizon (the
+## navigation regions' bounds) bounds those. Provisional technical guardrail.
+@export_range(1, 64, 1) var destination_candidates_per_order: int = 16

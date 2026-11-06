@@ -44,6 +44,8 @@ var _pending: Array[Dictionary] = []
 var _last_received := -1.0
 var _last_activated := -1.0
 var _destination := Vector3.ZERO
+## The requested click of the active or last move (Task #54); _destination becomes the resolved point once planned.
+var _requested := Vector3.ZERO
 var _has_order := false
 ## Course heading of the current order (yaw in radians), set by move_to(); no course for a zero-length order.
 var _course_yaw := 0.0
@@ -100,9 +102,15 @@ func has_order() -> bool:
 	return _has_order
 
 
-## Destination of the active order (or of the last one).
+## Destination of the active order (or of the last one): the click until its plan is taken, then the destination the
+## plan leads to (the click, or the resolved point, Task #54).
 func get_destination() -> Vector3:
 	return _destination
+
+
+## The requested click of the active or last move (Task #54).
+func get_requested_destination() -> Vector3:
+	return _requested
 
 
 ## Physics clock in seconds.
@@ -292,6 +300,7 @@ func _activate(command: Dictionary) -> void:
 	if command.kind == "move":
 		var world_position: Vector3 = command.position
 		_destination = Vector3(world_position.x, global_position.y, world_position.z)
+		_requested = _destination
 		_has_order = true
 		var course := _destination - global_position
 		course.y = 0.0
@@ -316,11 +325,15 @@ func _take_plan() -> void:
 	if job.status == Navigator.Status.DECLINED:
 		_has_order = false
 		_order_status = "declined (%.1f, %.1f): %s" % [job.click.x, job.click.z, job.reason]
-		print("Movement: order to (%.1f, %.1f) declined at %.3f s: %s (%d µs over %d ticks)" % [job.click.x, job.click.z, _clock, job.reason, job.used_usec, job.ticks])
+		print("Movement: order to (%.1f, %.1f) declined at %.3f s: %s (%d µs over %d ticks, worst tick %d µs)" % [job.click.x, job.click.z, _clock, job.reason, job.used_usec, job.ticks, job.worst_tick_usec])
+		_print_resolution(job)
 		return
 	if job.status != Navigator.Status.DONE:
 		return
+	_destination = job.destination
 	_order_status = "accepted (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, ["direct", "route", "departure"][job.plan.kind], job.summary.get_slice(";", 0)]
+	if job.resolution != "":
+		_order_status += "; %s" % job.resolution
 	if job.plan.kind == RouteGuidance.Kind.DIRECT:
 		# The direct order keeps its course from the ship's position now (the activation tick when planning took one
 		# tick, as before Task #46).
@@ -338,7 +351,17 @@ func _take_plan() -> void:
 		for point in job.plan.route:
 			points.push_back("(%.2f, %.2f)" % [point.x, point.z])
 		route = " via " + " ".join(points)
-	print("Movement: plan for (%.1f, %.1f) at %.3f s: %s%s; %s (%d µs over %d ticks)" % [job.click.x, job.click.z, _clock, ["direct", "route", "departure"][job.plan.kind], route, job.summary, job.used_usec, job.ticks])
+	print("Movement: plan for (%.1f, %.1f) at %.3f s: %s%s; %s (%d µs over %d ticks, worst tick %d µs)" % [job.click.x, job.click.z, _clock, ["direct", "route", "departure"][job.plan.kind], route, job.summary, job.used_usec, job.ticks, job.worst_tick_usec])
+	_print_resolution(job)
+
+
+## Destination resolution evidence (Task #54): the summary, every tested candidate in test order and the query counts.
+func _print_resolution(job: Navigator.Job) -> void:
+	if job.resolution_log.is_empty():
+		return
+	print("Movement: destination resolution for (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, job.resolution if job.resolution != "" else "no destination", job.query_text()])
+	for line in job.resolution_log:
+		print("  %s" % line)
 
 
 ## Cancels the planning job and drops the plan (a new command activated, or the order ended).
