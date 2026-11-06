@@ -186,8 +186,12 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	if planar_fraction + turn_fraction > 1.0:
 		_shared_scale = 1.0 / (planar_fraction + turn_fraction)
 	var _thruster_command := Vector3.ZERO
-	if request_norm > 0.0:
-		_thruster_command = thruster_request * (planar_fraction * _shared_scale / request_norm)
+	if request_norm > 1.0:
+		# Task 28 scratch (#59, option A): a saturated request keeps its braking component (along -velocity) first; the
+		# rest (faded sideways and bow-forward correction) gets what the envelope leaves.
+		_thruster_command = braking_first(thruster_request, planar_velocity, bow, thruster_limit, directional_limit) * _shared_scale
+	elif request_norm > 0.0:
+		_thruster_command = thruster_request * _shared_scale
 	var _turn_acceleration := signf(turn_request) * turn_fraction * _shared_scale * turn_limit
 	# Retro rule on the applied thrust: remove only the sternward excess; the removed capacity is not reallocated.
 	var sternward := -_thruster_command.dot(bow)
@@ -243,6 +247,30 @@ static func envelope_norm(thrust: Vector3, bow: Vector3, thruster_limit: float, 
 	if directional_limit <= 0.0:
 		return INF if absf(lateral) > 0.0 or axial > 0.0 else absf(axial) / axial_limit
 	return sqrt(pow(axial / axial_limit, 2.0) + pow(lateral / directional_limit, 2.0))
+
+
+## Task 28 scratch (#59, option A): fits a request that exceeds the thruster envelope onto its edge, braking first. The
+## component along -velocity (none at a standstill or when the request does not oppose the velocity) is kept up to the
+## envelope's reach in that direction; the remainder is then scaled by the largest factor (bisection) that stays inside.
+static func braking_first(request: Vector3, velocity: Vector3, bow: Vector3, thruster_limit: float, directional_limit: float) -> Vector3:
+	var braking := Vector3.ZERO
+	if velocity.length_squared() > 0.0:
+		var back := -velocity.normalized()
+		var along := request.dot(back)
+		if along > 0.0:
+			braking = back * minf(along, envelope_reach(back, bow, thruster_limit, directional_limit))
+	var rest := request - braking
+	if braking == Vector3.ZERO:
+		return request / envelope_norm(request, bow, thruster_limit, directional_limit)
+	var lo := 0.0
+	var hi := 1.0
+	for _i in 16:
+		var k := (lo + hi) * 0.5
+		if envelope_norm(braking + rest * k, bow, thruster_limit, directional_limit) <= 1.0:
+			lo = k
+		else:
+			hi = k
+	return braking + rest * lo
 
 
 ## Task 28 scratch (#59): the largest acceleration along a unit direction inside the thruster envelope (m/s²).
