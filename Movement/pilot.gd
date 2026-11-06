@@ -21,6 +21,8 @@ class State:
 	var turn_rate := 0.0
 	## Last tick's planar demand fraction on the directional thrusters (0–1).
 	var planar_fraction_prev := 0.0
+	## Last tick's start-of-tick planar speed (m/s); with this tick's it gives the current deceleration.
+	var speed_prev := 0.0
 
 	func copy() -> State:
 		var other := State.new()
@@ -30,6 +32,7 @@ class State:
 		other.bow = bow
 		other.turn_rate = turn_rate
 		other.planar_fraction_prev = planar_fraction_prev
+		other.speed_prev = speed_prev
 		return other
 
 
@@ -62,7 +65,8 @@ class Output:
 	var thruster_command := Vector3.ZERO
 	var target_yaw := 0.0
 	var turn_acceleration := 0.0
-	var rudder_multiplier := 0.0
+	## Available angular acceleration at the actual speed (rad/s², before sharing) and the turn-rate limit (rad/s).
+	var turn_authority := 0.0
 	var turn_rate_limit := 0.0
 	var shared_scale := 1.0
 	var desired_speed := 0.0
@@ -113,12 +117,10 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	elif distance > 0.0:
 		steer_direction = to_destination / distance
 
-	# Turning demand: bounded angular acceleration toward the order's course heading, as a fraction of the
-	# rated authority at the actual speed. The turn-rate limit follows the same rudder curve, normalized
-	# to its full-speed value, so it is zero at rest.
-	var _rudder_multiplier := profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
-	var turn_limit := deg_to_rad(profile.turn_authority / profile.mass) * _rudder_multiplier
-	var _turn_rate_limit := deg_to_rad(profile.max_turn_rate_at_max_speed) * _rudder_multiplier / profile.rudder_curve.sample(1.0)
+	# Turning demand: bounded angular acceleration toward the steering target, as a fraction of the available
+	# authority. Authority and turn-rate limit come from their own curves of the actual speed.
+	var turn_limit := deg_to_rad(maxf(profile.turn_acceleration_curve.sample(speed), 0.0))
+	var _turn_rate_limit := deg_to_rad(maxf(profile.turn_rate_curve.sample(speed), 0.0))
 	# Bow alignment: while the ship moves bow-first, the steering target is the course heading limited to
 	# bow_alignment_curve(actual speed) either side of the actual travel direction, recalculated every tick, so the hull
 	# leads a turn by at most that angle and the turn finishes as the trajectory follows. Stern-first motion and a
@@ -132,9 +134,19 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 		# Braking-distance rule: the fastest rate that can still stop at the target, within the turn-rate
 		# limit. It plans with the share the turn would get if planar demand stays at last tick's level
 		# (proportional sharing). The |error| / delta term only keeps the wanted rate from stepping past
-		# the target in one tick.
-		var planned_turn_limit := turn_limit / (1.0 + state.planar_fraction_prev)
-		var wanted_rate := signf(error) * minf(minf(sqrt(2.0 * planned_turn_limit * absf(error)), absf(error) / delta), _turn_rate_limit)
+		# the target in one tick. Authority and rate limit fall as the ship slows below their peak, so the plan uses
+		# the least of each between the actual speed and the speed left after the time the turn needs to stop at
+		# last tick's deceleration: the turn can still be stopped, and the rate stays within the limit it will meet.
+		var deceleration := maxf((state.speed_prev - speed) / delta, 0.0)
+		var plan_authority := turn_limit
+		var plan_rate_limit := _turn_rate_limit
+		for _i in 2:
+			var stop_time := absf(state.turn_rate) * (1.0 + state.planar_fraction_prev) / maxf(plan_authority, 1e-6)
+			var lowest := maxf(speed - deceleration * stop_time, 0.0)
+			plan_authority = deg_to_rad(maxf(curve_minimum(profile.turn_acceleration_curve, lowest, speed), 0.0))
+			plan_rate_limit = deg_to_rad(maxf(curve_minimum(profile.turn_rate_curve, lowest, speed), 0.0))
+		var planned_turn_limit := plan_authority / (1.0 + state.planar_fraction_prev)
+		var wanted_rate := signf(error) * minf(minf(sqrt(2.0 * planned_turn_limit * absf(error)), absf(error) / delta), plan_rate_limit)
 		turn_request = (wanted_rate - state.turn_rate) / delta
 		turn_fraction = minf(absf(turn_request) / turn_limit, 1.0)
 	else:
@@ -217,6 +229,7 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	# The limit can contract faster than the authority can slow the turn; the rate is then clamped to it.
 	state.turn_rate = clampf(state.turn_rate + _turn_acceleration * delta, -_turn_rate_limit, _turn_rate_limit)
 	state.planar_fraction_prev = planar_fraction
+	state.speed_prev = speed
 	planar_velocity += (bow * _main_command + _thruster_command) * delta
 	state.velocity = planar_velocity.limit_length(profile.max_speed)
 	state.yaw += state.turn_rate * delta
@@ -226,7 +239,7 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	out.thruster_command = _thruster_command
 	out.target_yaw = _target_yaw
 	out.turn_acceleration = _turn_acceleration
-	out.rudder_multiplier = _rudder_multiplier
+	out.turn_authority = turn_limit
 	out.turn_rate_limit = _turn_rate_limit
 	out.shared_scale = _shared_scale
 	out.desired_speed = _desired_speed
@@ -242,6 +255,16 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 ## Unit planar bow for a yaw (0 = −Z, positive = counter-clockwise seen from above).
 static func bow_of(yaw: float) -> Vector3:
 	return Vector3(-sin(yaw), 0.0, -cos(yaw))
+
+
+## The lowest value of a curve over the input range low–high (its value at both ends and at every point between).
+static func curve_minimum(curve: Curve, low: float, high: float) -> float:
+	var lowest := minf(curve.sample(low), curve.sample(high))
+	for i in curve.point_count:
+		var x := curve.get_point_position(i).x
+		if x > low and x < high:
+			lowest = minf(lowest, curve.get_point_position(i).y)
+	return lowest
 
 
 ## Largest commanded angle (radians, 0–PI) between bow and travel direction at an actual planar speed in m/s.

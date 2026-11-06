@@ -13,9 +13,13 @@ const BEFORE := "4b1d646"
 const DELTA := 1.0 / 60.0
 const PROFILE_PATH := "res://Movement/Profiles/frigate_movement_profile.tres"
 const EPS := 1e-4
+const Baseline := preload("res://Tests/baseline_pilot.gd")
 
 var _failures := 0
 var _pilots := {}
+## Each earlier commit's own frigate profile, and cached variants of them.
+var _base_profiles := {}
+var _variants := {}
 
 
 func _init() -> void:
@@ -23,12 +27,14 @@ func _init() -> void:
 	var before := _snapshot(profile)
 	_pilots["now"] = ShipPilot
 	for commit in [SPEED_FADE, BEFORE]:
-		var script := _load_pilot(commit)
-		if script == null:
-			_fail("pilot at %s could not be loaded" % commit)
+		var script := Baseline.load_pilot(commit)
+		var old_profile := Baseline.load_profile(commit)
+		if script == null or old_profile == null:
+			_fail("pilot or profile at %s could not be loaded" % commit)
 			quit(1)
 			return
 		_pilots[commit] = script
+		_base_profiles[commit] = old_profile
 	var no_retro: MovementProfile = profile.duplicate()
 	no_retro.retro_thrusters = false
 
@@ -119,6 +125,7 @@ func _test_main_engine_dominates(profile: MovementProfile) -> void:
 	var traces := {}
 	for pilot in [SPEED_FADE, BEFORE, "now"]:
 		var script: Variant = _pilots[pilot]
+		var pilot_profile := _profile_for(pilot, profile)
 		var state: Variant = script.State.new()
 		var targets: Variant = script.Targets.new()
 		targets.has_order = true
@@ -131,7 +138,7 @@ func _test_main_engine_dominates(profile: MovementProfile) -> void:
 		var marks := {}
 		var trace := PackedVector3Array()
 		for i in 3600:
-			_step(script, profile, state, targets, out)
+			_step(script, pilot_profile, state, targets, out)
 			trace.push_back(state.velocity)
 			var main: float = out.main_command
 			var thr := maxf(out.thruster_command.dot(Vector3.FORWARD), 0.0)
@@ -301,6 +308,7 @@ func _test_translate_and_rotate(profile: MovementProfile) -> void:
 ## pilot only) every tick is checked for priority and limits.
 func _run(pilot: String, profile: MovementProfile, velocity: Vector3, destination: Vector3, seconds: float, order: bool, course: bool, audit := false) -> Dictionary:
 	var script: Variant = _pilots[pilot]
+	var pilot_profile := _profile_for(pilot, profile)
 	var state: Variant = script.State.new()
 	state.velocity = velocity
 	var targets: Variant = script.Targets.new()
@@ -321,7 +329,7 @@ func _run(pilot: String, profile: MovementProfile, velocity: Vector3, destinatio
 		var t := (i + 1) * DELTA
 		var before_velocity: Vector3 = state.velocity
 		var before_yaw: float = state.yaw
-		_step(script, profile, state, targets, out)
+		_step(script, pilot_profile, state, targets, out)
 		r.trace.push_back(state.position)
 		r.trace.push_back(state.velocity)
 		if audit:
@@ -381,8 +389,7 @@ func _audit_tick(profile: MovementProfile, velocity: Vector3, yaw: float, out: S
 	var command := out.thruster_command
 	var parts := ShipPilot.split(request, planar, bow, tau)
 	var k := ShipPilot.allocation_scales(request, planar, share, bow, tau, a_t, side, fwd)
-	var rudder := profile.rudder_curve.sample(clampf(speed / profile.max_speed, 0.0, 1.0))
-	var turn_use := absf(out.turn_acceleration) / (deg_to_rad(profile.turn_authority / profile.mass) * rudder) if rudder > 0.0 else 0.0
+	var turn_use := absf(out.turn_acceleration) / out.turn_authority if out.turn_authority > 0.0 else 0.0
 	var physical := ShipPilot.envelope_norm(command, bow, a_t, side, side)
 	var forward_assist := parts[2].length() * k.z
 	r.worst_planar = maxf(r.worst_planar, physical)
@@ -418,22 +425,24 @@ func _audit_tick(profile: MovementProfile, velocity: Vector3, yaw: float, out: S
 
 
 ## One tick as ShipMovement and the navigator's rollout do it, with the position integrated in open space.
-func _step(script: Variant, profile: MovementProfile, state: Variant, targets: Variant, out: Variant) -> void:
+func _step(script: Variant, profile: Resource, state: Variant, targets: Variant, out: Variant) -> void:
 	state.bow = ShipPilot.bow_of(state.yaw)
 	script.step(profile, state, targets, DELTA, out)
 	state.position += state.velocity * DELTA
 
 
-func _load_pilot(commit: String) -> GDScript:
-	var output := []
-	if OS.execute("git", ["show", "%s:Movement/pilot.gd" % commit], output, true) != 0:
-		return null
-	var source: String = output[0].replace("class_name ShipPilot", "")
-	var script := GDScript.new()
-	script.source_code = source
-	if script.reload() != OK:
-		return null
-	return script
+## The profile a pilot runs with: the current one for "now", otherwise that commit's own frigate profile with this
+## test's variations (retro thrusters, max_speed) copied onto a cached duplicate.
+func _profile_for(pilot: String, profile: MovementProfile) -> Resource:
+	if pilot == "now":
+		return profile
+	var key := "%s|%s|%s" % [pilot, profile.retro_thrusters, profile.max_speed]
+	if not _variants.has(key):
+		var variant: Resource = _base_profiles[pilot].duplicate()
+		variant.retro_thrusters = profile.retro_thrusters
+		variant.max_speed = profile.max_speed
+		_variants[key] = variant
+	return _variants[key]
 
 
 func _snapshot(profile: MovementProfile) -> String:

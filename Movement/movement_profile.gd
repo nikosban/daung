@@ -26,15 +26,13 @@ extends Resource
 @export_range(0.25, 10.0, 0.05, "suffix:m") var arrival_tolerance: float = 2.0
 ## An order completes only at or below this planar speed (and within arrival_tolerance).
 @export_range(0.05, 5.0, 0.01, "suffix:m/s") var arrival_speed_tolerance: float = 0.5
-## Turning rating in turn-authority units (°/s² × mass): turn_authority / mass is the angular acceleration
-## at a rudder multiplier of 1. Shared proportionally with planar thrust from the directional thrusters.
-@export_range(1.0, 1000.0, 1.0) var turn_authority: float = 120.0
-## Turn-rate limit at max_speed. At lower speeds it scales with the rudder curve (normalized to its
-## full-speed value), so it is zero at rest.
-@export_range(1.0, 180.0, 1.0, "suffix:°/s") var max_turn_rate_at_max_speed: float = 60.0
-## Rudder multiplier (output, 0–2) against actual planar speed as a fraction of max_speed (input, 0–1).
-## Zero at rest means no turning in place.
-@export var rudder_curve: Curve
+## Powered turning: the largest angular acceleration (output, °/s², not divided by mass) against the actual planar
+## speed in m/s (input; the curve's domain is m/s, speeds past its end points use those points' values). Shared
+## proportionally with planar thrust from the directional thrusters. Required.
+@export var turn_acceleration_curve: Curve
+## Powered turning: the turn-rate limit (output, °/s) against the actual planar speed in m/s (input, as above). When it
+## contracts faster than the turn can be braked, the rate is clamped to it (never the heading). Required.
+@export var turn_rate_curve: Curve
 ## Bow alignment: the largest angle (output, degrees 0–180; 180 = unrestricted) the pilot may command between the bow
 ## and the actual travel direction, against the actual planar speed in m/s (input; the curve's domain is m/s, speeds
 ## past its end points use those points' values). While the ship moves bow-first, the steering target is the course

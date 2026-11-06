@@ -7,7 +7,8 @@ extends CharacterBody3D
 ## Each physics tick the pilot computes a desired velocity toward the destination that falls with the
 ## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
 ## velocity within pilot_response_time. The main engine supplies the useful part along the bow; the
-## directional thrusters supply the rest. While the ship moves bow-first, the steering target is the course limited to
+## directional thrusters supply the rest. Turning acceleration and the turn-rate limit are curves of actual speed
+## (profile.turn_acceleration_curve, profile.turn_rate_curve). While the ship moves bow-first, the steering target is the course limited to
 ## profile.bow_alignment_curve (actual speed) either side of the travel direction (bow alignment). Their sideways acceleration (thruster_strength / mass) and bow-forward acceleration
 ## (forward_directional_acceleration for thrust that pushes the ship forward, below the main engine) fade with actual
 ## speed (profile.directional_thrust_curve); sternward, and bow-forward when braking stern-first motion, they keep their
@@ -15,8 +16,8 @@ extends CharacterBody3D
 ## second and forward assistance last, and the approach is planned with the braking the thrusters can actually deliver
 ## against the travel direction. Turning demand is computed first, so the approach speed is planned
 ## with the braking that sharing will leave. The pilot also steers the hull toward the order's course heading
-## (set once by move_to(), toward the destination) with bounded angular acceleration whose authority grows
-## with actual speed (zero at rest), and a turn-rate limit that also follows speed (zero at rest). Planar
+## (set once by move_to(), toward the destination) with bounded angular acceleration and a turn-rate limit, both
+## curves of actual speed (weak at rest, peaking at low speed, falling toward cruise). Planar
 ## and turning demand share the directional thrusters' capacity proportionally. Only applied acceleration
 ## is integrated; yaw never rotates the velocity, and rotation does not persist without powered turning.
 ## The desired speed is lowered by the pilot's response lag so braking starts in time (Task #41).
@@ -62,6 +63,8 @@ var _turn_rate := 0.0
 ## thruster demand, so it carries over order replacement and stop(); it starts at 0 (no demand before the
 ## first tick). Used only to plan the yaw braking authority.
 var _planar_fraction_prev := 0.0
+## Previous tick's start-of-tick planar speed (m/s), for the pilot's turn planning while the ship slows.
+var _speed_prev := 0.0
 ## Pilot state, targets and last tick's values (read-only debug getters), reused every tick.
 var _pilot_state := ShipPilot.State.new()
 var _pilot_targets := ShipPilot.Targets.new()
@@ -79,7 +82,7 @@ var _order_status := "no order yet"
 
 func _ready() -> void:
 	if not _profile_valid():
-		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0), a rudder curve above 0 at full speed, a directional thrust curve, forward_directional_acceleration at least 0 and a bow alignment curve; the ship will not move.")
+		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0), turn acceleration and turn rate curves, a directional thrust curve, forward_directional_acceleration at least 0 and a bow alignment curve; the ship will not move.")
 		set_physics_process(false)
 		return
 	var hull: CollisionShape3D = null
@@ -187,9 +190,9 @@ func get_turn_acceleration() -> float:
 	return rad_to_deg(_pilot_out.turn_acceleration)
 
 
-## Last rudder multiplier sampled from the rudder curve at the actual speed.
-func get_rudder_multiplier() -> float:
-	return _pilot_out.rudder_multiplier
+## Last available angular acceleration at the actual speed in °/s² (turn_acceleration_curve, before sharing).
+func get_turn_authority() -> float:
+	return rad_to_deg(_pilot_out.turn_authority)
 
 
 ## Last shared-capacity scale applied to both thruster and turning demand (1 = not saturated).
@@ -247,6 +250,7 @@ func get_pilot_state() -> ShipPilot.State:
 	state.bow = bow.normalized()
 	state.turn_rate = _turn_rate
 	state.planar_fraction_prev = _planar_fraction_prev
+	state.speed_prev = _speed_prev
 	return state
 
 
@@ -266,6 +270,7 @@ func _physics_process(delta: float) -> void:
 	_pilot_state.bow = bow.normalized()
 	_pilot_state.turn_rate = _turn_rate
 	_pilot_state.planar_fraction_prev = _planar_fraction_prev
+	_pilot_state.speed_prev = _speed_prev
 	_pilot_targets.has_order = _has_order and _job == null
 	if _plan != null and _has_order:
 		RouteGuidance.guide(_plan, _follow, global_position, rotation.y, _pilot_targets)
@@ -287,6 +292,7 @@ func _physics_process(delta: float) -> void:
 
 	_turn_rate = _pilot_state.turn_rate
 	_planar_fraction_prev = _pilot_state.planar_fraction_prev
+	_speed_prev = _pilot_state.speed_prev
 	velocity = _pilot_state.velocity
 	rotation.y = _pilot_state.yaw
 	var attempted := Vector3(velocity.x, 0.0, velocity.z)
@@ -412,6 +418,7 @@ func _profile_valid() -> bool:
 	return profile != null and profile.mass > 0.0 and profile.main_acceleration > 0.0 \
 		and profile.thruster_strength > 0.0 and profile.max_speed > 0.0 and profile.pilot_response_time > 0.0 \
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
-		and profile.turn_authority > 0.0 and profile.max_turn_rate_at_max_speed > 0.0 \
-		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.no_go_tolerance >= 0.0 and profile.rudder_curve != null and profile.rudder_curve.sample(1.0) > 0.0 \
-		and profile.directional_thrust_curve != null and profile.forward_directional_acceleration >= 0.0 		and profile.bow_alignment_curve != null
+		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.no_go_tolerance >= 0.0 \
+		and profile.turn_acceleration_curve != null and profile.turn_rate_curve != null \
+		and profile.directional_thrust_curve != null and profile.forward_directional_acceleration >= 0.0 \
+		and profile.bow_alignment_curve != null

@@ -9,18 +9,22 @@ extends SceneTree
 const BASELINE := "a9af6cc"
 const DELTA := 1.0 / 60.0
 const PROFILE_PATH := "res://Movement/Profiles/frigate_movement_profile.tres"
+const Baseline := preload("res://Tests/baseline_pilot.gd")
 
 var _failures := 0
 var _old: GDScript
 var _profile: MovementProfile
+## BASELINE's own frigate profile.
+var _old_profile: Resource
 
 
 func _init() -> void:
 	_profile = load(PROFILE_PATH)
 	var before := _snapshot(_profile)
-	_old = _load_pilot(BASELINE)
-	if _old == null:
-		_fail("pilot at %s could not be loaded" % BASELINE)
+	_old = Baseline.load_pilot(BASELINE)
+	_old_profile = Baseline.load_profile(BASELINE)
+	if _old == null or _old_profile == null:
+		_fail("pilot or profile at %s could not be loaded" % BASELINE)
 		quit(1)
 		return
 
@@ -193,7 +197,7 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 			for field in ["destination", "use_steer", "steer_direction", "steer_distance", "has_course", "course_yaw", "bend_lengths", "bend_radii", "bend_from", "bend_s"]:
 				targets.set(field, guided.get(field))
 			course = targets.course_yaw
-		script.step(_profile, state, targets, DELTA, out)
+		script.step(_profile if pilot == "now" else _old_profile, state, targets, DELTA, out)
 		state.position += state.velocity * DELTA
 		if follow != null:
 			follow.time += DELTA
@@ -265,18 +269,6 @@ func _distance_to_route(route: PackedVector3Array, p: Vector3) -> float:
 		var t := clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
 		best = minf(best, (a + ab * t - p).length())
 	return best
-
-
-func _load_pilot(commit: String) -> GDScript:
-	var output := []
-	if OS.execute("git", ["show", "%s:Movement/pilot.gd" % commit], output, true) != 0:
-		return null
-	var source: String = output[0].replace("class_name ShipPilot", "")
-	var script := GDScript.new()
-	script.source_code = source
-	if script.reload() != OK:
-		return null
-	return script
 
 
 func _snapshot(profile: MovementProfile) -> String:
