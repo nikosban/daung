@@ -74,8 +74,11 @@ func _test_limits(profile: MovementProfile) -> void:
 		var forward_out := ShipPilot.Output.new()
 		_one_tick_accel(probe, Vector3.FORWARD * v, Vector3.FORWARD * 10.0, forward_out)
 		var forward := forward_out.thruster_command.dot(Vector3.FORWARD)
-		var sideways := _one_tick_accel(probe, Vector3.FORWARD * v, Vector3.RIGHT * 10.0).dot(Vector3.RIGHT)
-		var sternward := -_one_tick_accel(probe, Vector3.FORWARD * v, Vector3.BACK * 10.0).dot(Vector3.FORWARD)
+		# Sideways and sternward limits on the pilot's own allocator with a saturated request: the pilot's guidance turns a
+		# desired velocity far off the travel direction progressively (momentum-preserving course changes), so a desired
+		# velocity change no longer saturates these directions in one tick.
+		var sideways := _allocated(profile, Vector3.FORWARD * v, Vector3.RIGHT).dot(Vector3.RIGHT)
+		var sternward := -_allocated(profile, Vector3.FORWARD * v, Vector3.BACK).dot(Vector3.FORWARD)
 		# Stern-first at v, desired velocity zero (stop): braking with bow-forward thrust.
 		var stern_first := 0.0
 		if v > 0.0:
@@ -87,6 +90,19 @@ func _test_limits(profile: MovementProfile) -> void:
 		_check(absf(sternward - a_t) < EPS, "sternward at %.0f m/s keeps %.3f m/s²" % [v, sternward])
 		if v > 0.0:
 			_check(absf(stern_first - a_t * e) < EPS, "stern-first braking at %.0f m/s = %.3f m/s² (physical bow-forward capacity, not the forward-assistance limit)" % [v, stern_first])
+
+
+## The thruster command for a saturated request along `direction` at `velocity` (bow = −Z, no turning), on the whole
+## planar capacity: ShipPilot.allocate() with the speed-dependent limits, then the retro rule, as in ShipPilot.step().
+func _allocated(profile: MovementProfile, velocity: Vector3, direction: Vector3) -> Vector3:
+	var a_t := profile.thruster_strength / profile.mass
+	var e := ShipPilot.effectiveness_of(profile, velocity.length())
+	var command := ShipPilot.allocate(direction * 1000.0, velocity, 1.0, Vector3.FORWARD, profile.pilot_response_time, a_t, a_t * e, profile.forward_directional_acceleration * e)
+	var sternward_limit := ShipPilot.sternward_limit_of(profile, a_t)
+	var sternward := -command.dot(Vector3.FORWARD)
+	if sternward > sternward_limit:
+		command += Vector3.FORWARD * (sternward - sternward_limit)
+	return command
 
 
 ## Velocity change of one tick from `velocity` (bow = −Z, no turning) when the desired velocity differs from it by
@@ -178,7 +194,11 @@ func _test_sideways(profile: MovementProfile, label: String, velocity: Vector3, 
 		# moving case may differ from SPEED_FADE, but only toward more sideways authority and with the same momentum.
 		var now_r: Dictionary = rows["now"]
 		var fade_r: Dictionary = rows[SPEED_FADE]
-		_check(now_r.side_accel_1s >= fade_r.side_accel_1s - EPS and now_r.side_offset_6s >= fade_r.side_offset_6s - EPS and absf(now_r.fwd_speed_6s - fade_r.fwd_speed_6s) < 1e-3, "moving sideways repositioning at least as strong as %s (%.4f vs %.4f m/s², offset %.3f vs %.3f m), forward speed kept (%.3f vs %.3f m/s)" % [SPEED_FADE, now_r.side_accel_1s, fade_r.side_accel_1s, now_r.side_offset_6s, fade_r.side_offset_6s, now_r.fwd_speed_6s, fade_r.fwd_speed_6s])
+		# Momentum-preserving course changes keep the speed SPEED_FADE shed while braking for the new direction, and the
+		# sideways limit falls with speed, so the comparison is against the limit at the speed actually held: the
+		# sideways correction must use it in full, keep the forward speed and reach the same offset.
+		var held_limit := profile.thruster_strength / profile.mass * ShipPilot.effectiveness_of(profile, velocity.length())
+		_check(now_r.side_accel_1s >= held_limit - 2e-3 and now_r.side_offset_6s >= fade_r.side_offset_6s - 0.05 and now_r.fwd_speed_6s >= fade_r.fwd_speed_6s - 1e-3, "moving sideways repositioning uses the full sideways limit at the speed held (%.4f vs %.4f m/s²; %s %.4f at its lower speed), offset %.3f m (%.3f m), forward speed kept (%.3f vs %.3f m/s)" % [now_r.side_accel_1s, held_limit, SPEED_FADE, fade_r.side_accel_1s, now_r.side_offset_6s, fade_r.side_offset_6s, now_r.fwd_speed_6s, fade_r.fwd_speed_6s])
 	for pilot in [SPEED_FADE, BEFORE, "now"]:
 		var r := _run(pilot, profile, velocity, destination, 30.0, true, true)
 		print("   %-8s (with course turn) first 1 s sideways accel %.4f m/s², sideways speed at 2 s %.3f, at 4 s %.3f, sideways offset at 6 s %.2f m, arrived %s at %.2f s" % [pilot, r.side_accel_1s, r.side_speed_2s, r.side_speed_4s, r.side_offset_6s, r.arrived, r.arrive_time])
@@ -316,6 +336,8 @@ func _run(pilot: String, profile: MovementProfile, velocity: Vector3, destinatio
 	targets.destination = destination
 	targets.has_course = course and targets.has_order
 	targets.course_yaw = atan2(-destination.x, -destination.z)
+	# As ShipMovement: a direct order's course follows the bearing until arrival braking (pilots before that rule ignore it).
+	targets.set("course_follows", targets.has_course)
 	var out: Variant = script.Output.new()
 	var r := {side_accel_1s = 0.0, side_speed_2s = 0.0, side_speed_4s = 0.0, arrived = false, arrive_time = -1.0,
 		fwd_speed_6s = 0.0, side_offset_6s = 0.0, stop_time = -1.0, stop_distance = 0.0, peak_decel = 0.0,

@@ -116,9 +116,11 @@ func _test_unchanged() -> void:
 		var old_r := _run("baseline", case[1], case[2], 40.0, case[3])
 		var new_r := _run("now", case[1], case[2], 40.0, case[3])
 		_check(old_r.trace == new_r.trace, "%s identical on every tick" % case[0])
-	var side_old := _run("baseline", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 6.0, true, PackedVector3Array(), false)
-	var side_new := _run("now", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 6.0, true, PackedVector3Array(), false)
-	_check(side_old.trace == side_new.trace, "sideways repositioning at cruise without a course turn identical on every tick")
+	var side_old := _run("baseline", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 40.0, true, PackedVector3Array(), false)
+	var side_new := _run("now", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 40.0, true, PackedVector3Array(), false)
+	# A moving redirect: the guidance now turns the velocity progressively (momentum-preserving course changes), so it is
+	# no longer identical tick by tick; it must still reach the offset and arrive no later.
+	_check(side_new.arrived and side_new.arrive_time <= side_old.arrive_time + 0.05, "sideways repositioning at cruise without a course turn arrives no later (%.2f vs %.2f s)" % [side_new.arrive_time, side_old.arrive_time])
 	var rest_old := _run("baseline", Vector3.ZERO, Vector3(40, 0, 0), 20.0, true, PackedVector3Array(), false)
 	var rest_new := _run("now", Vector3.ZERO, Vector3(40, 0, 0), 20.0, true, PackedVector3Array(), false)
 	_check(rest_old.trace == rest_new.trace, "sideways repositioning from rest without a course turn identical on every tick")
@@ -171,6 +173,8 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 	targets.destination = destination
 	targets.has_course = order and course and destination != Vector3.ZERO
 	targets.course_yaw = atan2(-destination.x, -destination.z)
+	# As ShipMovement: a direct order's course follows the bearing until arrival braking (pilots before that rule ignore it).
+	targets.set("course_follows", targets.has_course and route.is_empty())
 	var course_yaw: float = targets.course_yaw
 	var plan: RouteGuidance.Plan = null
 	var follow: RouteGuidance.Follow = null
@@ -199,7 +203,7 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 		var rate_before: float = state.turn_rate
 		if plan != null and targets.has_order:
 			RouteGuidance.guide(plan, follow, state.position, state.yaw, guided)
-			for field in ["destination", "use_steer", "steer_direction", "steer_distance", "has_course", "course_yaw", "bend_lengths", "bend_radii", "bend_from", "bend_s"]:
+			for field in ["destination", "use_steer", "steer_direction", "steer_distance", "has_course", "course_yaw", "course_follows", "bend_lengths", "bend_radii", "bend_from", "bend_s"]:
 				targets.set(field, guided.get(field))
 		var had_order: bool = targets.has_order
 		script.step(profile, state, targets, DELTA, out)

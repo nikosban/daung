@@ -49,6 +49,11 @@ class Targets:
 	var has_course := false
 	## Course heading in radians.
 	var course_yaw := 0.0
+	## In/out. true: the course follows the steering direction (the bearing to the destination for a direct order)
+	## until the arrival braking curve first falls below the actual speed; step() then holds course_yaw and clears this
+	## for the rest of the order. The caller keeps both between ticks. false: course_yaw is used as given (route
+	## guidance sets its own course every tick).
+	var course_follows := false
 	## Route bends: per route point, its arc length along the route (m) and the radius guidance traces through it
 	## (m, 0 = no bend). Points from bend_from on are ahead of the ship, which is at arc length bend_s. Empty arrays
 	## (the direct order) mean no bends.
@@ -179,7 +184,8 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	if has_order and steer_distance > 0.0:
 		var braking := _planned_braking
 		var lag := braking * profile.pilot_response_time
-		var desired_speed := clampf(sqrt(2.0 * braking * steer_distance) - lag, 0.0, profile.max_speed)
+		var arrival_speed := sqrt(2.0 * braking * steer_distance) - lag
+		var desired_speed := clampf(arrival_speed, 0.0, profile.max_speed)
 		# Route bends (Task #46): slow early enough to reach each bend at the speed its curve can be held at,
 		# v² = a · radius, with the same lag compensation. A bend needs turning, so it plans with the planar share
 		# proportional sharing leaves beside full turning demand, a_t / (1 + 1), not this tick's (possibly straight-
@@ -197,7 +203,66 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 					var hold := minf(bend_braking * radius, bend_hold_speed_squared(profile, thruster_limit / 2.0, radius))
 					var bend_speed := sqrt(hold + 2.0 * bend_braking * to_bend) - bend_lag
 					desired_speed = minf(desired_speed, maxf(bend_speed, 0.0))
-		desired = steer_direction * desired_speed
+		# Course change while moving bow-first (momentum-preserving guidance). When requesting the steering direction at
+		# once would brake (it has a braking part in the allocator's per-hull-axis split) while the arrival and bend laws
+		# do not ask to slow (desired speed >= actual speed), it brakes only because the direction differs, and braking
+		# has the allocator's first priority. In that case the desired
+		# velocity instead turns from the travel direction toward the steering direction only as far as the
+		# acceleration available across the travel direction (main engine plus the directional thrusters' whole
+		# envelope, a_r) can turn it within pilot_response_time, an angle of asin(a_r x response time / speed), at no
+		# more than the actual speed, so the velocity sweeps round with its
+		# momentum (a speed-up, which would widen the turn and with the hull leading take sideways thrust from it, waits
+		# for the new direction); the allocator shares the request with turning as before. Braking stays where the
+		# sweep cannot both reach the steering point and stop there: the desired speed is limited to the speed whose
+		# holdable circle (radius v² / a_s, a_s being a_r within the share proportional sharing leaves beside this
+		# tick's turning demand) leaves a straight leg to the point at least as long as the stopping distance at the
+		# planned braking (the arrival law along the leg the turn ends on; the angle is taken as at most 90°, so a point
+		# abeam or behind uses the abeam circle and the ship does not sweep the long way round), besides the arrival and
+		# bend laws above. Within the step, stern-first, at rest, while the arrival or
+		# bend law asks to slow, or while the full-direction request does not brake, the desired direction
+		# is the steering direction itself, as before.
+		var direction := steer_direction
+		var course_direction := steer_direction
+		if speed > 0.0 and planar_velocity.dot(bow) > 0.0:
+			var angle := travel.angle_to(steer_direction)
+			var side := signf(travel.cross(steer_direction).y)
+			if side == 0.0:
+				side = signf(travel.cross(bow).y) if travel.cross(bow).y != 0.0 else 1.0
+			var across := travel.rotated(Vector3.UP, side * PI / 2.0)
+			var redirect := redirect_acceleration_of(across, bow, profile.main_acceleration, 1.0, thruster_limit, sideways_limit, forward_limit, sternward_limit)
+			var reach := redirect * profile.pilot_response_time / speed
+			var step_angle := asin(reach) if reach < 1.0 else PI
+			if angle > step_angle:
+				course_direction = travel.rotated(Vector3.UP, side * step_angle)
+			var direct_request := (steer_direction * desired_speed - planar_velocity) / profile.pilot_response_time
+			if angle > step_angle and desired_speed >= speed and split(direct_request, planar_velocity, bow, profile.pilot_response_time)[0] != Vector3.ZERO:
+				var shared := redirect_acceleration_of(across, bow, profile.main_acceleration, 1.0 / (1.0 + turn_fraction), thruster_limit, sideways_limit, forward_limit, sternward_limit)
+				direction = travel.rotated(Vector3.UP, side * step_angle)
+				desired_speed = speed
+				# Turn, then stop: on the circle of radius r = v² / a_s the straight leg left to the steering point is
+				# sqrt(d² - 2 r d sin angle); it must hold the stopping distance v² / (2 a) at the planned braking a.
+				# With u = v²: u² / (4 a²) + u x 2 d sin angle / a_s <= d², solved for the largest u.
+				var lateral := steer_distance * (sin(angle) if angle < PI / 2.0 else 1.0)
+				if shared > 0.0 and braking > 0.0:
+					var quad := 1.0 / (4.0 * braking * braking)
+					var lin := 2.0 * lateral / shared
+					var u := (-lin + sqrt(lin * lin + 4.0 * quad * steer_distance * steer_distance)) / (2.0 * quad)
+					desired_speed = minf(desired_speed, sqrt(maxf(u, 0.0)))
+		# Course following (direct orders): the course is the travel direction turned toward the steering direction by
+		# at most the step above (the bearing itself once within it, at rest, at low speed and stern-first), the useful
+		# direction of travel: a wide trajectory never leaves the hull pursuing the heading the order began with, and
+		# while the velocity sweeps the hull stays near the travel direction, where the sideways thrusters (stronger
+		# than forward thrust) turn the velocity; it is continuous whether or not the velocity request sweeps. Until
+		# arrival braking begins: the first tick the arrival law above (before the speed cap) asks for less than the
+		# actual speed. From then on the course holds for the rest of the order (as route guidance freezes its final
+		# approach), so positional corrections and an overshoot never command a turn toward the destination (no late
+		# arrival spin). Turning demand is computed before this, so the course set here steers from the next tick.
+		if targets.course_follows and targets.has_course:
+			if arrival_speed < speed:
+				targets.course_follows = false
+			else:
+				targets.course_yaw = atan2(-course_direction.x, -course_direction.z)
+		desired = direction * desired_speed
 	var _desired_speed := desired.length()
 
 	var requested := (desired - planar_velocity) / profile.pilot_response_time
@@ -409,6 +474,23 @@ static func bend_hold_speed_squared(profile: MovementProfile, hold_limit: float,
 		else:
 			high = v
 	return low * low
+
+
+## The largest acceleration (m/s²) along a unit planar direction from the main engine (up to main_acceleration along the
+## bow) together with the directional thrusters' share of their envelope (sideways and sternward the physical limits,
+## bow-forward the forward-assistance limit, sternward also the retro rule), by bisection.
+static func redirect_acceleration_of(direction: Vector3, bow: Vector3, main_acceleration: float, share: float, thruster_limit: float, sideways_limit: float, forward_limit: float, sternward_limit: float) -> float:
+	var along := direction.dot(bow)
+	var low := 0.0
+	var high := main_acceleration + thruster_limit
+	for _i in 16:
+		var a := (low + high) * 0.5
+		var thrust := direction * a - bow * clampf(along * a, 0.0, main_acceleration)
+		if envelope_norm(thrust, bow, thruster_limit, sideways_limit, forward_limit) <= share and -thrust.dot(bow) <= sternward_limit:
+			low = a
+		else:
+			high = a
+	return low
 
 
 ## Largest sternward directional-thruster acceleration (m/s²): unlimited with retro thrusters.

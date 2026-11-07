@@ -63,6 +63,8 @@ var _turn_rate := 0.0
 ## thruster demand, so it carries over order replacement and stop(); it starts at 0 (no demand before the
 ## first tick). Used only to plan the yaw braking authority.
 var _planar_fraction_prev := 0.0
+## Whether the direct order's course still follows the bearing to the destination (ShipPilot.Targets.course_follows).
+var _course_follows := false
 ## Previous tick's start-of-tick planar speed (m/s), for the pilot's turn planning while the ship slows.
 var _speed_prev := 0.0
 ## Pilot state, targets and last tick's values (read-only debug getters), reused every tick.
@@ -279,9 +281,13 @@ func _physics_process(delta: float) -> void:
 		_pilot_targets.use_steer = false
 		_pilot_targets.has_course = _has_course
 		_pilot_targets.course_yaw = _course_yaw
+		_pilot_targets.course_follows = _course_follows
 		_pilot_targets.bend_from = 0
 		_pilot_targets.bend_radii = PackedFloat32Array()
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
+	if _plan == null:
+		_course_yaw = _pilot_targets.course_yaw
+		_course_follows = _pilot_targets.course_follows
 	if _follow != null:
 		_follow.time += delta
 	if _pilot_out.arrived:
@@ -340,6 +346,7 @@ func _activate(command: Dictionary) -> void:
 		var course := _destination - global_position
 		course.y = 0.0
 		_has_course = course != Vector3.ZERO
+		_course_follows = _has_course
 		if _has_course:
 			_course_yaw = atan2(-course.x, -course.z)
 		_end_navigation()
@@ -375,6 +382,7 @@ func _take_plan() -> void:
 		var course := _destination - global_position
 		course.y = 0.0
 		_has_course = course != Vector3.ZERO
+		_course_follows = _has_course
 		if _has_course:
 			_course_yaw = atan2(-course.x, -course.z)
 	else:

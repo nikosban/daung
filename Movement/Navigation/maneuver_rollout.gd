@@ -84,6 +84,7 @@ var _sweeps := PackedFloat32Array()
 var _sweep := 0.0
 var _direct_has_course := false
 var _direct_course := 0.0
+var _direct_course_follows := false
 ## No-go check (Task #48): the navigation map, its cell size and whether the predicted centre has been on the mesh.
 var _map: RID
 var _cell := 0.25
@@ -126,10 +127,14 @@ func _tick() -> int:
 	if plan.kind == RouteGuidance.Kind.DIRECT:
 		_targets.has_course = _direct_has_course
 		_targets.course_yaw = _direct_course
+		_targets.course_follows = _direct_course_follows
 	_targets.has_order = not _arrived
 	var position := state.position
 	var yaw := state.yaw
 	ShipPilot.step(_profile, state, _targets, _delta, _out)
+	if plan.kind == RouteGuidance.Kind.DIRECT:
+		_direct_course = _targets.course_yaw
+		_direct_course_follows = _targets.course_follows
 	if _out.arrived:
 		_arrived = true
 	var motion := Vector3(state.velocity.x, 0.0, state.velocity.z) * _delta
@@ -174,7 +179,10 @@ func _tick() -> int:
 	if _region >= _regions.size():
 		_drift_time += _delta
 		var off_route := RouteGuidance.planar(state.position - follow.point).length()
-		if _corridor == null and off_route > _profile.arrival_tolerance:
+		# The corridor bounds drift for a ship travelling along its route; a ship crossing it at an angle sweeps round
+		# at its speed (momentum-preserving course changes) instead of braking, so it is predicted tick by tick until its
+		# velocity runs along the route.
+		if _corridor == null and (off_route > _profile.arrival_tolerance or not _moving_along_route()):
 			_drift_time = 0.0
 		if _corridor == null and _drift_time >= DRIFT_CHECK_INTERVAL - RouteGuidance.TIME_EPSILON:
 			_drift_time = 0.0
@@ -240,6 +248,7 @@ func _start_plan() -> void:
 	var course := RouteGuidance.planar(plan.destination - state.position)
 	_direct_has_course = course != Vector3.ZERO
 	_direct_course = atan2(-course.x, -course.z) if _direct_has_course else 0.0
+	_direct_course_follows = _direct_has_course
 
 
 ## Whether the predicted ship follows the route as the re-entry assumption describes: within the arrival tolerance
@@ -254,8 +263,15 @@ func _settled() -> bool:
 		return false
 	if RouteGuidance.planar(state.position - follow.point).length() > _profile.arrival_tolerance:
 		return false
+	return state.velocity.length() > 0.0 and _moving_along_route()
+
+
+## Whether the predicted velocity runs along the current route segment (within SETTLE_ANGLE); true at rest (no drift).
+func _moving_along_route() -> bool:
+	var route := plan.route
+	var direction := RouteGuidance.planar(route[follow.index] - route[follow.index - 1]).normalized()
 	var speed := state.velocity.length()
-	return speed > 0.0 and state.velocity.dot(direction) >= speed * cos(SETTLE_ANGLE)
+	return state.velocity.dot(direction) >= speed * cos(SETTLE_ANGLE)
 
 
 func _buffer(position: Vector3, yaw: float, motion: Vector3, dyaw: float) -> void:

@@ -144,7 +144,9 @@ func _test_turn_then_arrive() -> void:
 		_print_run(pilot, rows[pilot])
 	var r: Dictionary = rows["now"]
 	_check(r.arrived and r.limit_breaches == 0, "arrives without breaching the commanded limit (%.2f s, baseline %.2f s)" % [r.arrive_time, rows["baseline"].arrive_time])
-	_check(r.heading_travel <= 90.0 + 30.0, "no persistent corrective circling (total heading change %.1f° for a 90° turn, baseline %.1f°; turn-rate reversals %d, baseline %d)" % [r.heading_travel, rows["baseline"].heading_travel, r.reversals, rows["baseline"].reversals])
+	# The course follows the useful direction of travel (it is no longer fixed at the order's start), so the hull turns
+	# as far as the trajectory does; circling is a trajectory that loops or a hull that swings beyond it.
+	_check(r.travel_turn < 360.0 and r.heading_travel <= r.travel_turn + 30.0 and r.reversals <= 2, "no persistent corrective circling (trajectory turns %.1f°, hull %.1f° for a 90° order, baseline %.1f°; turn-rate reversals %d, baseline %d)" % [r.travel_turn, r.heading_travel, rows["baseline"].heading_travel, r.reversals, rows["baseline"].reversals])
 
 
 # 9. Route following and final approach (RouteGuidance on an open-space polyline with two 45° bends).
@@ -172,6 +174,8 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 	targets.destination = destination
 	targets.has_course = order and destination != Vector3.ZERO
 	targets.course_yaw = atan2(-destination.x, -destination.z)
+	# As ShipMovement: a direct order's course follows the bearing until arrival braking (pilots before that rule ignore it).
+	targets.set("course_follows", targets.has_course and route.is_empty())
 	var plan: RouteGuidance.Plan = null
 	var follow: RouteGuidance.Follow = null
 	var guided := ShipPilot.Targets.new()
@@ -182,7 +186,7 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 	var course := targets.course_yaw as float
 	var r := {trace = PackedVector3Array(), arrived = false, arrive_time = -1.0, limit_breaches = 0, both_ticks = 0,
 		max_angle_fast = 0.0, over_curve = 0.0, over_time = 0.0, course_reached = -1.0, after_max_angle = 0.0, final_angle = 0.0,
-		reversals = 0, heading_travel = 0.0, min_speed = INF, off_route = 0.0, samples = []}
+		reversals = 0, heading_travel = 0.0, travel_turn = 0.0, min_speed = INF, off_route = 0.0, samples = []}
 	var last_sign := 0
 	var times := [1.0, 2.0, 5.0, 10.0, 20.0, 40.0] if not dense else [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0]
 	var ticks := roundi(seconds / DELTA)
@@ -194,7 +198,7 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 		var yaw_before: float = state.yaw
 		if plan != null and targets.has_order:
 			RouteGuidance.guide(plan, follow, state.position, state.yaw, guided)
-			for field in ["destination", "use_steer", "steer_direction", "steer_distance", "has_course", "course_yaw", "bend_lengths", "bend_radii", "bend_from", "bend_s"]:
+			for field in ["destination", "use_steer", "steer_direction", "steer_distance", "has_course", "course_yaw", "course_follows", "bend_lengths", "bend_radii", "bend_from", "bend_s"]:
 				targets.set(field, guided.get(field))
 			course = targets.course_yaw
 		script.step(_profile if pilot == "now" else _old_profile, state, targets, DELTA, out)
@@ -220,6 +224,9 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 		if absf(state.turn_rate) > 1e-4 and out.thruster_command.length() > 0.1:
 			r.both_ticks += 1
 		r.heading_travel += rad_to_deg(absf(state.yaw - yaw_before))
+		var v_after: Vector3 = state.velocity
+		if speed > 1.0 and v_after.length() > 1.0:
+			r.travel_turn += rad_to_deg(absf(wrapf(atan2(-v_after.x, -v_after.z) - atan2(-v.x, -v.z), -PI, PI)))
 		var rate_sign := 0
 		if absf(state.turn_rate) > deg_to_rad(0.5):
 			rate_sign = 1 if state.turn_rate > 0.0 else -1
