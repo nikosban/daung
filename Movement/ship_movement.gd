@@ -41,11 +41,10 @@ extends CharacterBody3D
 ## the order as from rest. The decision is never re-evaluated; a later move or stop replaces it. The planning job is
 ## told, so its predictions brake first as well.
 ##
-## Navigation (Task #46): each activated move starts one planning job (Navigator). Until the job finishes the ship
-## brakes as it does without an order; the job's plan is then handed to the pilot once and followed every tick (the
-## unchanged direct order, a route around obstacles, or a departure that holds heading before following the route).
-## A declined plan ends the order. Nothing is re-planned without a new order; a later move or stop cancels the job.
-## The pilot itself is ShipPilot; this script stays the single writer of position, velocity and yaw.
+## Navigation (#60): one ordinary Godot route, with the existing destination resolver. A pending job does not
+## remove the active pilot target. Clear space uses a conservative stopping-room query; only nearby constraints
+## need local pilot/hull lookahead. Physical clearance can request braking; an unnegotiable route stays blocked.
+## No navigation code writes a transform or velocity. Alternative passages belong to a later ticket.
 
 @export var profile: MovementProfile
 
@@ -91,6 +90,13 @@ var _follow: RouteGuidance.Follow
 ## Outcome of the latest activated command for F3 (Task #46): planning, accepted, declined with its reason, arrived,
 ## stopped or static-contact stop. Kept after the order ends.
 var _order_status := "no order yet"
+var _navigation_baseline := false
+var _clearance_status := ""
+var _blocked := false
+var _reposition_direction := Vector3.ZERO
+var _reposition_remaining := 0.0
+var _reposition_used := 0.0
+var _navigation_on_mesh := false
 
 
 func _ready() -> void:
@@ -104,6 +110,11 @@ func _ready() -> void:
 			hull = child
 			break
 	_probe = HullProbe.new(self, hull)
+	Navigator.register_ship(self)
+
+
+func _exit_tree() -> void:
+	Navigator.unregister_ship(self)
 
 
 ## Receives an order to the point. After the reaction delay it replaces the active order; the course is
@@ -244,7 +255,7 @@ func get_thruster_command() -> Vector3:
 ## The latest activated command's outcome as text (F3 debugging): planning, accepted, declined with its reason, arrived,
 ## stopped or static-contact stop. It stays after the order ends.
 func get_order_status() -> String:
-	return _order_status
+	return _order_status + ("; " + _clearance_status if _has_order and _clearance_status != "" else "")
 
 
 ## Reversal rule (F3): the latest command's course-change angle at activation in degrees (-1 = not measured: a stop, a
@@ -261,7 +272,7 @@ func is_reversal_braking_complete() -> bool:
 	return _reversal and not _brake_first
 
 
-## Whether the active order is still waiting for its navigation plan (the ship brakes meanwhile).
+## Whether the active order is still waiting for its ordinary route (movement can already respond).
 func is_planning() -> bool:
 	return _job != null
 
@@ -287,7 +298,9 @@ func _physics_process(delta: float) -> void:
 		_activate(_pending.pop_front())
 	Navigator.service()
 	if _job != null and _job.status != Navigator.Status.PENDING:
+		var handoff_started := Navigator.measure()
 		_take_plan()
+		Navigator.account(handoff_started)
 
 	var bow := -global_basis.z
 	bow.y = 0.0
@@ -298,7 +311,8 @@ func _physics_process(delta: float) -> void:
 	_pilot_state.turn_rate = _turn_rate
 	_pilot_state.planar_fraction_prev = _planar_fraction_prev
 	_pilot_state.speed_prev = _speed_prev
-	_pilot_targets.has_order = _has_order and _job == null
+	var guidance_started := Navigator.measure()
+	_pilot_targets.has_order = _has_order
 	if _plan != null and _has_order:
 		RouteGuidance.guide(_plan, _follow, global_position, rotation.y, _pilot_targets)
 	else:
@@ -310,17 +324,41 @@ func _physics_process(delta: float) -> void:
 		_pilot_targets.bend_from = 0
 		_pilot_targets.bend_radii = PackedFloat32Array()
 	_pilot_targets.brake_first = _brake_first
+	if _has_order and not _navigation_baseline and not _blocked:
+		var map := get_world_3d().navigation_map
+		if not _navigation_on_mesh and NavigationServer3D.map_get_iteration_id(map) > 0:
+			_navigation_on_mesh = RouteGuidance.planar(NavigationServer3D.map_get_closest_point(map, global_position) - global_position).length() <= NavigationServer3D.map_get_cell_size(map)
+		var clearance := Navigator.Clearance.SLOW if _reposition_remaining > 0.0 else Navigator.clearance(profile, _probe, _pilot_state, _pilot_targets, delta, map, _navigation_on_mesh)
+		_clearance_status = "open stopping room" if clearance == Navigator.Clearance.OPEN else "local hull/stop clearance"
+		if clearance == Navigator.Clearance.SLOW:
+			if _reposition_remaining <= 0.0 and velocity.length() <= profile.arrival_speed_tolerance and _reposition_used < profile.departure_max_time:
+				_reposition_direction = HullProbe.escape_direction(map, global_position)
+				_reposition_remaining = minf(profile.departure_step_time, profile.departure_max_time - _reposition_used)
+			if _reposition_remaining > 0.0 and Navigator.reposition(profile, _probe, _pilot_state, _pilot_targets, delta, map, _reposition_direction, _navigation_on_mesh):
+				_reposition_remaining = maxf(_reposition_remaining - delta, 0.0)
+				if _reposition_remaining <= RouteGuidance.TIME_EPSILON:
+					_reposition_remaining = 0.0
+				_reposition_used = minf(_reposition_used + delta, profile.departure_max_time)
+				_clearance_status = "repositioning for physical clearance"
+			else:
+				_pilot_targets.has_order = false
+				_clearance_status = "slowing for physical clearance"
+				if velocity.length() <= ManeuverRollout.REST_SPEED:
+					_blocked = true
+					_clearance_status = "blocked (unresolved): available route needs a different maneuver"
+	if _blocked:
+		_pilot_targets.has_order = false
+	Navigator.account(guidance_started, true)
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
 	_brake_first = _pilot_targets.brake_first
-	if _plan == null:
+	if _plan == null and _clearance_status != "repositioning for physical clearance":
 		_course_yaw = _pilot_targets.course_yaw
 		_course_follows = _pilot_targets.course_follows
 	if _follow != null:
 		_follow.time += delta
 	if _pilot_out.arrived:
 		_has_order = false
-		_plan = null
-		_follow = null
+		_end_navigation()
 		_order_status = "arrived at (%.1f, %.1f) at %.2f s" % [_destination.x, _destination.z, _clock]
 
 	_turn_rate = _pilot_state.turn_rate
@@ -366,6 +404,11 @@ func _receive(kind: String, world_position: Vector3) -> void:
 
 func _activate(command: Dictionary) -> void:
 	if command.kind == "move":
+		_navigation_baseline = false
+		_clearance_status = ""
+		_blocked = false
+		_reposition_remaining = 0.0
+		_reposition_used = 0.0
 		var world_position: Vector3 = command.position
 		_destination = Vector3(world_position.x, global_position.y, world_position.z)
 		_requested = _destination
@@ -383,6 +426,9 @@ func _activate(command: Dictionary) -> void:
 		_job = Navigator.start_job(self, _probe, world_position, _brake_first)
 		_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
 	else:
+		_clearance_status = ""
+		_blocked = false
+		_reposition_remaining = 0.0
 		_has_order = false
 		_reversal_angle = -1.0
 		_reversal = false
@@ -406,6 +452,7 @@ func _take_plan() -> void:
 	if job.status != Navigator.Status.DONE:
 		return
 	_destination = job.destination
+	_navigation_baseline = job.baseline
 	_order_status = "accepted (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, ["direct", "route", "departure"][job.plan.kind], job.summary.get_slice(";", 0)]
 	if job.resolution != "":
 		_order_status += "; %s" % job.resolution
@@ -442,11 +489,13 @@ func _print_resolution(job: Navigator.Job) -> void:
 
 ## Cancels the planning job and drops the plan (a new command activated, or the order ended).
 func _end_navigation() -> void:
+	var start := Navigator.measure()
 	if _job != null:
 		_job.cancel()
 	_job = null
 	_plan = null
 	_follow = null
+	Navigator.account(start)
 
 
 func _describe(command: Dictionary) -> String:

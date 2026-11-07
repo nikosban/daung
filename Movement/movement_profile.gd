@@ -60,8 +60,8 @@ extends Resource
 ## than its reach is empty (a cheap shortcut used to find the route sections that need a full hull check). Never
 ## blocks a ship that is touching an obstacle from moving away.
 @export_range(0.05, 5.0, 0.01, "suffix:m") var plan_clearance_buffer: float = 0.5
-## Departures (Task #46): when a ship must first brake or back off before following a route, the planner tries
-## departures lasting one, two, … steps of this length, up to departure_max_time, shortest first.
+## Physical clearance repositioning (#60): held-heading requests last this long before route guidance is tried
+## again, up to departure_max_time total commanded repositioning per order. The pilot and hull checks still apply.
 @export_range(0.1, 2.0, 0.05, "suffix:s") var departure_step_time: float = 0.5
 @export_range(0.5, 10.0, 0.1, "suffix:s") var departure_max_time: float = 4.0
 ## No-go tolerance (Task #48, provisional): a predicted maneuver is rejected when the predicted ship centre, once on

@@ -14,11 +14,16 @@ var _game: Node3D
 var _ship: ShipMovement
 var _armed := false
 var _warmup := 0
+var _warmup_limit := 12
+var _check := false
+var _entered_mesh := false
+var _intrusion_after_entry := 0.0
 var _start := 0.0
 var _redirect_at := -1.0
 var _redirected := false
 var _first_activation := -1.0
 var _response := -1.0
+var _planning_done := -1.0
 var _arrival := -1.0
 var _rest_ticks := 0
 var _max_off_mesh := 0.0
@@ -28,6 +33,7 @@ var _min_speed := INF
 var _contacts := 0
 var _worst_navigation := 0
 var _overruns := 0
+var _overrun_events: Array = []
 var _last_status := ""
 var _events: Array = []
 var _trace := PackedFloat64Array()
@@ -39,6 +45,10 @@ func _initialize() -> void:
 			_case = arg.trim_prefix("--case=")
 		if arg.begins_with("--output="):
 			_output = arg.trim_prefix("--output=")
+		if arg.begins_with("--warmup="):
+			_warmup_limit = int(arg.trim_prefix("--warmup="))
+		if arg == "--check":
+			_check = true
 	_start_scene.call_deferred()
 
 func _start_scene() -> void:
@@ -56,7 +66,7 @@ func _start_scene() -> void:
 func _sample(_delta: float) -> void:
 	if not _armed:
 		_warmup += 1
-		if _warmup < 12:
+		if _warmup < _warmup_limit:
 			return
 		# A fixed-fps headless run can advance many ticks before the nav worker finishes.
 		# Map iteration alone is insufficient: wait for actual polygon ownership.
@@ -71,6 +81,20 @@ func _sample(_delta: float) -> void:
 			_ship.move_to(Vector3(170, 0, -90))
 		elif _case == "detour":
 			_ship.move_to(Vector3(130, 0, 0))
+		elif _case == "tight":
+			_ship.global_position = Vector3(120, 0, 235)
+			_ship.move_to(Vector3(120, 0, 330))
+		elif _case == "escape":
+			_ship.global_position = Vector3(66.7, 0, 0)
+			_ship.rotation.y = -PI / 2.0
+			_ship.move_to(Vector3.ZERO)
+		elif _case == "replacement":
+			# Both commands become due on the same tick. The unresolved asteroid request must never take over later.
+			_ship.move_to(Vector3(83, 0, 0))
+			_ship.move_to(Vector3(60, 0, -40))
+		elif _case == "redirect":
+			_ship.move_to(Vector3(130, 0, 0))
+			_redirect_at = 8.0
 		elif _case == "crab10":
 			_ship.move_to(Vector3(10, 0, 0))
 		elif _case.begins_with("turn"):
@@ -89,7 +113,7 @@ func _sample(_delta: float) -> void:
 	var time := _ship.get_clock() - _start
 	if _redirect_at >= 0.0 and not _redirected and time + 1e-7 >= _redirect_at:
 		_redirected = true
-		_ship.move_to(Vector3(240, 0, -201))
+		_ship.move_to(Vector3(240, 0, -201) if _case.begins_with("a2_") else Vector3(60, 0, -40))
 		_events.push_back({event = "redirect_received", time = time, due = time + _ship.profile.reaction_delay})
 	if _first_activation < 0.0 and _ship.get_last_activated_time() >= _start:
 		_first_activation = time
@@ -99,8 +123,10 @@ func _sample(_delta: float) -> void:
 		_last_status = status
 		if status.begins_with("static-contact"):
 			_contacts += 1
-	if _first_activation >= 0.0 and _response < 0.0 and not _ship.is_planning():
+	if _first_activation >= 0.0 and _response < 0.0 and (_ship.get_main_command() > 0.0 or _ship.get_thruster_command().length() > 0.0):
 		_response = time
+	if _first_activation >= 0.0 and _planning_done < 0.0 and not _ship.is_planning():
+		_planning_done = time
 	if status.begins_with("arrived") and _arrival < 0.0 and (_redirect_at < 0.0 or _redirected):
 		_arrival = time
 	var position := _ship.global_position
@@ -110,6 +136,10 @@ func _sample(_delta: float) -> void:
 	if absf(position.x) < 380.0 and absf(position.z) < 380.0:
 		var closest := NavigationServer3D.map_get_closest_point(_ship.get_world_3d().navigation_map, position)
 		var off_mesh := RouteGuidance.planar(closest - position).length()
+		if off_mesh <= NavigationServer3D.map_get_cell_size(_ship.get_world_3d().navigation_map):
+			_entered_mesh = true
+		if _entered_mesh:
+			_intrusion_after_entry = maxf(_intrusion_after_entry, off_mesh)
 		if off_mesh > _max_off_mesh:
 			_max_off_mesh = off_mesh
 			_worst_mesh_sample = {time = time, position = str(position), closest = str(closest), iteration = NavigationServer3D.map_get_iteration_id(_ship.get_world_3d().navigation_map)}
@@ -119,6 +149,7 @@ func _sample(_delta: float) -> void:
 	_worst_navigation = maxi(_worst_navigation, used)
 	if used > 1500:
 		_overruns += 1
+		_overrun_events.push_back({time = time, usec = used, status = status})
 	_trace.append_array(PackedFloat64Array([time, position.x, position.z, _ship.velocity.x, _ship.velocity.z,
 		_ship.rotation.y, _ship.get_turn_rate(), _ship.get_course_heading(), _ship.get_desired_speed(), float(_ship.has_order())]))
 	if time > maxf(_redirect_at + 1.0, 1.0) and not _ship.has_order() and _ship.get_pending_count() == 0 and speed < 0.01:
@@ -134,11 +165,12 @@ func _finish(time: float) -> void:
 	hashing.start(HashingContext.HASH_SHA256)
 	hashing.update(bytes)
 	var summary := {case = _case, engine = Engine.get_version_info().string, physics_hz = Engine.physics_ticks_per_second,
-		first_activation = _first_activation, first_plan_response = _response, arrival = _arrival, finish = time,
+		first_activation = _first_activation, first_physical_response = _response, planning_done = _planning_done, arrival = _arrival, finish = time,
 		position = [_ship.global_position.x, _ship.global_position.z], final_speed = _ship.velocity.length(),
-		max_no_go_excursion = _max_off_mesh, worst_mesh_sample = _worst_mesh_sample, closest_asteroid_centre = _closest_centre,
+		max_no_go_excursion = _max_off_mesh, no_go_after_mesh_entry = _intrusion_after_entry,
+		worst_mesh_sample = _worst_mesh_sample, closest_asteroid_centre = _closest_centre,
 		redirect_min_speed = _min_speed if _min_speed < INF else null, contacts = _contacts,
-		worst_counted_navigation_usec = _worst_navigation, counted_overruns = _overruns,
+		worst_counted_navigation_usec = _worst_navigation, counted_overruns = _overruns, overrun_events = _overrun_events,
 		status = _ship.get_order_status(), trace_sha256 = hashing.finish().hex_encode(), events = _events}
 	DirAccess.make_dir_recursive_absolute(_output)
 	var file := FileAccess.open(_output.path_join(_case + ".json"), FileAccess.WRITE)
@@ -146,4 +178,8 @@ func _finish(time: float) -> void:
 	file = FileAccess.open(_output.path_join(_case + ".trace"), FileAccess.WRITE)
 	file.store_buffer(bytes)
 	print("STAGE1_SCENE_RESULT ", JSON.stringify(summary))
-	quit()
+	var finished := (_arrival >= 0.0) if _case != "stop" else (not _ship.has_order() and _ship.velocity.length() < 0.01)
+	var passed := finished and _contacts == 0 and _intrusion_after_entry <= _ship.profile.no_go_tolerance + 1e-4 and _overruns == 0
+	if _check:
+		print("SCENE_CHECK ", "PASS" if passed else "FAIL", " ", _case)
+	quit(1 if _check and not passed else 0)
