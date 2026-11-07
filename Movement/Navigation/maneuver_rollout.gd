@@ -97,6 +97,65 @@ var _map: RID
 var _cell := 0.25
 var _on_mesh := false
 
+## Stage 1 (#60) gate: the same pilot/hull prediction can verify a finite segment followed by physical braking.
+## This mode is not connected to live navigation until the response/budget gate passes. No full-flight shortcut
+## or legacy 20-second rest timeout can approve a segment. A clear prefix alone never returns PASS.
+var segment_ticks := -1
+var segment_clear := false
+var segment_verified := false
+var segment_state: ShipPilot.State
+var segment_follow: RouteGuidance.Follow
+var segment_brake_first := false
+var segment_on_mesh := false
+var segment_course := 0.0
+var segment_course_follows := false
+var order_generation := 0
+var anchor_frame := -1
+var _segment_start: ShipPilot.State
+var _segment_map_iteration := 0
+var _segment_seed_checked := false
+var _segment_tail := false
+
+
+## Select finite-segment verification before run(). The snapshot and guidance progress belong to this order;
+## on_mesh carries the existing no-go history, rather than renewing the starting-inside exemption.
+func verify_segment(ticks: int, generation: int, frame: int, progress: RouteGuidance.Follow = null, on_mesh := false) -> void:
+	segment_ticks = maxi(ticks, 1)
+	order_generation = generation
+	anchor_frame = frame
+	_segment_start = state.copy()
+	_segment_map_iteration = NavigationServer3D.map_get_iteration_id(_map)
+	_on_mesh = on_mesh
+	if progress != null:
+		follow = _copy_follow(progress)
+
+
+## Initial-state handoff gate. The caller additionally owns candidate/course identity and cancellation. Compare
+## every pilot field: previous demand/speed influence future yaw even when position and velocity match.
+func segment_matches(actual: ShipPilot.State, generation: int, frame: int) -> bool:
+	if not segment_verified or generation != order_generation or frame != anchor_frame:
+		return false
+	if NavigationServer3D.map_get_iteration_id(_map) != _segment_map_iteration:
+		return false
+	var expected := _segment_start
+	var difference := actual.position.distance_to(expected.position) + actual.velocity.distance_to(expected.velocity) \
+		+ absf(wrapf(actual.yaw - expected.yaw, -PI, PI)) + actual.bow.distance_to(expected.bow) \
+		+ absf(actual.turn_rate - expected.turn_rate) + absf(actual.speed_prev - expected.speed_prev) \
+		+ absf(actual.planar_fraction_prev - expected.planar_fraction_prev)
+	return difference <= Navigator.HANDOFF_TOLERANCE and failure == ""
+
+
+static func _copy_follow(source: RouteGuidance.Follow) -> RouteGuidance.Follow:
+	var copy := RouteGuidance.Follow.new()
+	copy.index = source.index
+	copy.frozen = source.frozen
+	copy.frozen_course = source.frozen_course
+	copy.time = source.time
+	copy.switched = source.switched
+	copy.s = source.s
+	copy.point = source.point
+	return copy
+
 
 func _init(p_plan: RouteGuidance.Plan, start: ShipPilot.State, profile: MovementProfile, probe: HullProbe, regions: Array[Vector2], final_hazard: bool, delta: float, map: RID, reversal := false) -> void:
 	_reversal = reversal
@@ -131,12 +190,32 @@ func _tick() -> int:
 		return FAIL
 	if wait_ticks > 0:
 		return _wait_tick()
-	RouteGuidance.guide(plan, follow, state.position, state.yaw, _targets)
+	if segment_ticks >= 0:
+		if not _segment_seed_checked:
+			_segment_seed_checked = true
+			if not _centre_allowed():
+				failure = "segment starts outside the permitted no-go boundary"
+				return FAIL
+		if not _segment_tail and simulated_ticks >= segment_ticks:
+			if not _flush():
+				return FAIL
+			segment_clear = true
+			segment_state = state.copy()
+			segment_follow = _copy_follow(follow)
+			segment_brake_first = _brake_first
+			segment_on_mesh = _on_mesh
+			segment_course = _direct_course
+			segment_course_follows = _direct_course_follows
+			_segment_tail = true
+	if not _segment_tail:
+		RouteGuidance.guide(plan, follow, state.position, state.yaw, _targets)
 	if plan.kind == RouteGuidance.Kind.DIRECT:
 		_targets.has_course = _direct_has_course
 		_targets.course_yaw = _direct_course
 		_targets.course_follows = _direct_course_follows
-	_targets.has_order = not _arrived
+	_targets.has_order = not _arrived and not _segment_tail
+	if _segment_tail:
+		_targets.has_course = false
 	_targets.brake_first = _brake_first
 	var position := state.position
 	var yaw := state.yaw
@@ -158,6 +237,12 @@ func _tick() -> int:
 	if not find_clear and not _centre_allowed():
 		failure = "centre enters the no-go zone at (%.1f, %.1f)" % [state.position.x, state.position.z]
 		return FAIL
+	if segment_ticks >= 0:
+		if _segment_tail and state.velocity.length() <= REST_SPEED:
+			if not _flush():
+				return FAIL
+			return _segment_rest()
+		return RUNNING
 	if find_clear:
 		if _probe.cylinder_clear(state.position, _probe.reach + _profile.plan_clearance_buffer):
 			if not _flush():
@@ -216,6 +301,41 @@ func _tick() -> int:
 				return FAIL
 			_reenter(_regions[_region].x)
 	return RUNNING
+
+
+## Cover the infinite proportional-braking remainder, rather than treating REST_SPEED as an instantaneous stop.
+## With a linear, positive directional curve and delta <= response time, sufficiently slow no-order motion is
+## unsaturated on every hull axis and decays geometrically. Nonlinear/zero curves get no shortcut (unproven).
+func _segment_rest() -> int:
+	if _delta > _profile.pilot_response_time:
+		failure = "stopping remainder unproven at this physics delta"
+		return FAIL
+	var curve := _profile.directional_thrust_curve
+	var minimum := 1.0
+	for i in curve.point_count:
+		minimum = minf(minimum, clampf(curve.get_point_position(i).y, 0.0, 1.0))
+		if i + 1 < curve.point_count and (curve.get_point_right_mode(i) != Curve.TANGENT_LINEAR or curve.get_point_left_mode(i + 1) != Curve.TANGENT_LINEAR):
+			failure = "stopping remainder unproven for nonlinear directional curve"
+			return FAIL
+	var rating := _profile.thruster_strength / _profile.mass
+	var weakest := minf(rating * minimum, ShipPilot.sternward_limit_of(_profile, rating))
+	var speed := state.velocity.length()
+	if weakest <= 0.0 or speed / _profile.pilot_response_time > weakest:
+		failure = "stopping remainder still thrust-limited"
+		return FAIL
+	# Ideal remaining length <= speed * response_time. Twice that bounds float-rounded position increments
+	# (a nonzero increment rounds by at most its own size); the hull is fixed during no-order braking.
+	var remainder := 2.0 * speed * _profile.pilot_response_time
+	if _probe.overlaps(state.position, state.yaw, remainder):
+		failure = "stopping remainder overlaps"
+		return FAIL
+	var closest := NavigationServer3D.map_get_closest_point(_map, state.position)
+	# Distance to this fixed on-mesh point bounds distance to the mesh for every point in the remainder ball.
+	if RouteGuidance.planar(closest - state.position).length() + remainder > _profile.no_go_tolerance:
+		failure = "stopping remainder no-go clearance unproven"
+		return FAIL
+	segment_verified = true
+	return PASS
 
 
 ## One predicted tick of the braking before the plan starts (no order: the pilot brakes, rotation stops), hull-checked
