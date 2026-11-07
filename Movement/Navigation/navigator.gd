@@ -29,9 +29,10 @@ static var _frame_used := 0
 
 
 ## Starts the planning job for an activated move. The caller keeps the job and cancels it when a later command
-## activates.
-static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3) -> Job:
-	var job := Job.new(ship, probe, click)
+## activates. brake_first: the order was classified a reversal (ShipMovement), so every prediction of it brakes to near
+## rest first, and a route with no hazard regions is still predicted (the braking runs off the route).
+static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, brake_first := false) -> Job:
+	var job := Job.new(ship, probe, click, brake_first)
 	_jobs.push_back(job)
 	return job
 
@@ -103,8 +104,10 @@ class Job:
 	var _holding := false
 	var _held_frames := 0
 	var _tick_usec := 0
+	var _brake_first := false
 
-	func _init(ship: ShipMovement, probe: HullProbe, p_click: Vector3) -> void:
+	func _init(ship: ShipMovement, probe: HullProbe, p_click: Vector3, brake_first: bool) -> void:
+		_brake_first = brake_first
 		_ship = ship
 		_probe = probe
 		_profile = ship.profile
@@ -144,8 +147,8 @@ class Job:
 				RoutePlanner.DECLINED:
 					_decline(_route.note)
 				RoutePlanner.ROUTE:
-					if _route.needs_prediction:
-						_maneuver = ManeuverPlanner.new(_route.route_plan, _route.primary_plan, _route.regions, _route.final_hazard, _profile, _probe, _ship.get_pilot_state, _ship.get_physics_process_delta_time(), Navigator.BUDGET.plan_prediction_per_order, _ship.get_world_3d().navigation_map)
+					if _route.needs_prediction or _brake_first:
+						_maneuver = ManeuverPlanner.new(_route.route_plan, _route.primary_plan, _route.regions, _route.final_hazard, _profile, _probe, _ship.get_pilot_state, _ship.get_physics_process_delta_time(), Navigator.BUDGET.plan_prediction_per_order, _ship.get_world_3d().navigation_map, _brake_first)
 					else:
 						_finish(_route.primary_plan, "no hazard regions")
 		if _holding:

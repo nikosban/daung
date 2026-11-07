@@ -67,13 +67,16 @@ var _map: RID
 ## Physics frame of the anchor snapshot, and the braking wait (ticks) the validation predicts before handoff.
 var _anchor_frame := 0
 var _wait := 0
+## The order was classified a reversal: every rollout brakes to near rest first (ShipPilot.Targets.brake_first).
+var _brake_first := false
 ## After PASS with validation: the physics frame on which the plan must be handed over and the state the ship must
 ## have then; -1 when the plan applies at once (the ship had not moved).
 var hold_frame := -1
 var handoff_state: ShipPilot.State
 
 
-func _init(route_plan: RouteGuidance.Plan, primary: RouteGuidance.Plan, regions: Array[Vector2], final_hazard: bool, profile: MovementProfile, probe: HullProbe, live_state: Callable, delta: float, prediction_limit: float, map: RID) -> void:
+func _init(route_plan: RouteGuidance.Plan, primary: RouteGuidance.Plan, regions: Array[Vector2], final_hazard: bool, profile: MovementProfile, probe: HullProbe, live_state: Callable, delta: float, prediction_limit: float, map: RID, brake_first := false) -> void:
+	_brake_first = brake_first
 	_map = map
 	_route_plan = route_plan
 	_primary = primary
@@ -219,7 +222,7 @@ func _departure(local_direction: Vector3, switch_time: float) -> RouteGuidance.P
 
 
 func _new_rollout(plan: RouteGuidance.Plan) -> ManeuverRollout:
-	return ManeuverRollout.new(plan, _snapshot, _profile, _probe, _regions, _final_hazard, _delta, _map)
+	return ManeuverRollout.new(plan, _snapshot, _profile, _probe, _regions, _final_hazard, _delta, _map, _brake_first)
 
 
 func _same_state(a: ShipPilot.State, b: ShipPilot.State) -> bool:

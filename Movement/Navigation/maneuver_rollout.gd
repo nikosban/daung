@@ -16,6 +16,10 @@ extends RefCounted
 ## order), then the plan from that state (handoff_state), which is where the real ship starts it. A direct plan's
 ## course is taken from the position where the plan starts, as ShipMovement does at handoff.
 ##
+## Reversal (brake_first): the order was classified a reversal when it activated, so the plan starts with the same
+## braking commitment as real flight (ShipPilot.Targets.brake_first, carried between ticks). Until it completes, the
+## prediction never skips a stretch or passes on the drift corridor: the braking runs off the route.
+##
 ## No-go zone (Task #48): once the predicted centre has been on the navigation mesh (within one map cell), a tick
 ## that takes it more than MovementProfile.no_go_tolerance beyond the mesh edge fails the maneuver ("centre enters
 ## the no-go zone"). A ship starting inside a zone may leave it. The rotating hull may cross the edge (only the centre
@@ -85,13 +89,17 @@ var _sweep := 0.0
 var _direct_has_course := false
 var _direct_course := 0.0
 var _direct_course_follows := false
+## Reversal braking: the order's classification, and whether the predicted braking is still to complete.
+var _reversal := false
+var _brake_first := false
 ## No-go check (Task #48): the navigation map, its cell size and whether the predicted centre has been on the mesh.
 var _map: RID
 var _cell := 0.25
 var _on_mesh := false
 
 
-func _init(p_plan: RouteGuidance.Plan, start: ShipPilot.State, profile: MovementProfile, probe: HullProbe, regions: Array[Vector2], final_hazard: bool, delta: float, map: RID) -> void:
+func _init(p_plan: RouteGuidance.Plan, start: ShipPilot.State, profile: MovementProfile, probe: HullProbe, regions: Array[Vector2], final_hazard: bool, delta: float, map: RID, reversal := false) -> void:
+	_reversal = reversal
 	plan = p_plan
 	state = start.copy()
 	_profile = profile
@@ -129,9 +137,11 @@ func _tick() -> int:
 		_targets.course_yaw = _direct_course
 		_targets.course_follows = _direct_course_follows
 	_targets.has_order = not _arrived
+	_targets.brake_first = _brake_first
 	var position := state.position
 	var yaw := state.yaw
 	ShipPilot.step(_profile, state, _targets, _delta, _out)
+	_brake_first = _targets.brake_first
 	if plan.kind == RouteGuidance.Kind.DIRECT:
 		_direct_course = _targets.course_yaw
 		_direct_course_follows = _targets.course_follows
@@ -182,7 +192,7 @@ func _tick() -> int:
 		# The corridor bounds drift for a ship travelling along its route; a ship crossing it at an angle sweeps round
 		# at its speed (momentum-preserving course changes) instead of braking, so it is predicted tick by tick until its
 		# velocity runs along the route.
-		if _corridor == null and (off_route > _profile.arrival_tolerance or not _moving_along_route()):
+		if _corridor == null and (off_route > _profile.arrival_tolerance or not _moving_along_route() or _brake_first):
 			_drift_time = 0.0
 		if _corridor == null and _drift_time >= DRIFT_CHECK_INTERVAL - RouteGuidance.TIME_EPSILON:
 			_drift_time = 0.0
@@ -249,11 +259,14 @@ func _start_plan() -> void:
 	_direct_has_course = course != Vector3.ZERO
 	_direct_course = atan2(-course.x, -course.z) if _direct_has_course else 0.0
 	_direct_course_follows = _direct_has_course
+	_brake_first = _reversal
 
 
 ## Whether the predicted ship follows the route as the re-entry assumption describes: within the arrival tolerance
 ## of it, velocity and hull along it, no turn.
 func _settled() -> bool:
+	if _brake_first:
+		return false
 	if plan.kind == RouteGuidance.Kind.DEPART and not follow.switched:
 		return false
 	var route := plan.route

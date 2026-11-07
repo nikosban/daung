@@ -35,6 +35,12 @@ extends CharacterBody3D
 ## Static contact (Task #44): driving into a stationary StaticBody3D ends the active order and zeroes planar
 ## velocity and turn rate; see _stop_on_static_contact().
 ##
+## Reversal rule: when a move activates, the angle between the actual planar velocity and the direction to the click
+## is measured once (ShipPilot.reversal_angle_of()). At or beyond profile.near_opposite_angle the order commits to
+## braking first (ShipPilot.Targets.brake_first): the pilot brakes to near rest with no commanded turn, then follows
+## the order as from rest. The decision is never re-evaluated; a later move or stop replaces it. The planning job is
+## told, so its predictions brake first as well.
+##
 ## Navigation (Task #46): each activated move starts one planning job (Navigator). Until the job finishes the ship
 ## brakes as it does without an order; the job's plan is then handed to the pilot once and followed every tick (the
 ## unchanged direct order, a route around obstacles, or a departure that holds heading before following the route).
@@ -65,6 +71,11 @@ var _turn_rate := 0.0
 var _planar_fraction_prev := 0.0
 ## Whether the direct order's course still follows the bearing to the destination (ShipPilot.Targets.course_follows).
 var _course_follows := false
+## Reversal rule: the activated move's course-change angle (radians, -1 = not measured: near rest or an arrival),
+## whether it selected reversal braking, and whether that braking is still to complete (ShipPilot.Targets.brake_first).
+var _reversal_angle := -1.0
+var _reversal := false
+var _brake_first := false
 ## Previous tick's start-of-tick planar speed (m/s), for the pilot's turn planning while the ship slows.
 var _speed_prev := 0.0
 ## Pilot state, targets and last tick's values (read-only debug getters), reused every tick.
@@ -236,6 +247,20 @@ func get_order_status() -> String:
 	return _order_status
 
 
+## Reversal rule (F3): the latest command's course-change angle at activation in degrees (-1 = not measured: a stop, a
+## ship near rest or an arrival), whether reversal braking was selected, and whether that braking has completed.
+func get_reversal_angle() -> float:
+	return rad_to_deg(_reversal_angle) if _reversal_angle >= 0.0 else -1.0
+
+
+func is_reversal() -> bool:
+	return _reversal
+
+
+func is_reversal_braking_complete() -> bool:
+	return _reversal and not _brake_first
+
+
 ## Whether the active order is still waiting for its navigation plan (the ship brakes meanwhile).
 func is_planning() -> bool:
 	return _job != null
@@ -284,7 +309,9 @@ func _physics_process(delta: float) -> void:
 		_pilot_targets.course_follows = _course_follows
 		_pilot_targets.bend_from = 0
 		_pilot_targets.bend_radii = PackedFloat32Array()
+	_pilot_targets.brake_first = _brake_first
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
+	_brake_first = _pilot_targets.brake_first
 	if _plan == null:
 		_course_yaw = _pilot_targets.course_yaw
 		_course_follows = _pilot_targets.course_follows
@@ -349,11 +376,17 @@ func _activate(command: Dictionary) -> void:
 		_course_follows = _has_course
 		if _has_course:
 			_course_yaw = atan2(-course.x, -course.z)
+		_reversal_angle = ShipPilot.reversal_angle_of(profile, velocity, course)
+		_reversal = ShipPilot.is_reversal(profile, _reversal_angle)
+		_brake_first = _reversal
 		_end_navigation()
-		_job = Navigator.start_job(self, _probe, world_position)
+		_job = Navigator.start_job(self, _probe, world_position, _brake_first)
 		_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
 	else:
 		_has_order = false
+		_reversal_angle = -1.0
+		_reversal = false
+		_brake_first = false
 		_end_navigation()
 		_order_status = "stopped at %.2f s" % _clock
 	_last_activated = _clock

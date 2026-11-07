@@ -54,6 +54,12 @@ class Targets:
 	## for the rest of the order. The caller keeps both between ticks. false: course_yaw is used as given (route
 	## guidance sets its own course every tick).
 	var course_follows := false
+	## In/out. Reversal braking commitment (ShipMovement classifies the order once when it activates; see
+	## reversal_angle_of()): while true and an order is active, the pilot requests zero velocity and commands no turn,
+	## so nothing directed at the destination cancels the stop. step() clears it the first tick the actual planar speed
+	## is at or below arrival_speed_tolerance; the order then continues with the ordinary movement rules. The caller
+	## keeps it between ticks; route guidance never touches it.
+	var brake_first := false
 	## Route bends: per route point, its arc length along the route (m) and the radius guidance traces through it
 	## (m, 0 = no bend). Points from bend_from on are ahead of the ship, which is at arc length bend_s. Empty arrays
 	## (the direct order) mean no bends.
@@ -112,6 +118,15 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 		has_order = false
 		arrived = true
 
+	# Reversal braking commitment: completes once the ship is near rest (the arrival speed tolerance), and this very
+	# tick then already follows the ordinary rules; until then no destination-directed velocity and no commanded turn.
+	var committed := false
+	if has_order and targets.brake_first:
+		if speed <= profile.arrival_speed_tolerance:
+			targets.brake_first = false
+		else:
+			committed = true
+
 	# Steering direction and distance for the speed law: straight at the destination for a direct order, or the
 	# supplied route guidance.
 	var steer_direction := Vector3.ZERO
@@ -134,7 +149,7 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	var _target_yaw := aligned_target(targets.course_yaw, planar_velocity, bow, _max_bow_angle)
 	var turn_request := 0.0
 	var turn_fraction := 0.0
-	if has_order and targets.has_course and turn_limit > 0.0:
+	if has_order and targets.has_course and turn_limit > 0.0 and not committed:
 		var error := wrapf(_target_yaw - state.yaw, -PI, PI)
 		# Braking-distance rule: the fastest rate that can still stop at the target, within the turn-rate
 		# limit. It plans with the share the turn would get if planar demand stays at last tick's level
@@ -181,7 +196,7 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	if sternward_share > 0.0:
 		_planned_braking = minf(_planned_braking, sternward_limit / sternward_share)
 	var desired := Vector3.ZERO
-	if has_order and steer_distance > 0.0:
+	if has_order and steer_distance > 0.0 and not committed:
 		var braking := _planned_braking
 		var lag := braking * profile.pilot_response_time
 		var arrival_speed := sqrt(2.0 * braking * steer_distance) - lag
@@ -232,10 +247,13 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 			var redirect := redirect_acceleration_of(across, bow, profile.main_acceleration, 1.0, thruster_limit, sideways_limit, forward_limit, sternward_limit)
 			var reach := redirect * profile.pilot_response_time / speed
 			var step_angle := asin(reach) if reach < 1.0 else PI
-			if angle > step_angle:
+			# Beyond the step only when the step is limited: angle_to() is single precision, so at exactly opposite
+			# directions it exceeds the double-precision PI of an unlimited step.
+			var beyond_step := reach < 1.0 and angle > step_angle
+			if beyond_step:
 				course_direction = travel.rotated(Vector3.UP, side * step_angle)
 			var direct_request := (steer_direction * desired_speed - planar_velocity) / profile.pilot_response_time
-			if angle > step_angle and desired_speed >= speed and split(direct_request, planar_velocity, bow, profile.pilot_response_time)[0] != Vector3.ZERO:
+			if beyond_step and desired_speed >= speed and split(direct_request, planar_velocity, bow, profile.pilot_response_time)[0] != Vector3.ZERO:
 				var shared := redirect_acceleration_of(across, bow, profile.main_acceleration, 1.0 / (1.0 + turn_fraction), thruster_limit, sideways_limit, forward_limit, sternward_limit)
 				direction = travel.rotated(Vector3.UP, side * step_angle)
 				desired_speed = speed
@@ -315,6 +333,22 @@ static func step(profile: MovementProfile, state: State, targets: Targets, delta
 	out.max_bow_angle = _max_bow_angle
 	out.bow_travel_angle = acos(clampf(bow.dot(planar_velocity / speed), -1.0, 1.0)) if speed > 0.0 else 0.0
 	out.planar_share = _planar_share
+
+
+## Angle (radians, 0–PI) between the actual planar travel direction and the direction to the destination, for the
+## reversal rule: -1 when it does not apply (at or below arrival_speed_tolerance, the ship counts as stationary; within
+## arrival_tolerance, the order is an arrival). An order is a reversal when this is at least near_opposite_angle.
+static func reversal_angle_of(profile: MovementProfile, velocity: Vector3, to_destination: Vector3) -> float:
+	var travel := Vector3(velocity.x, 0.0, velocity.z)
+	var offset := Vector3(to_destination.x, 0.0, to_destination.z)
+	if travel.length() <= profile.arrival_speed_tolerance or offset.length() <= profile.arrival_tolerance:
+		return -1.0
+	return travel.angle_to(offset)
+
+
+## Whether a reversal angle from reversal_angle_of() selects reversal braking.
+static func is_reversal(profile: MovementProfile, angle: float) -> bool:
+	return angle >= 0.0 and angle >= deg_to_rad(profile.near_opposite_angle) - 1e-6
 
 
 ## Unit planar bow for a yaw (0 = −Z, positive = counter-clockwise seen from above).
