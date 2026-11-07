@@ -38,6 +38,10 @@ var _last_status := ""
 var _events: Array = []
 var _trace := PackedFloat64Array()
 var _asteroids: Array[Node3D] = []
+var _nw_refreshes := 0
+var _nw_refresh_job: Navigator.Job
+var _nw_translate_turn_ticks := 0
+var _nw_terminal := false
 
 func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
@@ -74,7 +78,22 @@ func _sample(_delta: float) -> void:
 			return
 		_armed = true
 		_start = _ship.get_clock()
-		if _case.begins_with("a2_"):
+		if _case == "nw_redirect":
+			# Representative state, not a reconstruction of the owner's unknown original pose.
+			# At activation the moving change is 95.9 degrees; the old fallback strands this same order.
+			_ship.global_position = Vector3(-110, 0, -136)
+			var toward := (Vector3(-134.6, 0, -131.8) - _ship.global_position).normalized()
+			var previous := toward.rotated(Vector3.UP, deg_to_rad(-88))
+			_ship.velocity = previous * 12.0
+			_ship.rotation.y = atan2(-previous.x, -previous.z)
+			_ship.move_to(Vector3(-134.6, 0, -131.8))
+			_game.get_node("Camera3D").global_position = Vector3(-140, 110, -85)
+			var key := InputEventKey.new()
+			key.keycode = KEY_F3
+			key.pressed = true
+			_game.get_node("MovementDebugOverlay")._unhandled_input(key)
+			_game.get_node("RightClickMoveInput").emit_signal("move_requested", Vector3(-134.6, 0, -131.8))
+		elif _case.begins_with("a2_"):
 			_ship.global_position = Vector3(238, 0, -162)
 			var seconds := float(_case.right(1))
 			_redirect_at = seconds - (_ship.profile.reaction_delay if _case.begins_with("a2_activate") else 0.0)
@@ -118,6 +137,13 @@ func _sample(_delta: float) -> void:
 	if _first_activation < 0.0 and _ship.get_last_activated_time() >= _start:
 		_first_activation = time
 	var status := _ship.get_order_status()
+	if _case == "nw_redirect":
+		if _ship._job != null and _ship._job.refresh and _ship._job != _nw_refresh_job:
+			_nw_refresh_job = _ship._job
+			_nw_refreshes += 1
+		if status.contains("repositioning") and _ship.velocity.length() > 0.0 and absf(_ship.get_turn_rate()) > 0.0 and _ship.get_thruster_command().length() > 0.0:
+			_nw_translate_turn_ticks += 1
+		_nw_terminal = _nw_terminal or _ship._blocked
 	if status != _last_status:
 		_events.push_back({event = "status", time = time, status = status})
 		_last_status = status
@@ -172,6 +198,11 @@ func _finish(time: float) -> void:
 		redirect_min_speed = _min_speed if _min_speed < INF else null, contacts = _contacts,
 		worst_counted_navigation_usec = _worst_navigation, counted_overruns = _overruns, overrun_events = _overrun_events,
 		status = _ship.get_order_status(), trace_sha256 = hashing.finish().hex_encode(), events = _events}
+	if _case == "nw_redirect":
+		summary.nw = {representative_not_exact_replay = true, course_change_degrees = _ship.get_reversal_angle(),
+			path_refreshes = _nw_refreshes, translate_and_turn_ticks = _nw_translate_turn_ticks, terminal = _nw_terminal,
+			same_order = is_equal_approx(_ship.get_last_activated_time() - _start, _first_activation),
+			retained_destination = _ship.get_destination() == Vector3(-134.6, 0, -131.8)}
 	DirAccess.make_dir_recursive_absolute(_output)
 	var file := FileAccess.open(_output.path_join(_case + ".json"), FileAccess.WRITE)
 	file.store_string(JSON.stringify(summary, "\t"))
@@ -180,6 +211,9 @@ func _finish(time: float) -> void:
 	print("STAGE1_SCENE_RESULT ", JSON.stringify(summary))
 	var finished := (_arrival >= 0.0) if _case != "stop" else (not _ship.has_order() and _ship.velocity.length() < 0.01)
 	var passed := finished and _contacts == 0 and _intrusion_after_entry <= _ship.profile.no_go_tolerance + 1e-4 and _overruns == 0
+	if _case == "nw_redirect":
+		passed = passed and summary.nw.same_order and summary.nw.retained_destination and not _nw_terminal and _nw_refreshes == 1 and _nw_translate_turn_ticks > 0
+		print("NW_CHECK ", JSON.stringify(summary.nw))
 	if _check:
 		print("SCENE_CHECK ", "PASS" if passed else "FAIL", " ", _case)
 	quit(1 if _check and not passed else 0)

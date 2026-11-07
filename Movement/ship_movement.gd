@@ -93,8 +93,10 @@ var _order_status := "no order yet"
 var _navigation_baseline := false
 var _clearance_status := ""
 var _blocked := false
-var _reposition_direction := Vector3.ZERO
-var _reposition_remaining := 0.0
+var _route_refreshed := false
+var _reposition_guide := Vector3.ZERO
+var _reposition_distance := INF
+var _reposition_route_distance := INF
 var _reposition_used := 0.0
 var _navigation_on_mesh := false
 
@@ -324,34 +326,58 @@ func _physics_process(delta: float) -> void:
 		_pilot_targets.bend_from = 0
 		_pilot_targets.bend_radii = PackedFloat32Array()
 	_pilot_targets.brake_first = _brake_first
+	var corrected := false
 	if _has_order and not _navigation_baseline and not _blocked:
 		var map := get_world_3d().navigation_map
 		if not _navigation_on_mesh and NavigationServer3D.map_get_iteration_id(map) > 0:
 			_navigation_on_mesh = RouteGuidance.planar(NavigationServer3D.map_get_closest_point(map, global_position) - global_position).length() <= NavigationServer3D.map_get_cell_size(map)
-		var clearance := Navigator.Clearance.SLOW if _reposition_remaining > 0.0 else Navigator.clearance(profile, _probe, _pilot_state, _pilot_targets, delta, map, _navigation_on_mesh)
+		var clearance := Navigator.clearance(profile, _probe, _pilot_state, _pilot_targets, delta, map, _navigation_on_mesh)
 		_clearance_status = "open stopping room" if clearance == Navigator.Clearance.OPEN else "local hull/stop clearance"
 		if clearance == Navigator.Clearance.SLOW:
-			if _reposition_remaining <= 0.0 and velocity.length() <= profile.arrival_speed_tolerance and _reposition_used < profile.departure_max_time:
-				_reposition_direction = HullProbe.escape_direction(map, global_position)
-				_reposition_remaining = minf(profile.departure_step_time, profile.departure_max_time - _reposition_used)
-			if _reposition_remaining > 0.0 and Navigator.reposition(profile, _probe, _pilot_state, _pilot_targets, delta, map, _reposition_direction, _navigation_on_mesh):
-				_reposition_remaining = maxf(_reposition_remaining - delta, 0.0)
-				if _reposition_remaining <= RouteGuidance.TIME_EPSILON:
-					_reposition_remaining = 0.0
-				_reposition_used = minf(_reposition_used + delta, profile.departure_max_time)
-				_clearance_status = "repositioning for physical clearance"
-			else:
+			_clearance_status = "slowing for physical clearance"
+			if velocity.length() <= profile.arrival_speed_tolerance:
+				if not _route_refreshed and _job == null:
+					# The accepted guide may now be behind an obstacle after a momentum-preserving drift.
+					# Refresh once from the actual pose, keeping the same order and resolved destination.
+					_route_refreshed = true
+					_job = Navigator.start_job(self, _probe, _destination, _brake_first, true)
+				elif _job == null:
+					var guide := _destination if _plan == null else _plan.route[_follow.index]
+					var distance := RouteGuidance.planar(guide - global_position).length()
+					var route_distance := 0.0 if _plan == null else RouteGuidance.planar(_follow.point - global_position).length()
+					if guide != _reposition_guide:
+						_reposition_guide = guide
+						_reposition_distance = distance
+						_reposition_route_distance = route_distance
+						_reposition_used = 0.0
+					if distance < _reposition_distance - RoutePlanner.DUPLICATE_DISTANCE or route_distance < _reposition_route_distance - RoutePlanner.DUPLICATE_DISTANCE:
+						_reposition_distance = minf(_reposition_distance, distance)
+						_reposition_route_distance = minf(_reposition_route_distance, route_distance)
+						_reposition_used = 0.0
+					if _reposition_used < profile.departure_max_time:
+						_reposition_used += delta
+						# Return toward the current ordinary route before its corner if drift left us off it.
+						# This restores route-following room; it does not follow an unrelated nearest boundary.
+						if route_distance > RoutePlanner.DUPLICATE_DISTANCE:
+							guide = _follow.point
+						var candidate := Navigator.reposition(profile, _probe, _pilot_state, _pilot_targets, delta, map, guide, _navigation_on_mesh)
+						if candidate == null and guide != _reposition_guide:
+							candidate = Navigator.reposition(profile, _probe, _pilot_state, _pilot_targets, delta, map, _reposition_guide, _navigation_on_mesh)
+						if candidate != null:
+							_pilot_targets = candidate
+							corrected = true
+							_clearance_status = "repositioning for physical clearance toward next route guide"
+					elif velocity.length() <= ManeuverRollout.REST_SPEED:
+						_blocked = true
+						_clearance_status = "Stage 2 distinct-passage recovery needed: ordinary path refresh and checked local corrections could not restore progress"
+			if not corrected:
 				_pilot_targets.has_order = false
-				_clearance_status = "slowing for physical clearance"
-				if velocity.length() <= ManeuverRollout.REST_SPEED:
-					_blocked = true
-					_clearance_status = "blocked (unresolved): available route needs a different maneuver"
 	if _blocked:
 		_pilot_targets.has_order = false
 	Navigator.account(guidance_started, true)
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
 	_brake_first = _pilot_targets.brake_first
-	if _plan == null and _clearance_status != "repositioning for physical clearance":
+	if _plan == null and not corrected:
 		_course_yaw = _pilot_targets.course_yaw
 		_course_follows = _pilot_targets.course_follows
 	if _follow != null:
@@ -407,7 +433,10 @@ func _activate(command: Dictionary) -> void:
 		_navigation_baseline = false
 		_clearance_status = ""
 		_blocked = false
-		_reposition_remaining = 0.0
+		_route_refreshed = false
+		_reposition_guide = Vector3.ZERO
+		_reposition_distance = INF
+		_reposition_route_distance = INF
 		_reposition_used = 0.0
 		var world_position: Vector3 = command.position
 		_destination = Vector3(world_position.x, global_position.y, world_position.z)
@@ -428,7 +457,7 @@ func _activate(command: Dictionary) -> void:
 	else:
 		_clearance_status = ""
 		_blocked = false
-		_reposition_remaining = 0.0
+		_route_refreshed = false
 		_has_order = false
 		_reversal_angle = -1.0
 		_reversal = false
@@ -444,6 +473,11 @@ func _take_plan() -> void:
 	var job := _job
 	_job = null
 	if job.status == Navigator.Status.DECLINED:
+		if job.refresh:
+			# A failed ordinary query is not proof that a checked local return to the route cannot work.
+			# Keep the order/guide and let the same bounded local correction attempt run before settling.
+			_order_status += "; " + job.reason
+			return
 		_has_order = false
 		_order_status = "declined (%.1f, %.1f): %s" % [job.click.x, job.click.z, job.reason]
 		print("Movement: order to (%.1f, %.1f) declined at %.3f s: %s (%d µs over %d ticks, worst tick %d µs)" % [job.click.x, job.click.z, _clock, job.reason, job.used_usec, job.ticks, job.worst_tick_usec])
@@ -452,6 +486,8 @@ func _take_plan() -> void:
 	if job.status != Navigator.Status.DONE:
 		return
 	_destination = job.destination
+	_plan = null
+	_follow = null
 	_navigation_baseline = job.baseline
 	_order_status = "accepted (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, ["direct", "route", "departure"][job.plan.kind], job.summary.get_slice(";", 0)]
 	if job.resolution != "":

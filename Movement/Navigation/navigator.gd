@@ -53,9 +53,9 @@ static func account(start: int, runtime := false) -> void:
 		_guided += 1
 
 
-static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, _brake_first := false) -> Job:
+static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, _brake_first := false, refresh := false) -> Job:
 	var start := measure()
-	var job := Job.new(ship, probe, click)
+	var job := Job.new(ship, probe, click, refresh)
 	_jobs.push_back(job)
 	account(start)
 	return job
@@ -65,6 +65,9 @@ static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, _bra
 ## of live guidance for ships still to move this frame. Geometry checks are charged by the caller as well.
 static func service() -> void:
 	var start := measure()
+	if _jobs.is_empty() and _prepared_frame == _frame:
+		account(start)
+		return # No route work; this frame's cache preparation has already had its slice.
 	# Do not cap this at half the allowance: several ships beside hazards can need more than half
 	# for live checks alone. Only route/preparation work yields; physical guidance still runs this tick.
 	var reserve := _runtime_peak * maxi(_ships.size() - _guided, 0)
@@ -112,19 +115,24 @@ static func clearance(profile: MovementProfile, probe: HullProbe, actual: ShipPi
 	return Clearance.SLOW
 
 
-## Existing held-heading repositioning, only when slow beside a real constraint. This changes guidance only;
-## the same pilot and local hull/stop test decide whether the move can be made. No passage search is performed.
+## A bounded correction toward the next ordinary route guide. Test a temporary target with the same pilot,
+## including translation and turning; the caller applies it only when its hull and stopping room are clear.
 static func reposition(profile: MovementProfile, probe: HullProbe, actual: ShipPilot.State,
-		targets: ShipPilot.Targets, delta: float, map: RID, direction: Vector3, on_mesh := true) -> bool:
-	if direction == Vector3.ZERO:
-		return false
-	targets.use_steer = true
-	targets.steer_direction = direction
-	targets.steer_distance = profile.detour_lookahead_distance
-	targets.has_course = false
-	targets.course_follows = false
-	targets.bend_radii = PackedFloat32Array()
-	return ManeuverRollout.local_clear(profile, probe, actual, targets, delta, map, on_mesh)
+		targets: ShipPilot.Targets, delta: float, map: RID, guide: Vector3, on_mesh := true) -> ShipPilot.Targets:
+	var toward := RouteGuidance.planar(guide - actual.position)
+	if toward == Vector3.ZERO:
+		return null
+	var candidate := ManeuverRollout._copy_targets(targets)
+	candidate.use_steer = true
+	candidate.steer_direction = toward.normalized()
+	candidate.steer_distance = profile.detour_lookahead_distance
+	# Keep the ordinary guide's course while crabbing/backing toward it; translation direction is not a new
+	# heading request. This preserves the pilot's simultaneous translate-and-turn capability.
+	candidate.course_follows = false
+	candidate.bend_radii = PackedFloat32Array()
+	if ManeuverRollout.local_clear(profile, probe, actual, candidate, delta, map, on_mesh):
+		return candidate
+	return null
 
 
 class Job:
@@ -146,15 +154,17 @@ class Job:
 	var _route: RoutePlanner
 	var _last_frame := -1
 	var _tick_usec := 0
+	var refresh := false
 
-	func _init(ship: ShipMovement, probe: HullProbe, p_click: Vector3) -> void:
+	func _init(ship: ShipMovement, probe: HullProbe, p_click: Vector3, p_refresh: bool) -> void:
 		_ship = ship
 		_probe = probe
 		click = Vector3(p_click.x, ship.global_position.y, p_click.z)
+		refresh = p_refresh
 		destination = click
 		probe.queries = 0
 		_route = RoutePlanner.new(ship.get_world_3d().navigation_map, probe, ship.profile, click,
-			ship.get_pilot_state, Navigator.BUDGET.destination_candidates_per_order)
+			ship.get_pilot_state, Navigator.BUDGET.destination_candidates_per_order, refresh)
 
 	func cancel() -> void:
 		status = Status.CANCELLED

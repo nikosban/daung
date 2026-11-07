@@ -236,33 +236,6 @@ static func minimum_braking(profile: MovementProfile) -> float:
 	return result
 
 
-## Direction toward more centre clearance for a low-speed reposition, using the same baked boundaries.
-static func escape_direction(map: RID, position: Vector3) -> Vector3:
-	var nearest := closest_point(map, position)
-	var onto_mesh := RouteGuidance.planar(nearest - position)
-	if onto_mesh.length() > 1e-4:
-		return onto_mesh.normalized()
-	if not _spaces.has(map) or not _spaces[map].ready:
-		return Vector3.ZERO
-	var edges: PackedVector3Array = _spaces[map].boundary
-	var bounds: Array = _spaces[map].bounds
-	var point := Vector2(position.x, position.z)
-	var away := Vector2.ZERO
-	var best := INF
-	for i in range(0, edges.size(), 2):
-		var box: Vector4 = bounds[i / 2]
-		var dx := maxf(box.x - point.x, maxf(point.x - box.z, 0.0))
-		var dz := maxf(box.y - point.y, maxf(point.y - box.w, 0.0))
-		if dx * dx + dz * dz >= best:
-			continue
-		var closest := Geometry2D.get_closest_point_to_segment(point, Vector2(edges[i].x, edges[i].z), Vector2(edges[i + 1].x, edges[i + 1].z))
-		var offset := point - closest
-		if offset.length_squared() < best:
-			best = offset.length_squared()
-			away = offset
-	return Vector3(away.x, 0, away.y).normalized()
-
-
 ## Cheap clear-space proof: all response-window accelerations, then ordinary braking, fit this enclosing disk.
 ## For retro-equipped ships no-order braking is parallel to velocity, with fixed hull heading. The lateral radius
 ## bounds response-window velocity changes through the longest possible stop. Without retro, use a full ball

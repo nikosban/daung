@@ -75,9 +75,10 @@ var _horizon := 0.0
 var _allowance := 0.0
 var _tested := 0
 var _path_tests := 0
+var _keep_destination := false
 
 
-func _init(map: RID, probe: HullProbe, profile: MovementProfile, click: Vector3, live_state: Callable, path_limit: int) -> void:
+func _init(map: RID, probe: HullProbe, profile: MovementProfile, click: Vector3, live_state: Callable, path_limit: int, keep_destination := false) -> void:
 	_map = map
 	_probe = probe
 	_profile = profile
@@ -85,6 +86,7 @@ func _init(map: RID, probe: HullProbe, profile: MovementProfile, click: Vector3,
 	destination = click
 	_live_state = live_state
 	_path_limit = path_limit
+	_keep_destination = keep_destination
 
 
 func run(clock: PlanClock) -> int:
@@ -147,6 +149,10 @@ func _enabled_regions() -> Array[RID]:
 ## one cell off the mesh lies in a static no-go zone (an obstacle's baked exclusion) and is resolved (Task #54),
 ## starting from the nearest navigable point.
 func _classify() -> void:
+	if _keep_destination:
+		# One current-state path refresh, never a new destination search for the existing order.
+		_step = Step.PATH
+		return
 	var inside := false
 	for region in _enabled_regions():
 		var bounds := NavigationServer3D.region_get_bounds(region)
@@ -172,6 +178,9 @@ func _path() -> void:
 	var path := _query_path(position, _click)
 	if not path.is_empty() and _leg_on_mesh(path[path.size() - 1], _click):
 		_build_route(path, position)
+		return
+	if _keep_destination:
+		_decline_search("ordinary path refresh does not reach the retained destination")
 		return
 	if path.is_empty():
 		_start_resolution("no path from the ship")
