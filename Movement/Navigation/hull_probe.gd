@@ -31,6 +31,9 @@ var _query := PhysicsShapeQueryParameters3D.new()
 ## Read-only boundary edges of the existing baked mesh, shared by ships in the same map. This is a clearance
 ## query cache, not a route graph. Internal polygon edges cancel; region seams can conservatively reject a check.
 static var _spaces: Dictionary = {}
+const BOUNDARY_BLOCK_SIZE := 16 # Geometry broad-phase batch size, not movement tuning.
+static var _braking_frame := -1
+static var _braking_by_profile: Dictionary = {}
 
 
 static func forget_space(map: RID) -> void:
@@ -43,7 +46,8 @@ static func prepare_space(map: RID, root: Node, clock: PlanClock) -> bool:
 		return false
 	if not _spaces.has(map) or _spaces[map].iteration != iteration:
 		_spaces[map] = {iteration = iteration, regions = [], region = 0, polygon = 0,
-			edges = {}, edge_keys = [], boundary = PackedVector3Array(), bounds = [], ready = false, vertices = PackedVector3Array()}
+			edges = {}, edge_keys = [], boundary = PackedVector3Array(), bounds = [], order = [], blocks = [], ready = false,
+			vertices = PackedVector3Array(), flat = true, height = INF, sample_frame = -1, samples = {}, closest = {}, last_hit = -1}
 		for node in root.find_children("*", "NavigationRegion3D", true, false):
 			if node.enabled and node.navigation_mesh != null and node.get_navigation_map() == map:
 				_spaces[map].regions.push_back(node)
@@ -52,7 +56,15 @@ static func prepare_space(map: RID, root: Node, clock: PlanClock) -> bool:
 		return true
 	while not space.ready and clock.has_time():
 		if space.region >= space.regions.size():
-			space.ready = true
+			var offset: int = space.blocks.size() * BOUNDARY_BLOCK_SIZE
+			if offset >= space.order.size():
+				space.ready = true
+			else:
+				var box: Vector4 = space.bounds[space.order[offset]]
+				for i in range(offset + 1, mini(offset + BOUNDARY_BLOCK_SIZE, space.order.size())):
+					var next: Vector4 = space.bounds[space.order[i]]
+					box = Vector4(minf(box.x, next.x), minf(box.y, next.y), maxf(box.z, next.z), maxf(box.w, next.w))
+				space.blocks.push_back(box)
 		elif space.polygon == -1:
 			# Consume one edge at a time, including finalization, under the same clock.
 			if space.edge_keys.is_empty():
@@ -68,7 +80,20 @@ static func prepare_space(map: RID, root: Node, clock: PlanClock) -> bool:
 					var b: Vector3 = region.global_transform * space.vertices[key.y]
 					space.boundary.push_back(Vector3(a.x, 0, a.z))
 					space.boundary.push_back(Vector3(b.x, 0, b.z))
-					space.bounds.push_back(Vector4(minf(a.x, b.x), minf(a.z, b.z), maxf(a.x, b.x), maxf(a.z, b.z)))
+					var box := Vector4(minf(a.x, b.x), minf(a.z, b.z), maxf(a.x, b.x), maxf(a.z, b.z))
+					# Keep edge centres sorted along X, one insertion per clock item. Adjacent batches then
+					# have useful spatial bounds without an unbudgeted whole-cache sort.
+					var low := 0
+					var high: int = space.order.size()
+					while low < high:
+						var middle := (low + high) / 2
+						var other: Vector4 = space.bounds[space.order[middle]]
+						if other.x + other.z < box.x + box.z:
+							low = middle + 1
+						else:
+							high = middle
+					space.order.insert(low, space.bounds.size())
+					space.bounds.push_back(box)
 				space.edges.erase(key)
 		else:
 			var region: NavigationRegion3D = space.regions[space.region]
@@ -83,6 +108,11 @@ static func prepare_space(map: RID, root: Node, clock: PlanClock) -> bool:
 				for i in polygon.size():
 					var a := polygon[i]
 					var b := polygon[(i + 1) % polygon.size()]
+					var height: float = (region.global_transform * space.vertices[a]).y
+					if space.height == INF:
+						space.height = height
+					elif height != space.height:
+						space.flat = false
 					var key := Vector2i(mini(a, b), maxi(a, b))
 					space.edges[key] = space.edges.get(key, 0) + 1
 				space.polygon += 1
@@ -99,9 +129,6 @@ static func disk_on_mesh(map: RID, centre: Vector3, radius: float) -> bool:
 static func capsule_on_mesh(map: RID, start: Vector3, end: Vector3, radius: float) -> bool:
 	if not _spaces.has(map) or not _spaces[map].ready or _spaces[map].iteration != NavigationServer3D.map_get_iteration_id(map):
 		return false
-	var nearest := NavigationServer3D.map_get_closest_point(map, start)
-	if RouteGuidance.planar(nearest - start).length() > 1e-4:
-		return false
 	var edges: PackedVector3Array = _spaces[map].boundary
 	if edges.is_empty():
 		return false
@@ -110,37 +137,108 @@ static func capsule_on_mesh(map: RID, start: Vector3, end: Vector3, radius: floa
 	var bounds: Array = _spaces[map].bounds
 	var flat_start := RouteGuidance.planar(start)
 	var flat_end := RouteGuidance.planar(end)
-	for i in range(0, edges.size(), 2):
-		var box: Vector4 = bounds[i / 2]
+	# Nearby ships and successive local checks usually meet the same boundary. Re-test that exact edge first;
+	# a remembered obstruction never counts as a current result without the same geometric intersection test.
+	var last_hit: int = _spaces[map].last_hit
+	if last_hit >= 0 and _edge_intersects(flat_start, flat_end, radius, edges[last_hit], edges[last_hit + 1]):
+		return false
+	# Coarse blocks reject unrelated edge batches before the per-edge test. They only group existing geometry;
+	# no navigation adjacency, route graph or alternate search is added.
+	var blocks: Array = _spaces[map].blocks
+	var order: Array = _spaces[map].order
+	var i := 0
+	while i < order.size():
+		if i % BOUNDARY_BLOCK_SIZE == 0:
+			var group: Vector4 = blocks[i / BOUNDARY_BLOCK_SIZE]
+			if high.x < group.x or low.x > group.z or high.y < group.y or low.y > group.w:
+				i += BOUNDARY_BLOCK_SIZE
+				continue
+		var edge: int = order[i]
+		var box: Vector4 = bounds[edge]
 		if high.x < box.x or low.x > box.z or high.y < box.y or low.y > box.w:
+			i += 1
 			continue
-		var closest := Geometry3D.get_closest_points_between_segments(flat_start, flat_end, edges[i], edges[i + 1])
-		# At a crossing, float closest points can differ by a few micrometres; radius zero must not require exact
-		# equality. Segment intersection also catches the crossing directly, independent of that rounding.
-		if radius == 0.0 and Geometry2D.segment_intersects_segment(Vector2(start.x, start.z), Vector2(end.x, end.z),
-			Vector2(edges[i].x, edges[i].z), Vector2(edges[i + 1].x, edges[i + 1].z)) != null:
+		if _edge_intersects(flat_start, flat_end, radius, edges[edge * 2], edges[edge * 2 + 1]):
+			_spaces[map].last_hit = edge * 2
 			return false
-		if closest[0].distance_squared_to(closest[1]) <= maxf(radius, 1e-4) * maxf(radius, 1e-4):
+		i += 1
+	# An intersected boundary already disproves containment; only surviving capsules need a start-point query.
+	return RouteGuidance.planar(closest_point(map, start) - start).length() <= 1e-4
+
+
+static func _edge_intersects(start: Vector3, end: Vector3, radius: float, a: Vector3, b: Vector3) -> bool:
+	var points := Geometry3D.get_closest_points_between_segments(start, end, a, b)
+	# A crossing's float closest points need not be exactly equal, even for a zero-width line.
+	if radius == 0.0 and Geometry2D.segment_intersects_segment(Vector2(start.x, start.z), Vector2(end.x, end.z), Vector2(a.x, a.z), Vector2(b.x, b.z)) != null:
+		return true
+	return points[0].distance_squared_to(points[1]) <= maxf(radius, 1e-4) * maxf(radius, 1e-4)
+
+
+## Exact native query memoization for repeated points in one immutable map iteration/physics frame.
+static func closest_point(map: RID, point: Vector3) -> Vector3:
+	if not _spaces.has(map) or _spaces[map].iteration != NavigationServer3D.map_get_iteration_id(map):
+		return NavigationServer3D.map_get_closest_point(map, point)
+	var space: Dictionary = _spaces[map]
+	_sample_frame(space)
+	if not space.closest.has(point):
+		space.closest[point] = NavigationServer3D.map_get_closest_point(map, point)
+	return space.closest[point]
+
+
+static func _sample_frame(space: Dictionary) -> void:
+	var frame := Engine.get_physics_frames()
+	if space.sample_frame != frame:
+		space.sample_frame = frame
+		space.closest.clear()
+
+
+## Same clearance decision as the exact closest-point test. On a flat map, planar distance to the mesh is
+## 1-Lipschitz: a cached cell-centre distance +/- the offset bounds this sample. Only decisive bounds are reused;
+## near a threshold, on nonflat maps, or without a current cache, query the exact point. Cell distances belong
+## to the immutable map iteration; no physical state or earlier-order guidance is retained.
+static func centre_within(map: RID, point: Vector3, limit: float) -> bool:
+	if _spaces.has(map) and _spaces[map].ready and _spaces[map].flat and _spaces[map].iteration == NavigationServer3D.map_get_iteration_id(map):
+		var space: Dictionary = _spaces[map]
+		_sample_frame(space)
+		var cell := NavigationServer3D.map_get_cell_size(map)
+		var centre := Vector3((floorf(point.x / cell) + 0.5) * cell, point.y, (floorf(point.z / cell) + 0.5) * cell)
+		if not space.samples.has(centre):
+			space.samples[centre] = RouteGuidance.planar(NavigationServer3D.map_get_closest_point(map, centre) - centre).length()
+		var distance: float = space.samples[centre]
+		var offset := RouteGuidance.planar(point - centre).length()
+		if distance + offset + 1e-4 <= limit:
+			return true
+		if distance - offset - 1e-4 > limit:
 			return false
-	return true
+	return RouteGuidance.planar(closest_point(map, point) - point).length() <= limit
 
 
 ## Lower bound across the actual directional curve. Nonlinear curves need the detailed check rather than an
 ## endpoint-minimum assumption. This does not change or rescale the profile.
 static func minimum_braking(profile: MovementProfile) -> float:
+	# Configuration is shared and constant during a physics tick; ships must not repeat the same curve scan.
+	var frame := Engine.get_physics_frames()
+	if _braking_frame != frame:
+		_braking_frame = frame
+		_braking_by_profile.clear()
+	if _braking_by_profile.has(profile):
+		return _braking_by_profile[profile]
 	var curve := profile.directional_thrust_curve
 	var effectiveness := 1.0
 	for i in curve.point_count:
 		effectiveness = minf(effectiveness, clampf(curve.get_point_position(i).y, 0.0, 1.0))
 		if i + 1 < curve.point_count and (curve.get_point_right_mode(i) != Curve.TANGENT_LINEAR or curve.get_point_left_mode(i + 1) != Curve.TANGENT_LINEAR):
+			_braking_by_profile[profile] = 0.0
 			return 0.0
 	var rating := profile.thruster_strength / profile.mass
-	return minf(rating * effectiveness, ShipPilot.sternward_limit_of(profile, rating))
+	var result := minf(rating * effectiveness, ShipPilot.sternward_limit_of(profile, rating))
+	_braking_by_profile[profile] = result
+	return result
 
 
 ## Direction toward more centre clearance for a low-speed reposition, using the same baked boundaries.
 static func escape_direction(map: RID, position: Vector3) -> Vector3:
-	var nearest := NavigationServer3D.map_get_closest_point(map, position)
+	var nearest := closest_point(map, position)
 	var onto_mesh := RouteGuidance.planar(nearest - position)
 	if onto_mesh.length() > 1e-4:
 		return onto_mesh.normalized()

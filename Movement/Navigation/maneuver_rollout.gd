@@ -20,18 +20,18 @@ static func local_clear(profile: MovementProfile, probe: HullProbe, actual: Ship
 	state.bow = ShipPilot.bow_of(state.yaw)
 	if not centre_leg_clear(map, profile, actual.position, state.position, on_mesh):
 		return false
-	return stopping_room(profile, probe, state, delta, map, on_mesh)
+	return _stopping_room(profile, probe, state, delta, map, on_mesh)
 
 
 ## Brake-to-rest distance bound: at least the weakest directional reach until braking becomes proportional,
 ## plus the complete response-time remainder and one integration tick. No-rest/timer shortcuts are used.
-static func stopping_room(profile: MovementProfile, probe: HullProbe, state: ShipPilot.State, delta: float, map: RID, on_mesh := true) -> bool:
+static func _stopping_room(profile: MovementProfile, probe: HullProbe, state: ShipPilot.State, delta: float, map: RID, on_mesh: bool) -> bool:
 	var weakest := HullProbe.minimum_braking(profile)
 	if weakest <= 0.0 or delta > profile.pilot_response_time:
 		return false
 	var speed := state.velocity.length()
 	if speed == 0.0:
-		return not probe.overlaps(state.position, state.yaw, 0.0)
+		return true # local_clear's first sweep already contains this predicted pose.
 	var direction := state.velocity / speed
 	var rating := profile.thruster_strength / profile.mass
 	if profile.retro_thrusters:
@@ -42,7 +42,7 @@ static func stopping_room(profile: MovementProfile, probe: HullProbe, state: Shi
 		# The component cap can bend a stop. Use the full enclosing ball rather than assume a straight stop.
 		return HullProbe.disk_on_mesh(map, state.position, distance) and probe.cylinder_clear(state.position, distance + probe.reach)
 	var end := state.position + direction * distance
-	if not probe.step_clear(state.position, state.yaw, end - state.position, 0.0, true):
+	if not probe.step_clear(state.position, state.yaw, end - state.position, 0.0, false):
 		return false
 	return centre_leg_clear(map, profile, state.position, end, on_mesh)
 
@@ -50,9 +50,15 @@ static func stopping_room(profile: MovementProfile, probe: HullProbe, state: Shi
 ## Test the actual centre rule, including its tolerance, when the stricter whole-mesh geometric proof fails.
 ## Distance to a closed mesh is 1-Lipschitz: reserving half a sample interval covers the points between samples.
 static func centre_leg_clear(map: RID, profile: MovementProfile, start: Vector3, end: Vector3, on_mesh := true) -> bool:
+	var distance := RouteGuidance.planar(end - start).length()
+	# Most immediate pilot steps fit one interval. The same endpoint/mid-interval bound used below
+	# can prove them without scanning every baked boundary before falling back to these two samples.
+	if on_mesh and profile.no_go_tolerance > 0.0 and distance <= profile.no_go_tolerance:
+		var limit := profile.no_go_tolerance - distance * 0.5
+		if HullProbe.centre_within(map, start, limit) and HullProbe.centre_within(map, end, limit):
+			return true
 	if HullProbe.capsule_on_mesh(map, start, end, 0.0):
 		return true
-	var distance := RouteGuidance.planar(end - start).length()
 	var cell := NavigationServer3D.map_get_cell_size(map)
 	# The tolerance itself sets the sampling scale; the Lipschitz margin below covers every intermediate point.
 	# Using the bake cell here needlessly repeated closest-point queries along long, otherwise clear stops.
@@ -63,7 +69,11 @@ static func centre_leg_clear(map: RID, profile: MovementProfile, start: Vector3,
 	var margin := distance / samples * 0.5
 	for i in samples + 1:
 		var point := start.lerp(end, float(i) / samples)
-		var nearest := NavigationServer3D.map_get_closest_point(map, point)
+		if on_mesh:
+			if not HullProbe.centre_within(map, point, profile.no_go_tolerance - margin):
+				return false
+			continue
+		var nearest := HullProbe.closest_point(map, point)
 		var off_mesh := RouteGuidance.planar(nearest - point).length()
 		if off_mesh <= cell:
 			on_mesh = true

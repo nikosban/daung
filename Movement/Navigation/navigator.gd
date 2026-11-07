@@ -65,7 +65,9 @@ static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, _bra
 ## of live guidance for ships still to move this frame. Geometry checks are charged by the caller as well.
 static func service() -> void:
 	var start := measure()
-	var reserve := mini(BUDGET.plan_time_per_tick / 2, _runtime_peak * maxi(_ships.size() - _guided, 0))
+	# Do not cap this at half the allowance: several ships beside hazards can need more than half
+	# for live checks alone. Only route/preparation work yields; physical guidance still runs this tick.
+	var reserve := _runtime_peak * maxi(_ships.size() - _guided, 0)
 	var allowance := BUDGET.plan_time_per_tick - _frame_used - reserve
 	if allowance > 0:
 		var clock := PlanClock.new(start + allowance, BUDGET.plan_time_per_tick)
