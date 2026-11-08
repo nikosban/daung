@@ -20,17 +20,13 @@ const MARKER_DISPLAY_HEIGHT := 0.1
 ## F3 red outlines of collision shapes (Task #44); shown and hidden with the readout.
 @export var collision_outlines: Array[CollisionShapeOutline] = []
 
-var _label := Label.new()
+@onready var _label: Label = $Layout/Margins/Telemetry
 var _has_request := false
 var _requested_position := Vector3.ZERO
 
 
 func _ready() -> void:
 	visible = false
-	_label.position = Vector2(12.0, 12.0)
-	_label.add_theme_color_override("font_outline_color", Color.BLACK)
-	_label.add_theme_constant_override("outline_size", 4)
-	add_child(_label)
 
 
 func _unhandled_input(event: InputEvent) -> void:

@@ -15,6 +15,7 @@
 | [Movement](Movement/ship_movement.gd) | Commands, authoritative position, planar velocity and yaw; internal pilot/propulsion and navigation | Godot APIs and its own internal components only |
 | [Camera](game/camera/camera_rig.tscn) | Floor focus, view transform and camera input | Shared camera settings; Godot only |
 | [Debugging](debugging/debugging_suite.tscn) | Temporary movement input, telemetry display and diagnostic visuals | Movement requests/read-only observations; injected Camera3D and scene references; Godot |
+| [Display and UI configuration](project.godot) | Window/reference sizing and proportional UI scaling; shared UI theme | Godot; shared [theme resource](game/ui/ui_theme.tres) |
 
 Movement and Camera are independent gameplay modules. Main and Ship are composition boundaries. Movement never depends on Camera or Debugging. New module dependencies require an approved ticket stating the map change.
 
@@ -59,6 +60,14 @@ Consumers obtain Camera3D through `get_camera()`; `set_view(focus_position, heig
 [DebuggingSuite](debugging/debugging_suite.gd) receives ship, camera, collision shapes and reference positions from its host. Removing it removes its controls and cleans up generated outlines attached to external collision shapes.
 
 Input sends Movement requests using the supplied Camera3D for right-click projection only. The overlay reads telemetry; the trail samples actual world positions after movement; markers/outlines change presentation only. Debugging does not control the camera transform. Shared visual definitions/settings remain reusable; runtime state belongs to each suite.
+
+The suite owns the overlay's scene-based Control layout, margins and wrapping telemetry label. Diagnostic Controls ignore mouse input. The label selects the shared theme's `DebuggerLabel` variation; its outline does not apply to ordinary UI labels.
+
+## Display and UI configuration
+
+[Project settings](project.godot) own the logical UI reference and independent initial window size. Canvas-item stretching scales UI proportionally; expand aspect handling adds logical space for other aspect ratios. Startup is resizable and windowed, with no enforced minimum size. The 3D view renders at the window resolution; Camera does not own display configuration.
+
+The external [UI theme](game/ui/ui_theme.tres) supplies the project-wide default font size and the opt-in debugger outline variation. Shared theme data is read-only at runtime. Layout dimensions belong to reusable scene resources. Godot's embedded-game sizing remains an editor preference, separate from project window/scaling settings.
 
 ## Data and units
 
