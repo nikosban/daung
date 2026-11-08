@@ -1,6 +1,10 @@
 # Architecture
 
-Current responsibilities, dependencies and integration contracts. Update this map when those boundaries change. Linked source and resources hold implementation details and tuning; GitHub and Git hold history.
+1. **Map and group the current system.** Catalogue active modules and meaningful internal responsibilities, their dependencies and connections to the wider project. Group where it clarifies existing architectural boundaries; distinguish modules from scene composition and implementation helpers.
+
+2. **Document interfaces.** Describe what each module provides, consumes and controls, including ownership and dependency direction. Include only contracts another component must rely on or respect. Retain necessary distinctions in command activation, cancellation, failure handling and fallback behavior; avoid exhaustive API inventories.
+
+3. **Keep it minimal and current.** Update existing entries instead of appending explanations; add entries for genuinely new responsibilities and remove obsolete information. Exclude low-level algorithms, numeric tuning, implementation walkthroughs, history and test records. Retain units, coordinate conventions, configuration ownership and useful source links. Verify claims against current code and report substantive conflicts with approved decisions for owner review.
 
 ## System map
 
