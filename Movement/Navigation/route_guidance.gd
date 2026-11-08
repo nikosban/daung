@@ -83,6 +83,8 @@ static func guide(plan: Plan, follow: Follow, position: Vector3, yaw: float, tar
 	targets.bend_lengths = plan.lengths
 	targets.bend_radii = plan.corner_radii
 	targets.bend_from = plan.route.size()
+	# Route guidance owns the course (its aim, or the frozen final approach); a direct plan's caller sets its own.
+	targets.course_follows = false
 	track(plan, follow, position)
 	if plan.kind == Kind.DIRECT:
 		targets.use_steer = false

@@ -1,16 +1,12 @@
 class_name RoutePlanner
 extends RefCounted
 ## The route half of one planning job (Task #46): navigation readiness, destination classification, one Godot
-## navigation path, route cleanup, hazard regions and, for a moving ship without hazards, the drift corridor.
+## navigation path and route cleanup. Physical feasibility is checked locally from actual movement (#60).
 ## Resumable: run() does one small item at a time while its PlanClock allows and continues on a later call.
 ##
 ## Readiness: map inactive or iteration 0, or an enabled region with region iteration 0: wait (no path query). No
 ## enabled region once the map has synced: navigation unavailable. Regions synced but no polygon merged yet: wait
 ## while the map iteration still changes; after MERGE_WAIT_FRAMES frames without change, unavailable.
-##
-## Hazard regions: route samples every hull half-width where a cylinder of radius hull reach + clearance buffer is not
-## empty (the hull could touch something there at some yaw), each with a lead-in of the stopping distance at max
-## speed; regions closer than that merge. The start (departure) and end (final approach) samples are included.
 ##
 ## Destination resolution (Task #54): a click inside the bounds that is off the mesh (a no-go zone) or that the path
 ## cannot reach is replaced by the nearest candidate found by a bounded local search; a valid click skips it entirely.
@@ -30,7 +26,7 @@ extends RefCounted
 ## up) or "no destination found in bounded search" (queue empty at the horizon).
 
 enum { RUNNING, BASELINE, DECLINED, ROUTE }
-enum Step { SYNC, CLASSIFY, PATH, RESOLVE, HAZARDS, DRIFT }
+enum Step { SYNC, CLASSIFY, PATH, RESOLVE }
 
 ## Physics frames that may pass with an unchanged map iteration while enabled regions report synced but no polygon
 ## is merged yet, before navigation counts as unavailable. Godot merges a region in the map sync after the one in
@@ -53,14 +49,9 @@ var resolution := ""
 var resolution_log := PackedStringArray()
 var closest_queries := 0
 var path_queries := 0
-## For ROUTE: the route plan, the direct-or-route plan the pilot flies when nothing needs predicting, the hazard
-## regions (arc-length intervals, m), whether the last one is the final approach, and whether prediction is needed.
+## Usable route guidance; never a full-flight approval.
 var route_plan: RouteGuidance.Plan
 var primary_plan: RouteGuidance.Plan
-var regions: Array[Vector2] = []
-var final_hazard := false
-var needs_prediction := true
-var hazard_text := ""
 ## Whether run() is only waiting for navigation to sync (no work done; the job may yield to others).
 var waiting := false
 
@@ -73,9 +64,6 @@ var _step := Step.SYNC
 var _cell := 0.25
 var _merge_iteration := -1
 var _merge_frame := -1
-var _samples := PackedFloat32Array()
-var _sample := 0
-var _corridor: CorridorScan
 var _path_limit := 1
 var _candidates: Array[Dictionary] = []
 var _seen := PackedVector3Array()
@@ -87,9 +75,10 @@ var _horizon := 0.0
 var _allowance := 0.0
 var _tested := 0
 var _path_tests := 0
+var _keep_destination := false
 
 
-func _init(map: RID, probe: HullProbe, profile: MovementProfile, click: Vector3, live_state: Callable, path_limit: int) -> void:
+func _init(map: RID, probe: HullProbe, profile: MovementProfile, click: Vector3, live_state: Callable, path_limit: int, keep_destination := false) -> void:
 	_map = map
 	_probe = probe
 	_profile = profile
@@ -97,6 +86,7 @@ func _init(map: RID, probe: HullProbe, profile: MovementProfile, click: Vector3,
 	destination = click
 	_live_state = live_state
 	_path_limit = path_limit
+	_keep_destination = keep_destination
 
 
 func run(clock: PlanClock) -> int:
@@ -116,10 +106,6 @@ func run(clock: PlanClock) -> int:
 				_path()
 			Step.RESOLVE:
 				_resolve_item()
-			Step.HAZARDS:
-				_hazard_sample()
-			Step.DRIFT:
-				_drift_sample()
 		clock.item_done()
 	return result
 
@@ -163,6 +149,10 @@ func _enabled_regions() -> Array[RID]:
 ## one cell off the mesh lies in a static no-go zone (an obstacle's baked exclusion) and is resolved (Task #54),
 ## starting from the nearest navigable point.
 func _classify() -> void:
+	if _keep_destination:
+		# One current-state path refresh, never a new destination search for the existing order.
+		_step = Step.PATH
+		return
 	var inside := false
 	for region in _enabled_regions():
 		var bounds := NavigationServer3D.region_get_bounds(region)
@@ -188,6 +178,9 @@ func _path() -> void:
 	var path := _query_path(position, _click)
 	if not path.is_empty() and _leg_on_mesh(path[path.size() - 1], _click):
 		_build_route(path, position)
+		return
+	if _keep_destination:
+		_decline_search("ordinary path refresh does not reach the retained destination")
 		return
 	if path.is_empty():
 		_start_resolution("no path from the ship")
@@ -233,14 +226,8 @@ func _build_route(path: PackedVector3Array, position: Vector3) -> void:
 		primary_plan.has_course = course != Vector3.ZERO
 		if primary_plan.has_course:
 			primary_plan.course_yaw = atan2(-course.x, -course.z)
-	var total := route_plan.total_length()
-	var spacing := maxf(_probe.half_width, 0.5)
-	var s := 0.0
-	while s < total:
-		_samples.push_back(s)
-		s += spacing
-	_samples.push_back(total)
-	_step = Step.HAZARDS
+	# The path is guidance, not a full-flight feasibility result. Local clearance uses the actual ship each tick.
+	result = ROUTE
 
 
 ## Whether the straight leg from the path's end to the target stays on the mesh (every point within one cell of it,
@@ -383,55 +370,6 @@ func _query_path(from: Vector3, to: Vector3) -> PackedVector3Array:
 	return NavigationServer3D.map_get_path(_map, from, to, true)
 
 
-func _hazard_sample() -> void:
-	var total := route_plan.total_length()
-	var spacing := maxf(_probe.half_width, 0.5)
-	var stop_distance := stop_distance_of(_profile)
-	var k := _sample
-	_sample += 1
-	var point := RouteGuidance.point_at(route_plan, _samples[k])
-	if not _probe.cylinder_clear(point, _probe.reach + _profile.plan_clearance_buffer):
-		var start := maxf(_samples[k] - stop_distance, 0.0)
-		var end := minf(_samples[k] + spacing, total)
-		if k == _samples.size() - 1:
-			final_hazard = true
-			end = total
-		if not regions.is_empty() and start - regions[regions.size() - 1].y < stop_distance:
-			regions[regions.size() - 1].y = maxf(regions[regions.size() - 1].y, end)
-		else:
-			regions.push_back(Vector2(start, end))
-	if _sample < _samples.size():
-		return
-	if final_hazard and not regions.is_empty():
-		regions[regions.size() - 1].y = total
-	var parts: Array[String] = []
-	for region in regions:
-		parts.push_back("%.1f–%.1f" % [region.x, region.y])
-	hazard_text = "hazards [%s] of %.1f m%s" % [", ".join(parts), total, " (final approach)" if final_hazard else ""]
-	if not regions.is_empty():
-		result = ROUTE
-		return
-	# Nowhere along the route can the hull touch anything at any yaw. From rest the ship sets off along the route; a
-	# moving ship needs its drift corridor empty as well.
-	var state: ShipPilot.State = _live_state.call()
-	var speed := RouteGuidance.planar(state.velocity).length()
-	if speed <= _profile.arrival_speed_tolerance:
-		needs_prediction = false
-		result = ROUTE
-		return
-	_corridor = CorridorScan.new(route_plan, _probe, _profile, state.position, speed, 0.0)
-	_step = Step.DRIFT
-
-
-func _drift_sample() -> void:
-	match _corridor.step():
-		CorridorScan.CLEAR:
-			needs_prediction = false
-			result = ROUTE
-		CorridorScan.BLOCKED:
-			result = ROUTE
-
-
 func _baseline(reason: String) -> void:
 	result = BASELINE
 	note = reason
@@ -446,8 +384,3 @@ static func arrival_allowance_of(profile: MovementProfile) -> float:
 	if not profile.retro_thrusters:
 		braking = minf(braking, profile.no_retro_braking_effectiveness * thrusters)
 	return profile.arrival_tolerance + profile.arrival_speed_tolerance * profile.arrival_speed_tolerance / (2.0 * braking)
-
-
-## Stopping distance from max speed with the full directional-thruster braking (m).
-static func stop_distance_of(profile: MovementProfile) -> float:
-	return profile.max_speed * profile.max_speed / (2.0 * profile.thruster_strength / profile.mass)
