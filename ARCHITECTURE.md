@@ -37,7 +37,9 @@ The ship's collision shape is navigation's authoritative hull source; hull queri
 - **Clearance:** `HullProbe` queries the real hull, static space and navigation boundaries. `ManeuverRollout` checks the immediate response using the same pilot on copied state/targets, then checks stopping room. Physical hull clearance and the navigation mesh's centre no-go constraint are separate requirements. None of these helpers writes live motion.
 - **Work ownership:** `Navigator`/`PlanClock` share work accounting across ships, including live clearance. Boundary caches are shared per map, invalidated by map iteration changes and released when its last ship leaves. Pending work does not itself request braking; physical clearance can.
 
-The controller can refresh a stale route once and apply checked local corrections. Exhausted local recovery retains a blocked order; distinct-passage recovery is not implemented. Bounded destination-search failure is reported separately from local movement failure and does not prove impossibility. Navigation unavailable or destinations outside its bounds use the direct movement/contact fallback.
+The controller can refresh a stale route once and apply checked local corrections. Exhausted local recovery retains a blocked order; distinct-passage recovery is not implemented. Bounded destination-search failure is reported separately from local movement failure and does not prove impossibility.
+
+Direct movement with the static-contact fallback is selected only for no enabled navigation regions, no navigation polygons after synchronization checks, or a requested destination outside every enabled region's bounds. An inactive or unsynchronized map leaves the route job pending, with live clearance still checked. Pathfinding or destination-search failure does not select this fallback.
 
 ## Debugging integration
 
