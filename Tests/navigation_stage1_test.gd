@@ -87,7 +87,7 @@ func _sample(_delta: float) -> void:
 			_ship.velocity = previous * 12.0
 			_ship.rotation.y = atan2(-previous.x, -previous.z)
 			_ship.move_to(Vector3(-134.6, 0, -131.8))
-			_game.get_node("Camera3D").global_position = Vector3(-140, 110, -85)
+			_game.get_node("CameraRig").set_view(Vector3(-140, 0, -195), 110.0, 0.0)
 			var key := InputEventKey.new()
 			key.keycode = KEY_F3
 			key.pressed = true

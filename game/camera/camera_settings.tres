@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="CameraSettings" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/camera/camera_settings.gd" id="1_settings"]
+
+[resource]
+script = ExtResource("1_settings")
+initial_height = 55.0
+min_height = 15.0
+max_height = 400.0
+pitch_degrees = 45.0
+initial_yaw_degrees = 0.0
+field_of_view = 75.0
+near_clip = 0.05
+far_clip = 2000.0
+zoom_factor = 1.1
+zoom_smoothing_time = 0.12
+keyboard_zoom_interval = 0.15
+keyboard_rotation_speed = 90.0
+mouse_rotation_sensitivity = 0.2
+pan_speed = 75.0

@@ -1,8 +1,7 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://debugging/debugging_suite.gd" id="1_suite"]
 [ext_resource type="Script" path="res://debugging/right_click_move_input.gd" id="2_input"]
-[ext_resource type="Script" path="res://debugging/camera_pan_zoom.gd" id="3_camera"]
 [ext_resource type="Script" path="res://debugging/movement_trail.gd" id="4_trail"]
 [ext_resource type="Resource" path="res://debugging/movement_trail_settings.tres" id="5_settings"]
 [ext_resource type="Script" path="res://debugging/movement_debug_overlay.gd" id="6_overlay"]
@@ -17,9 +16,6 @@ script = ExtResource("1_suite")
 
 [node name="RightClickMoveInput" type="Node" parent="."]
 script = ExtResource("2_input")
-
-[node name="CameraPanZoom" type="Node" parent="."]
-script = ExtResource("3_camera")
 
 [node name="MovementTrail" type="MeshInstance3D" parent="."]
 script = ExtResource("4_trail")
