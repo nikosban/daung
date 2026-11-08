@@ -1,0 +1,8 @@
+[gd_resource type="Theme" format=3]
+
+[resource]
+default_font_size = 27
+DebuggerLabel/base_type = &"Label"
+DebuggerLabel/colors/font_outline_color = Color(0, 0, 0, 1)
+DebuggerLabel/constants/outline_size = 4
+DebuggerLabel/constants/max_screen_font_size = 18

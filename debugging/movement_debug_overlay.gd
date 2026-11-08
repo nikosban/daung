@@ -20,17 +20,24 @@ const MARKER_DISPLAY_HEIGHT := 0.1
 ## F3 red outlines of collision shapes (Task #44); shown and hidden with the readout.
 @export var collision_outlines: Array[CollisionShapeOutline] = []
 
-var _label := Label.new()
+@onready var _label: Label = $Layout/Margins/Telemetry
 var _has_request := false
 var _requested_position := Vector3.ZERO
 
 
 func _ready() -> void:
 	visible = false
-	_label.position = Vector2(12.0, 12.0)
-	_label.add_theme_color_override("font_outline_color", Color.BLACK)
-	_label.add_theme_constant_override("outline_size", 4)
-	add_child(_label)
+	get_viewport().size_changed.connect(_update_font_size)
+	_update_font_size()
+
+
+## Keep this diagnostic readout near its screen-pixel cap while ordinary UI scales normally.
+func _update_font_size() -> void:
+	var stretch := get_viewport().get_stretch_transform().get_scale()
+	var screen_scale := maxf(stretch.x, stretch.y)
+	var cap := _label.get_theme_constant("max_screen_font_size")
+	var font_size := mini(ThemeDB.get_project_theme().default_font_size, maxi(1, floori(cap / screen_scale)))
+	_label.add_theme_font_size_override("font_size", font_size)
 
 
 func _unhandled_input(event: InputEvent) -> void:
