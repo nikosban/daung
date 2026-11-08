@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[sub_resource type="TorusMesh" id="TorusMesh_marker"]
+inner_radius = 1.8
+outer_radius = 2.0
+
+[sub_resource type="StandardMaterial3D" id="Material_amber"]
+shading_mode = 0
+albedo_color = Color(1, 0.75, 0.2, 1)
+
+[node name="DebugMarker" type="MeshInstance3D"]
+mesh = SubResource("TorusMesh_marker")
+surface_material_override/0 = SubResource("Material_amber")

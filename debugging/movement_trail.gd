@@ -16,6 +16,9 @@ var _material := StandardMaterial3D.new()
 
 
 func _ready() -> void:
+	# Vertices are sampled in world space, independently of the suite host transform.
+	top_level = true
+	global_transform = Transform3D.IDENTITY
 	# Runs after the ship's _physics_process (priority 0), so each sample is the position after this tick's move.
 	process_physics_priority = 1
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

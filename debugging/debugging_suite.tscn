@@ -1,0 +1,41 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://debugging/debugging_suite.gd" id="1_suite"]
+[ext_resource type="Script" path="res://debugging/right_click_move_input.gd" id="2_input"]
+[ext_resource type="Script" path="res://debugging/camera_pan_zoom.gd" id="3_camera"]
+[ext_resource type="Script" path="res://debugging/movement_trail.gd" id="4_trail"]
+[ext_resource type="Resource" path="res://debugging/movement_trail_settings.tres" id="5_settings"]
+[ext_resource type="Script" path="res://debugging/movement_debug_overlay.gd" id="6_overlay"]
+[ext_resource type="PackedScene" path="res://debugging/debug_marker.tscn" id="7_marker"]
+
+[sub_resource type="StandardMaterial3D" id="Material_destination"]
+shading_mode = 0
+albedo_color = Color(1, 0.2, 1, 1)
+
+[node name="DebuggingSuite" type="Node3D"]
+script = ExtResource("1_suite")
+
+[node name="RightClickMoveInput" type="Node" parent="."]
+script = ExtResource("2_input")
+
+[node name="CameraPanZoom" type="Node" parent="."]
+script = ExtResource("3_camera")
+
+[node name="MovementTrail" type="MeshInstance3D" parent="."]
+script = ExtResource("4_trail")
+settings = ExtResource("5_settings")
+
+[node name="DebugDestinationMarker" parent="." instance=ExtResource("7_marker")]
+transform = Transform3D(1.25, 0, 0, 0, 1.25, 0, 0, 0, 1.25, 0, 0.1, 0)
+top_level = true
+visible = false
+surface_material_override/0 = SubResource("Material_destination")
+
+[node name="MovementDebugOverlay" type="CanvasLayer" parent="." node_paths=PackedStringArray("trail", "destination_marker")]
+script = ExtResource("6_overlay")
+trail = NodePath("../MovementTrail")
+destination_marker = NodePath("../DebugDestinationMarker")
+
+[node name="ReferenceMarkers" type="Node3D" parent="."]
+
+[connection signal="move_requested" from="RightClickMoveInput" to="MovementDebugOverlay" method="record_move_request"]

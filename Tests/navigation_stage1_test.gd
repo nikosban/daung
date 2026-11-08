@@ -91,8 +91,8 @@ func _sample(_delta: float) -> void:
 			var key := InputEventKey.new()
 			key.keycode = KEY_F3
 			key.pressed = true
-			_game.get_node("MovementDebugOverlay")._unhandled_input(key)
-			_game.get_node("RightClickMoveInput").emit_signal("move_requested", Vector3(-134.6, 0, -131.8))
+			_game.get_node("DebuggingSuite/MovementDebugOverlay")._unhandled_input(key)
+			_game.get_node("DebuggingSuite/RightClickMoveInput").emit_signal("move_requested", Vector3(-134.6, 0, -131.8))
 		elif _case.begins_with("a2_"):
 			_ship.global_position = Vector3(238, 0, -162)
 			var seconds := float(_case.right(1))

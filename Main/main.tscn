@@ -1,14 +1,10 @@
 [gd_scene format=3 uid="uid://c4o17ea3lltlq"]
 
 [ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="1_ship"]
-[ext_resource type="Script" uid="uid://hdxxfgxlaidt" path="res://Main/right_click_move_input.gd" id="2_input"]
 [ext_resource type="NavigationMesh" path="res://Main/navigation_mesh.tres" id="3_navmesh"]
-[ext_resource type="Script" uid="uid://k6oxd20ems7v" path="res://Main/camera_pan_zoom.gd" id="4_camera"]
-[ext_resource type="Script" uid="uid://2frr3jy3edpm" path="res://Main/movement_debug_overlay.gd" id="5_overlay"]
-[ext_resource type="Script" uid="uid://bw82flnn8gbww" path="res://Main/movement_trail.gd" id="6_trail"]
-[ext_resource type="Resource" path="res://Main/movement_trail_settings.tres" id="7_trail_settings"]
-[ext_resource type="Script" path="res://Main/collision_shape_outline.gd" id="8_outline"]
 [ext_resource type="PackedScene" path="res://Main/asteroid.tscn" id="9_asteroid"]
+
+[ext_resource type="PackedScene" path="res://debugging/debugging_suite.tscn" id="10_debugging"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -17,20 +13,8 @@ ambient_light_source = 2
 ambient_light_color = Color(0.6, 0.65, 0.75, 1)
 ambient_light_energy = 0.5
 
-[sub_resource type="TorusMesh" id="TorusMesh_marker"]
-inner_radius = 1.8
-outer_radius = 2.0
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_marker"]
-shading_mode = 0
-albedo_color = Color(1, 0.75, 0.2, 1)
-
 [sub_resource type="BoxShape3D" id="BoxShape3D_navigation_floor"]
 size = Vector3(800, 1, 800)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_debug_destination"]
-shading_mode = 0
-albedo_color = Color(1, 0.2, 1, 1)
 
 [node name="Main" type="Node3D" unique_id=2048189383]
 
@@ -43,33 +27,8 @@ transform = Transform3D(0.866025, 0.25, -0.433013, 0, 0.866025, 0.5, 0.5, -0.433
 [node name="Camera3D" type="Camera3D" parent="." unique_id=15245028]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 50, 55, 60)
 far = 1000.0
-script = ExtResource("4_camera")
 
 [node name="Ship" parent="." unique_id=2125529357 instance=ExtResource("1_ship")]
-
-[node name="TestDestinationMarker" type="MeshInstance3D" parent="." unique_id=22172087]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 130, 0, 0)
-mesh = SubResource("TorusMesh_marker")
-surface_material_override/0 = SubResource("StandardMaterial3D_marker")
-
-[node name="StartLocationMarker" type="MeshInstance3D" parent="." unique_id=1978266779]
-mesh = SubResource("TorusMesh_marker")
-surface_material_override/0 = SubResource("StandardMaterial3D_marker")
-
-[node name="RouteTestMarker1" type="MeshInstance3D" parent="." unique_id=1901905064]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, 0)
-mesh = SubResource("TorusMesh_marker")
-surface_material_override/0 = SubResource("StandardMaterial3D_marker")
-
-[node name="RouteTestMarker2" type="MeshInstance3D" parent="." unique_id=1584326393]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, -40)
-mesh = SubResource("TorusMesh_marker")
-surface_material_override/0 = SubResource("StandardMaterial3D_marker")
-
-[node name="RouteTestMarker3" type="MeshInstance3D" parent="." unique_id=1642017513]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -40)
-mesh = SubResource("TorusMesh_marker")
-surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
 [node name="TestObstacle" parent="." unique_id=222604826 instance=ExtResource("9_asteroid")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 83, 0, 0)
@@ -155,9 +114,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 47, 0, 80)
 [node name="C12" parent="ClusterC" instance=ExtResource("9_asteroid")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 92, 0, 69)
 
-[node name="CollisionOutline" type="MeshInstance3D" parent="Ship/CollisionShape3D"]
-script = ExtResource("8_outline")
-
 [node name="NavigationFloor" type="StaticBody3D" parent="." unique_id=1048801733 groups=["navigation_source"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -0.5, 0)
 collision_layer = 2
@@ -169,27 +125,8 @@ shape = SubResource("BoxShape3D_navigation_floor")
 [node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=1193409923]
 navigation_mesh = ExtResource("3_navmesh")
 
-[node name="RightClickMoveInput" type="Node" parent="." unique_id=2024739329 node_paths=PackedStringArray("camera", "ship")]
-script = ExtResource("2_input")
+[node name="DebuggingSuite" parent="." node_paths=PackedStringArray("ship", "camera", "collision_shapes") instance=ExtResource("10_debugging")]
+ship = NodePath("../Ship")
 camera = NodePath("../Camera3D")
-ship = NodePath("../Ship")
-
-[node name="MovementTrail" type="MeshInstance3D" parent="." unique_id=1703737801 node_paths=PackedStringArray("ship")]
-script = ExtResource("6_trail")
-ship = NodePath("../Ship")
-settings = ExtResource("7_trail_settings")
-
-[node name="DebugDestinationMarker" type="MeshInstance3D" parent="." unique_id=1417822898]
-transform = Transform3D(1.25, 0, 0, 0, 1.25, 0, 0, 0, 1.25, 0, 0.1, 0)
-visible = false
-mesh = SubResource("TorusMesh_marker")
-surface_material_override/0 = SubResource("StandardMaterial3D_debug_destination")
-
-[node name="MovementDebugOverlay" type="CanvasLayer" parent="." unique_id=1163721375 node_paths=PackedStringArray("ship", "trail", "destination_marker", "collision_outlines")]
-script = ExtResource("5_overlay")
-ship = NodePath("../Ship")
-trail = NodePath("../MovementTrail")
-destination_marker = NodePath("../DebugDestinationMarker")
-collision_outlines = [NodePath("../Ship/CollisionShape3D/CollisionOutline"), NodePath("../TestObstacle/CollisionShape3D/CollisionOutline"), NodePath("../ClusterA/A1/CollisionShape3D/CollisionOutline"), NodePath("../ClusterA/A2/CollisionShape3D/CollisionOutline"), NodePath("../ClusterA/A3/CollisionShape3D/CollisionOutline"), NodePath("../ClusterA/A4/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B1/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B2/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B3/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B4/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B5/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B6/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B7/CollisionShape3D/CollisionOutline"), NodePath("../ClusterB/B8/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C1/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C2/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C3/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C4/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C5/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C6/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C7/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C8/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C9/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C10/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C11/CollisionShape3D/CollisionOutline"), NodePath("../ClusterC/C12/CollisionShape3D/CollisionOutline")]
-
-[connection signal="move_requested" from="RightClickMoveInput" to="MovementDebugOverlay" method="record_move_request"]
+collision_shapes = [NodePath("../Ship/CollisionShape3D"), NodePath("../TestObstacle/CollisionShape3D"), NodePath("../ClusterA/A1/CollisionShape3D"), NodePath("../ClusterA/A2/CollisionShape3D"), NodePath("../ClusterA/A3/CollisionShape3D"), NodePath("../ClusterA/A4/CollisionShape3D"), NodePath("../ClusterB/B1/CollisionShape3D"), NodePath("../ClusterB/B2/CollisionShape3D"), NodePath("../ClusterB/B3/CollisionShape3D"), NodePath("../ClusterB/B4/CollisionShape3D"), NodePath("../ClusterB/B5/CollisionShape3D"), NodePath("../ClusterB/B6/CollisionShape3D"), NodePath("../ClusterB/B7/CollisionShape3D"), NodePath("../ClusterB/B8/CollisionShape3D"), NodePath("../ClusterC/C1/CollisionShape3D"), NodePath("../ClusterC/C2/CollisionShape3D"), NodePath("../ClusterC/C3/CollisionShape3D"), NodePath("../ClusterC/C4/CollisionShape3D"), NodePath("../ClusterC/C5/CollisionShape3D"), NodePath("../ClusterC/C6/CollisionShape3D"), NodePath("../ClusterC/C7/CollisionShape3D"), NodePath("../ClusterC/C8/CollisionShape3D"), NodePath("../ClusterC/C9/CollisionShape3D"), NodePath("../ClusterC/C10/CollisionShape3D"), NodePath("../ClusterC/C11/CollisionShape3D"), NodePath("../ClusterC/C12/CollisionShape3D")]
+reference_marker_positions = PackedVector3Array(130, 0, 0, 0, 0, 0, 60, 0, 0, 60, 0, -40, 20, 0, -40)

@@ -1,7 +1,9 @@
-extends Camera3D
+extends Node
 ## Temporary scene camera control for the movement test area: middle-mouse drag pans over the world
 ## XZ plane (the ground point under the cursor stays under it); the mouse wheel zooms along the view
 ## axis, keeping the camera's pitch. Never follows the ship and never rotates.
+
+@export var camera: Camera3D
 
 ## Fraction of the camera's height moved per wheel notch (provisional).
 @export_range(0.02, 0.5, 0.01) var zoom_step: float = 0.1
@@ -29,17 +31,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		var after: Variant = _ground_point(motion.position)
 		if before != null and after != null:
 			var shift: Vector3 = before - after
-			global_position += Vector3(shift.x, 0.0, shift.z)
+			camera.global_position += Vector3(shift.x, 0.0, shift.z)
 
 
 ## Moves along the view axis by zoom_step of the current height; out when direction > 0.
 func _zoom(direction: float) -> void:
-	var forward := -global_basis.z
+	var forward := -camera.global_basis.z
 	if is_zero_approx(forward.y):
 		return
-	var height := clampf(global_position.y * (1.0 + direction * zoom_step), min_height, max_height)
-	global_position += forward * ((height - global_position.y) / forward.y)
+	var height := clampf(camera.global_position.y * (1.0 + direction * zoom_step), min_height, max_height)
+	camera.global_position += forward * ((height - camera.global_position.y) / forward.y)
 
 
 func _ground_point(screen_position: Vector2) -> Variant:
-	return _plane.intersects_ray(project_ray_origin(screen_position), project_ray_normal(screen_position))
+	return _plane.intersects_ray(camera.project_ray_origin(screen_position), camera.project_ray_normal(screen_position))
