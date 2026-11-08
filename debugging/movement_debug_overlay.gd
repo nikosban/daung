@@ -27,6 +27,17 @@ var _requested_position := Vector3.ZERO
 
 func _ready() -> void:
 	visible = false
+	get_viewport().size_changed.connect(_update_font_size)
+	_update_font_size()
+
+
+## Keep this diagnostic readout near its screen-pixel cap while ordinary UI scales normally.
+func _update_font_size() -> void:
+	var stretch := get_viewport().get_stretch_transform().get_scale()
+	var screen_scale := maxf(stretch.x, stretch.y)
+	var cap := _label.get_theme_constant("max_screen_font_size")
+	var font_size := mini(ThemeDB.get_project_theme().default_font_size, maxi(1, floori(cap / screen_scale)))
+	_label.add_theme_font_size_override("font_size", font_size)
 
 
 func _unhandled_input(event: InputEvent) -> void:

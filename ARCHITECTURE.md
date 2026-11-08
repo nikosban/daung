@@ -61,7 +61,7 @@ Consumers obtain Camera3D through `get_camera()`; `set_view(focus_position, heig
 
 Input sends Movement requests using the supplied Camera3D for right-click projection only. The overlay reads telemetry; the trail samples actual world positions after movement; markers/outlines change presentation only. Debugging does not control the camera transform. Shared visual definitions/settings remain reusable; runtime state belongs to each suite.
 
-The suite owns the overlay's scene-based Control layout, margins and wrapping telemetry label. Diagnostic Controls ignore mouse input. The label selects the shared theme's `DebuggerLabel` variation; its outline does not apply to ordinary UI labels.
+The suite owns the overlay's scene-based Control layout, margins and wrapping telemetry label. Diagnostic Controls ignore mouse input. The label selects the shared theme's `DebuggerLabel` variation; its outline does not apply to ordinary UI labels. On initialization and viewport resize, the overlay caps its label's nominal screen-pixel font size using that variation's limit and the actual viewport stretch, rounding down. The font override belongs to the label instance; the shared theme and ordinary UI scaling remain unchanged.
 
 ## Display and UI configuration
 
