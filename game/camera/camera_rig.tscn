@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://game/camera/camera_rig.gd" id="1_rig"]
+[ext_resource type="Resource" path="res://game/camera/camera_settings.tres" id="2_settings"]
+
+[node name="CameraRig" type="Node3D"]
+physics_interpolation_mode = 2
+script = ExtResource("1_rig")
+settings = ExtResource("2_settings")
+
+[node name="PitchPivot" type="Node3D" parent="."]
+rotation = Vector3(-0.7853982, 0, 0)
+
+[node name="Camera3D" type="Camera3D" parent="PitchPivot"]
+position = Vector3(0, 0, 77.781746)
+current = true

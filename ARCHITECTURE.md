@@ -10,12 +10,13 @@
 
 | Boundary | Owns | Dependencies |
 |---|---|---|
-| [Main composition](Main/main.tscn) | World, camera, static obstacles and baked navigation geometry; ship and debugging instances | Shared ship, asteroid and debugging scenes; Godot |
+| [Main composition](Main/main.tscn) | World, static obstacles and baked navigation geometry; camera, ship and debugging instances | Shared camera, ship, asteroid and debugging scenes; Godot |
 | [Ship composition](Ships/ship.tscn) | Movement body, collision hull, movement profile and visual/model child | Movement; shared profile and model assets |
 | [Movement](Movement/ship_movement.gd) | Commands, authoritative position, planar velocity and yaw; internal pilot/propulsion and navigation | Godot APIs and its own internal components only |
-| [Debugging](debugging/debugging_suite.tscn) | Temporary input/camera controls, telemetry display and diagnostic visuals | Movement requests/read-only observations; injected scene references; Godot |
+| [Camera](game/camera/camera_rig.tscn) | Floor focus, view transform and camera input | Shared camera settings; Godot only |
+| [Debugging](debugging/debugging_suite.tscn) | Temporary movement input, telemetry display and diagnostic visuals | Movement requests/read-only observations; injected Camera3D and scene references; Godot |
 
-Movement is the only gameplay module. Main and Ship are composition boundaries. Movement never depends on Debugging. New module dependencies require an approved ticket stating the map change.
+Movement and Camera are independent gameplay modules. Main and Ship are composition boundaries. Movement never depends on Camera or Debugging. New module dependencies require an approved ticket stating the map change.
 
 Main supplies the navigation map through Godot's `NavigationRegion3D` and physics geometry. Static obstacle instances share [one scene](Main/asteroid.tscn); geometry changes require rebaking the navigation mesh. The navigation floor is bake geometry and is excluded from the ship's physical collision mask.
 
@@ -45,11 +46,19 @@ The controller can refresh a stale route once and apply checked local correction
 
 Direct movement with the static-contact fallback is selected only for no enabled navigation regions, no navigation polygons after synchronization checks, or a requested destination outside every enabled region's bounds. An inactive or unsynchronized map leaves the route job pending, with live clearance still checked. Pathfinding or destination-search failure does not select this fallback.
 
+## Camera
+
+[CameraRig](game/camera/camera_rig.gd) owns a horizontal floor focus and its child Camera3D. Zoom and yaw orbit preserve that focus at screen center; camera-relative panning translates it. Only the active camera accepts unhandled input, and held controls clear on window focus loss or deactivation. Removing Debugging leaves camera controls available.
+
+Levels instance the master scene and place its root at their initial floor focus. The shared [settings resource](game/camera/camera_settings.tres) is Inspector-editable and read-only at runtime; local tuning copies/overrides are avoided so master changes propagate. View and input state belong to each rig. Pan speed scales with current smoothed height relative to the configured starting height. Input bindings belong to Project Settings' Input Map.
+
+Consumers obtain Camera3D through `get_camera()`; `set_view(focus_position, height, yaw_degrees)` immediately places the view and synchronizes zoom within its limits. Focus Y defines the camera's floor elevation; this does not change Movement's X/Z gameplay plane.
+
 ## Debugging integration
 
 [DebuggingSuite](debugging/debugging_suite.gd) receives ship, camera, collision shapes and reference positions from its host. Removing it removes its controls and cleans up generated outlines attached to external collision shapes.
 
-Input sends Movement requests. The overlay reads telemetry; the trail samples actual world positions after movement; markers/outlines change presentation only. Camera controls operate the supplied camera. Shared visual definitions/settings remain reusable; runtime state belongs to each suite.
+Input sends Movement requests using the supplied Camera3D for right-click projection only. The overlay reads telemetry; the trail samples actual world positions after movement; markers/outlines change presentation only. Debugging does not control the camera transform. Shared visual definitions/settings remain reusable; runtime state belongs to each suite.
 
 ## Data and units
 
@@ -58,5 +67,6 @@ Shared Godot Resources hold configuration and are not mutated per instance. Orde
 - [MovementProfile](Movement/movement_profile.gd) defines movement configuration; the [frigate resource](Movement/Profiles/frigate_movement_profile.tres) supplies the active hull's values and curves.
 - [NavigationBudget](Movement/Navigation/navigation_budget.gd) and its [resource](Movement/Navigation/navigation_budget.tres) configure shared navigation limits.
 - [Trail settings](debugging/movement_trail_settings.gd) and their [resource](debugging/movement_trail_settings.tres) configure diagnostic sampling.
+- [Camera settings](game/camera/camera_settings.gd) and their [resource](game/camera/camera_settings.tres) configure view, zoom, orbit and pan behavior.
 
 One world unit is one metre. Gameplay motion uses world X/Z; the bow points along local -Z. Speed uses m/s, acceleration m/s², distances metres and durations seconds. Angles use degrees in data/debug output and radians internally; angular acceleration/rate use °/s² and °/s in data. Gameplay mass is a dimensionless divisor for thruster strength; main-engine and turning acceleration are specified directly.

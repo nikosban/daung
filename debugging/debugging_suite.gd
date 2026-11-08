@@ -16,7 +16,6 @@ var _outlines: Array[CollisionShapeOutline] = []
 func _ready() -> void:
 	$RightClickMoveInput.ship = ship
 	$RightClickMoveInput.camera = camera
-	$CameraPanZoom.camera = camera
 	$MovementTrail.ship = ship
 	$MovementDebugOverlay.ship = ship
 	for shape in collision_shapes:
