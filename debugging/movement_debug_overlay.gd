@@ -3,7 +3,7 @@ extends CanvasLayer
 ## applied and available angular acceleration, shared-capacity scale), desired speed, planned braking, main-engine and thruster
 ## commands, active destination and order state, the latest order's outcome (Task #46: planning, accepted, declined
 ## with its reason, arrived, stopped or static-contact stop), and the reaction-delay queue (physics clock, pending count, next
-## pending command and its due time, last receipt and activation times). Reads Movement only; Movement never calls it. Hidden until F3.
+## pending command and its due time, last receipt and activation times, from Orders). Reads Movement and Orders only; Movement never calls it. Hidden until F3.
 ## F3 also turns the world-space movement trail on and off with it (a fresh trace each time it turns on).
 ## F3 also shows and hides the red collision-shape outlines (Task #44).
 
@@ -42,6 +42,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if not visible:
 		return
+	var orders := ship.get_node("%Orders") as ShipOrders
 	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
 	var thruster := ship.get_thruster_command()
 	var destination := ship.get_destination()
@@ -55,7 +56,7 @@ func _process(_delta: float) -> void:
 		_destination_text(destination) if ship.has_order() else "no active order",
 		ship.get_order_status(),
 		_reversal_text(),
-		ship.get_clock(), ship.get_pending_count(), _next_pending_text(), _time_text(ship.get_last_received_time()), _time_text(ship.get_last_activated_time()),
+		orders.get_clock(), orders.get_pending_count(), _next_pending_text(orders), _time_text(orders.get_last_received_time()), _time_text(orders.get_last_activated_time()),
 	]
 
 
@@ -80,8 +81,8 @@ func _reversal_text() -> String:
 	return "course change at activation %5.1f°  (reversal from %.1f°)  reversal braking %s" % [angle, ship.profile.near_opposite_angle, braking]
 
 
-func _next_pending_text() -> String:
-	var next := ship.get_next_pending()
+func _next_pending_text(orders: ShipOrders) -> String:
+	var next := orders.get_next_pending()
 	if next.is_empty():
 		return ""
 	if next.kind == "move":

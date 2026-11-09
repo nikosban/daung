@@ -12,6 +12,7 @@ var _case := "clear"
 var _output := "res://.godot/issue60/baseline"
 var _game: Node3D
 var _ship: ShipMovement
+var _orders: ShipOrders
 var _armed := false
 var _warmup := 0
 var _warmup_limit := 12
@@ -59,6 +60,7 @@ func _start_scene() -> void:
 	_game = load("res://Main/main.tscn").instantiate()
 	root.add_child(_game)
 	_ship = _game.get_node("Ship")
+	_orders = _ship.get_node("%Orders")
 	for body in get_nodes_in_group("navigation_source"):
 		if body is StaticBody3D and body.get_node_or_null("CollisionShape3D").shape is SphereShape3D:
 			_asteroids.push_back(body)
@@ -77,7 +79,7 @@ func _sample(_delta: float) -> void:
 		if not NavigationServer3D.map_get_closest_point_owner(_ship.get_world_3d().navigation_map, Vector3.ZERO).is_valid():
 			return
 		_armed = true
-		_start = _ship.get_clock()
+		_start = _orders.get_clock()
 		if _case == "nw_redirect":
 			# Representative state, not a reconstruction of the owner's unknown original pose.
 			# At activation the moving change is 95.9 degrees; the old fallback strands this same order.
@@ -86,7 +88,7 @@ func _sample(_delta: float) -> void:
 			var previous := toward.rotated(Vector3.UP, deg_to_rad(-88))
 			_ship.velocity = previous * 12.0
 			_ship.rotation.y = atan2(-previous.x, -previous.z)
-			_ship.move_to(Vector3(-134.6, 0, -131.8))
+			_orders.move(Vector3(-134.6, 0, -131.8))
 			_game.get_node("CameraRig").set_view(Vector3(-140, 0, -195), 110.0, 0.0)
 			var key := InputEventKey.new()
 			key.keycode = KEY_F3
@@ -95,45 +97,45 @@ func _sample(_delta: float) -> void:
 		elif _case.begins_with("a2_"):
 			_ship.global_position = Vector3(238, 0, -162)
 			var seconds := float(_case.right(1))
-			_redirect_at = seconds - (_ship.profile.reaction_delay if _case.begins_with("a2_activate") else 0.0)
-			_ship.move_to(Vector3(170, 0, -90))
+			_redirect_at = seconds - (_orders.crew.reaction_delay if _case.begins_with("a2_activate") else 0.0)
+			_orders.move(Vector3(170, 0, -90))
 		elif _case == "detour":
-			_ship.move_to(Vector3(130, 0, 0))
+			_orders.move(Vector3(130, 0, 0))
 		elif _case == "tight":
 			_ship.global_position = Vector3(120, 0, 235)
-			_ship.move_to(Vector3(120, 0, 330))
+			_orders.move(Vector3(120, 0, 330))
 		elif _case == "escape":
 			_ship.global_position = Vector3(66.7, 0, 0)
 			_ship.rotation.y = -PI / 2.0
-			_ship.move_to(Vector3.ZERO)
+			_orders.move(Vector3.ZERO)
 		elif _case == "replacement":
 			# Both commands become due on the same tick. The unresolved asteroid request must never take over later.
-			_ship.move_to(Vector3(83, 0, 0))
-			_ship.move_to(Vector3(60, 0, -40))
+			_orders.move(Vector3(83, 0, 0))
+			_orders.move(Vector3(60, 0, -40))
 		elif _case == "redirect":
-			_ship.move_to(Vector3(130, 0, 0))
+			_orders.move(Vector3(130, 0, 0))
 			_redirect_at = 8.0
 		elif _case == "crab10":
-			_ship.move_to(Vector3(10, 0, 0))
+			_orders.move(Vector3(10, 0, 0))
 		elif _case.begins_with("turn"):
 			_ship.global_position = Vector3(1000, 0, 1000)
 			_ship.velocity = Vector3.FORWARD * 15.0
 			var angle := deg_to_rad(float(_case.trim_prefix("turn")))
-			_ship.move_to(_ship.global_position + Vector3(sin(angle), 0, -cos(angle)) * 300.0)
+			_orders.move(_ship.global_position + Vector3(sin(angle), 0, -cos(angle)) * 300.0)
 		elif _case == "stop":
 			_ship.global_position = Vector3(1000, 0, 1000)
 			_ship.velocity = Vector3.FORWARD * 15.0
-			_ship.stop()
+			_orders.stop()
 		else:
-			_ship.move_to(Vector3(60, 0, -40))
+			_orders.move(Vector3(60, 0, -40))
 		_ship.reset_physics_interpolation()
 		return
-	var time := _ship.get_clock() - _start
+	var time := _orders.get_clock() - _start
 	if _redirect_at >= 0.0 and not _redirected and time + 1e-7 >= _redirect_at:
 		_redirected = true
-		_ship.move_to(Vector3(240, 0, -201) if _case.begins_with("a2_") else Vector3(60, 0, -40))
-		_events.push_back({event = "redirect_received", time = time, due = time + _ship.profile.reaction_delay})
-	if _first_activation < 0.0 and _ship.get_last_activated_time() >= _start:
+		_orders.move(Vector3(240, 0, -201) if _case.begins_with("a2_") else Vector3(60, 0, -40))
+		_events.push_back({event = "redirect_received", time = time, due = time + _orders.crew.reaction_delay})
+	if _first_activation < 0.0 and _orders.get_last_activated_time() >= _start:
 		_first_activation = time
 	var status := _ship.get_order_status()
 	if _case == "nw_redirect":
@@ -177,7 +179,7 @@ func _sample(_delta: float) -> void:
 		_overrun_events.push_back({time = time, usec = used, status = status})
 	_trace.append_array(PackedFloat64Array([time, position.x, position.z, _ship.velocity.x, _ship.velocity.z,
 		_ship.rotation.y, _ship.get_turn_rate(), _ship.get_course_heading(), _ship.get_desired_speed(), float(_ship.has_order())]))
-	if time > maxf(_redirect_at + 1.0, 1.0) and not _ship.has_order() and _ship.get_pending_count() == 0 and speed < 0.01:
+	if time > maxf(_redirect_at + 1.0, 1.0) and not _ship.has_order() and _orders.get_pending_count() == 0 and speed < 0.01:
 		_rest_ticks += 1
 	else:
 		_rest_ticks = 0
@@ -200,7 +202,7 @@ func _finish(time: float) -> void:
 	if _case == "nw_redirect":
 		summary.nw = {representative_not_exact_replay = true, course_change_degrees = _ship.get_reversal_angle(),
 			path_refreshes = _nw_refreshes, translate_and_turn_ticks = _nw_translate_turn_ticks, terminal = _nw_terminal,
-			same_order = is_equal_approx(_ship.get_last_activated_time() - _start, _first_activation),
+			same_order = is_equal_approx(_orders.get_last_activated_time() - _start, _first_activation),
 			retained_destination = _ship.get_destination() == Vector3(-134.6, 0, -131.8)}
 	DirAccess.make_dir_recursive_absolute(_output)
 	var file := FileAccess.open(_output.path_join(_case + ".json"), FileAccess.WRITE)

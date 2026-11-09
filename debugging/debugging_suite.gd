@@ -40,4 +40,4 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key != null and key.pressed and not key.echo and key.keycode == KEY_F4:
 		if is_instance_valid(ship):
-			ship.stop()
+			(ship.get_node("%Orders") as ShipOrders).stop()

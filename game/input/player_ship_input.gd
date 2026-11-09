@@ -41,7 +41,7 @@ func _move_ship(origin: Vector3, direction: Vector3) -> void:
 		return
 	var target: Variant = MOVE_PLANE.intersects_ray(origin, direction)
 	if target != null:
-		_selection.record_move(_selection.ship.move_to(target))
+		_selection.orders.move(target)
 
 
 func _select_ship(from: Vector3, to: Vector3) -> void:
