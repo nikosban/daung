@@ -2,6 +2,16 @@
 
 [ext_resource type="Script" uid="uid://4du8rewyollp" path="res://Movement/movement_profile.gd" id="1_profile"]
 
+[sub_resource type="Curve" id="Curve_bow_alignment"]
+_limits = [0.0, 180.0, 0.0, 15.0]
+_data = [Vector2(0, 180), 0.0, -18.0, 0, 1, Vector2(5, 90), -18.0, -9.0, 1, 1, Vector2(10, 45), -9.0, -3.0, 1, 1, Vector2(15, 30), -3.0, 0.0, 1, 0]
+point_count = 4
+
+[sub_resource type="Curve" id="Curve_directional"]
+_limits = [0.0, 1.0, 0.0, 15.0]
+_data = [Vector2(0, 1), 0.0, -0.05, 0, 1, Vector2(5, 0.75), -0.05, -0.05, 1, 1, Vector2(10, 0.5), -0.05, -0.05, 1, 1, Vector2(15, 0.25), -0.05, 0.0, 1, 0]
+point_count = 4
+
 [sub_resource type="Curve" id="Curve_turn_acceleration"]
 _limits = [0.0, 30.0, 0.0, 15.0]
 _data = [Vector2(0, 0.5), 0.0, 1.9, 0, 1, Vector2(5, 10), 1.9, -0.6, 1, 1, Vector2(10, 7), -0.6, -0.7, 1, 1, Vector2(15, 3.5), -0.7, 0.0, 1, 0]
@@ -12,23 +22,12 @@ _limits = [0.0, 90.0, 0.0, 15.0]
 _data = [Vector2(0, 1.8), 0.0, 6.64, 0, 1, Vector2(5, 35), 6.64, -1.0, 1, 1, Vector2(10, 30), -1.0, -2.0, 1, 1, Vector2(15, 20), -2.0, 0.0, 1, 0]
 point_count = 4
 
-[sub_resource type="Curve" id="Curve_directional"]
-_limits = [0.0, 1.0, 0.0, 15.0]
-_data = [Vector2(0, 1), 0.0, -0.05, 0, 1, Vector2(5, 0.75), -0.05, -0.05, 1, 1, Vector2(10, 0.5), -0.05, -0.05, 1, 1, Vector2(15, 0.25), -0.05, 0.0, 1, 0]
-point_count = 4
-
-[sub_resource type="Curve" id="Curve_bow_alignment"]
-_limits = [0.0, 180.0, 0.0, 15.0]
-_data = [Vector2(0, 180), 0.0, -18.0, 0, 1, Vector2(5, 90), -18.0, -9.0, 1, 1, Vector2(10, 45), -9.0, -3.0, 1, 1, Vector2(15, 30), -3.0, 0.0, 1, 0]
-point_count = 4
-
 [resource]
 script = ExtResource("1_profile")
 mass = 12.0
 main_acceleration = 0.5
 thruster_strength = 40.0
+directional_thrust_curve = SubResource("Curve_directional")
 turn_acceleration_curve = SubResource("Curve_turn_acceleration")
 turn_rate_curve = SubResource("Curve_turn_rate")
 bow_alignment_curve = SubResource("Curve_bow_alignment")
-directional_thrust_curve = SubResource("Curve_directional")
-forward_directional_acceleration = 0.25

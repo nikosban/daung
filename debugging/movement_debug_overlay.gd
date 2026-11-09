@@ -5,24 +5,14 @@ extends CanvasLayer
 ## with its reason, arrived, stopped or static-contact stop), and the reaction-delay queue (physics clock, pending count, next
 ## pending command and its due time, last receipt and activation times). Reads Movement only; Movement never calls it. Hidden until F3.
 ## F3 also turns the world-space movement trail on and off with it (a fresh trace each time it turns on).
-## F3 also shows the debug destination marker where the ship will go (Task #38, owner decision in PR #55): at the latest
-## received right-click from its receipt, and at the resolved destination once that click's order has been planned to a
-## different point (Task #54). It is forgotten once the ship has no active order and no pending command. Never changes
-## Movement's queue.
 ## F3 also shows and hides the red collision-shape outlines (Task #44).
-
-## Display height of the destination marker above its XZ (rendering detail, not motion data).
-const MARKER_DISPLAY_HEIGHT := 0.1
 
 @export var ship: ShipMovement
 @export var trail: MovementTrail
-@export var destination_marker: MeshInstance3D
 ## F3 red outlines of collision shapes (Task #44); shown and hidden with the readout.
 @export var collision_outlines: Array[CollisionShapeOutline] = []
 
 @onready var _label: Label = $Layout/Margins/Telemetry
-var _has_request := false
-var _requested_position := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -47,23 +37,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		trail.set_active(visible)
 		for outline in collision_outlines:
 			outline.visible = visible
-		_update_marker()
-
-
-## Connected to the input's move_requested: caches the latest received move target, also while F3 is hidden.
-func record_move_request(world_position: Vector3) -> void:
-	_has_request = true
-	_requested_position = world_position
-	_update_marker()
 
 
 func _process(_delta: float) -> void:
-	if _has_request and not ship.has_order() and ship.get_pending_count() == 0:
-		_has_request = false
-		_update_marker()
 	if not visible:
 		return
-	_update_marker()
 	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
 	var thruster := ship.get_thruster_command()
 	var destination := ship.get_destination()
@@ -113,19 +91,3 @@ func _next_pending_text() -> String:
 
 func _time_text(time: float) -> String:
 	return "—" if time < 0.0 else "%.2f s" % time
-
-
-func _update_marker() -> void:
-	destination_marker.visible = visible and _has_request
-	if destination_marker.visible:
-		var target := _marker_target()
-		destination_marker.global_position = Vector3(target.x, MARKER_DISPLAY_HEIGHT, target.z)
-
-
-## Where the ship will go for the latest click: its resolved destination once the active order is that click's and
-## nothing newer is pending (Task #54), otherwise the click itself.
-func _marker_target() -> Vector3:
-	var requested := ship.get_requested_destination()
-	if ship.has_order() and ship.get_pending_count() == 0 and Vector2(requested.x - _requested_position.x, requested.z - _requested_position.z).length() <= 0.01:
-		return ship.get_destination()
-	return _requested_position

@@ -1,0 +1,31 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="1_ship"]
+[ext_resource type="PackedScene" path="res://game/camera/camera_rig.tscn" id="2_camera"]
+[ext_resource type="PackedScene" path="res://game/input/player_ship_input.tscn" id="3_input"]
+
+[sub_resource type="Environment" id="Environment_preview"]
+background_mode = 1
+background_color = Color(0.05, 0.06, 0.09, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.6, 0.65, 0.75, 1)
+ambient_light_energy = 0.5
+
+[node name="MoveFeedbackPreview" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_preview")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-50, -25, 0)
+
+[node name="CameraRig" parent="." instance=ExtResource("2_camera")]
+position = Vector3(0, 0, -15)
+
+[node name="ShipA" parent="." instance=ExtResource("1_ship")]
+position = Vector3(-18, 0, 0)
+
+[node name="ShipB" parent="." instance=ExtResource("1_ship")]
+position = Vector3(18, 0, 0)
+
+[node name="PlayerShipInput" parent="." instance=ExtResource("3_input")]

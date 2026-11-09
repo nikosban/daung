@@ -1,0 +1,17 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://game/presentation/ship_selection/ship_command_presentation.gd" id="1_presentation"]
+[ext_resource type="Resource" path="res://game/presentation/ship_feedback_style.tres" id="2_style"]
+[ext_resource type="PackedScene" path="res://game/presentation/movement/move_feedback.tscn" id="3_feedback"]
+
+[node name="CommandPresentation" type="Node3D"]
+visible = false
+top_level = true
+physics_interpolation_mode = 2
+script = ExtResource("1_presentation")
+style = ExtResource("2_style")
+
+[node name="SelectionRing" type="MeshInstance3D" parent="."]
+cast_shadow = 0
+
+[node name="MoveFeedback" parent="." instance=ExtResource("3_feedback")]

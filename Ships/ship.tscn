@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://Movement/ship_movement.gd" id="1_movement"]
 [ext_resource type="Resource" path="res://Movement/Profiles/frigate_movement_profile.tres" id="2_profile"]
 [ext_resource type="PackedScene" uid="uid://bt7o1ldcdkadv" path="res://Assets/Ships/Whitebox/Arrata_Frigate_001.glb" id="3_model"]
+[ext_resource type="PackedScene" path="res://game/presentation/ship_selection/ship_command_presentation.tscn" id="4_presentation"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_hull"]
 size = Vector3(5.9, 3.2, 20.3)
@@ -19,3 +20,7 @@ shape = SubResource("BoxShape3D_hull")
 [node name="Visual" type="Node3D" parent="."]
 
 [node name="Model" parent="Visual" instance=ExtResource("3_model")]
+
+[node name="CommandPresentation" parent="Visual" node_paths=PackedStringArray("ship") instance=ExtResource("4_presentation")]
+unique_name_in_owner = true
+ship = NodePath("../..")

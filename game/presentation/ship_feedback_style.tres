@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="ShipFeedbackStyle" format=3 uid="uid://c3vyv8skmb4xb"]
+
+[ext_resource type="Script" uid="uid://c1iuary3clq06" path="res://game/presentation/ship_feedback_style.gd" id="1_style"]
+
+[sub_resource type="StandardMaterial3D" id="Material_feedback"]
+cull_mode = 2
+shading_mode = 0
+albedo_color = Color(0.522, 0.557, 0.58, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_pending_feedback"]
+cull_mode = 2
+shading_mode = 0
+albedo_color = Color(0.439216, 0.65098, 0.839216, 1)
+
+[resource]
+script = ExtResource("1_style")
+material = SubResource("Material_feedback")
+pending_material = SubResource("Material_pending_feedback")
+selection_stroke = 0.25
+destination_inner_radius = 1.2
+destination_outer_radius = 2.0
+ring_stroke = 0.2
+line_width = 0.2
+line_gap = 0.5

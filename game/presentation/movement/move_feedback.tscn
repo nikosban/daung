@@ -1,0 +1,13 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/presentation/movement/move_feedback.gd" id="1_feedback"]
+
+[node name="MoveFeedback" type="Node3D"]
+visible = false
+script = ExtResource("1_feedback")
+
+[node name="Connector" type="MeshInstance3D" parent="."]
+cast_shadow = 0
+
+[node name="Destination" type="MeshInstance3D" parent="."]
+cast_shadow = 0

@@ -50,8 +50,10 @@ extends CharacterBody3D
 
 ## Physics clock in seconds: the sum of physics ticks so far.
 var _clock := 0.0
-## Received commands waiting for activation, in receipt order: {kind: "move" | "stop", position, received, due}.
+## Received commands waiting for activation, in receipt order: {kind, position, received, due, move_receipt}.
 var _pending: Array[Dictionary] = []
+var _last_move_receipt := 0
+var _active_move_receipt := 0
 ## Physics clock of the last receipt and the last activation (-1 = none yet).
 var _last_received := -1.0
 var _last_activated := -1.0
@@ -121,8 +123,11 @@ func _exit_tree() -> void:
 
 ## Receives an order to the point. After the reaction delay it replaces the active order; the course is
 ## taken from the ship's position then. Y is ignored. The current velocity carries over.
-func move_to(world_position: Vector3) -> void:
-	_receive("move", world_position)
+## Returns a positive per-ship receipt ID for observing this particular move.
+func move_to(world_position: Vector3) -> int:
+	_last_move_receipt += 1
+	_receive("move", world_position, _last_move_receipt)
+	return _last_move_receipt
 
 
 ## Receives a stop. After the reaction delay it ends the active order; the ship then brakes toward zero
@@ -141,6 +146,28 @@ func has_order() -> bool:
 ## plan leads to (the click, or the resolved point, Task #54).
 func get_destination() -> Vector3:
 	return _destination
+
+
+## Returns the accepted destination for this active move, or null while it is unavailable.
+## A route refresh keeps the accepted endpoint while it runs.
+func get_resolved_move_destination(move_receipt: int) -> Variant:
+	if move_receipt <= 0 or move_receipt != _active_move_receipt or not _has_order or _blocked:
+		return null
+	if _job != null and not _job.refresh:
+		return null
+	return _destination
+
+
+## Returns the requested point while this move is queued or its first plan is pending.
+func get_pending_move_destination(move_receipt: int) -> Variant:
+	if move_receipt <= 0:
+		return null
+	if move_receipt == _active_move_receipt and _has_order and not _blocked and _job != null and not _job.refresh:
+		return _requested
+	for command in _pending:
+		if command.move_receipt == move_receipt:
+			return command.position
+	return null
 
 
 ## The requested click of the active or last move (Task #54).
@@ -162,7 +189,9 @@ func get_pending_count() -> int:
 func get_next_pending() -> Dictionary:
 	if _pending.is_empty():
 		return {}
-	return _pending[0].duplicate()
+	var command := _pending[0].duplicate()
+	command.erase("move_receipt")
+	return command
 
 
 ## Physics clock of the last received command, or -1 if none.
@@ -420,9 +449,10 @@ func _stop_on_static_contact(attempted: Vector3) -> void:
 		return
 
 
-func _receive(kind: String, world_position: Vector3) -> void:
+func _receive(kind: String, world_position: Vector3, move_receipt := 0) -> void:
 	var delay := profile.reaction_delay if profile != null else 0.0
-	var command := {kind = kind, position = world_position, received = _clock, due = _clock + delay}
+	var command := {kind = kind, position = world_position, received = _clock, due = _clock + delay,
+		move_receipt = move_receipt}
 	_pending.push_back(command)
 	_last_received = _clock
 	print("Movement: received %s at %.3f s, due %.3f s" % [_describe(command), command.received, command.due])
@@ -430,6 +460,7 @@ func _receive(kind: String, world_position: Vector3) -> void:
 
 func _activate(command: Dictionary) -> void:
 	if command.kind == "move":
+		_active_move_receipt = command.move_receipt
 		_navigation_baseline = false
 		_clearance_status = ""
 		_blocked = false
