@@ -12,7 +12,7 @@ class Sampler extends Node:
 
 const SINGLE_CASES: Array[String] = ["clear", "detour", "replacement", "stop", "a2_activate5", "a2_activate6", "a2_activate7"]
 const TRAFFIC_CASES: Array[String] = ["crossing", "acceleration_priority", "committed_priority", "tie", "back_out",
-	"parked_blocker", "exhausted_recovery", "replacement_while_yielding", "contact", "slow_clear"]
+	"parked_blocker", "exhausted_recovery", "replacement_while_yielding", "contact", "slow_clear", "fleet_line"]
 const BUDGET_USEC := 1500
 
 var _queue: Array[String] = []
@@ -361,6 +361,8 @@ func _check_traffic(time: float) -> void:
 			passed = _no_contact() and _arrived(0) and _arrived(1) and _closest[0].y < _closest[1].y and _saw(1, "yielding to Ship0")
 		"back_out":
 			passed = _no_contact() and _arrived(0) and _arrived(1) and _saw(1, "making room for Ship0") and _min_x[1] < -10.0
+		"fleet_line":
+			passed = _no_contact() and _arrived(0) and _arrived(1) and _arrived(2) 				and not _saw(0, "making room") and not _saw(1, "making room") and not _saw(2, "making room")
 		"slow_clear":
 			passed = _no_contact() and _arrived(0) and _arrived(1) and _saw(0, "passage obstructed by Ship1")
 		"parked_blocker":

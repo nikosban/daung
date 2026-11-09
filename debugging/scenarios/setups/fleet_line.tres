@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="TrafficSetup" format=3]
+
+[ext_resource type="Script" path="res://debugging/scenarios/traffic_setup.gd" id="1_setup"]
+
+[resource]
+script = ExtResource("1_setup")
+description = "Fleet line: the three ships at Main's start positions get the fleet points for a click at (-150, -20) (middle (-150, -20), left (-153.5, 6.3), right (-146.5, -46.3)). They stand in a line along the travel direction: left goes, then middle, then right; no ship makes room or backs away."
+positions = PackedVector3Array(0, 0, 0, -30, 0, 0, 30, 0, 0)
+yaws = PackedFloat32Array(0, 0, 0)
+velocities = PackedVector3Array(0, 0, 0, 0, 0, 0, 0, 0, 0)
+order_times = PackedFloat32Array(0, 0, 0)
+order_slots = PackedInt32Array(0, 1, 2)
+order_points = PackedVector3Array(-150, 0, -20, -153.5, 0, 6.3, -146.5, 0, -46.3)
+camera_focus = Vector3(-60, 0, -10)
+camera_height = 160

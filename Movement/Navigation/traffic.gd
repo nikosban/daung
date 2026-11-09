@@ -418,14 +418,17 @@ static func _end_room(ship: ShipMovement, winner: ShipMovement) -> void:
 
 
 ## Deadlock rule: per conflict group (ships joined by grants), the best remaining path distance of each ship. When none
-## improves by arrival_tolerance within departure_max_time, the lowest-ranked ship makes room once.
+## improves by arrival_tolerance within departure_max_time, the lowest-ranked ship makes room once. A ship's wait counts
+## only within its current grants: gaining or losing one restarts it, so waiting behind a ship that was moving (a grant
+## that has just ended) is not mistaken for a deadlock of the group that remains.
 static func _deadlocks(by_ship: Dictionary, delta: float) -> void:
 	for ship: ShipMovement in by_ship:
 		var snap: Snap = by_ship[ship]
 		var remaining := _lengths(snap.full)[snap.full.size() - 1]
+		var grants := _grants_of(ship)
 		var entry: Dictionary = _progress.get(ship, {})
-		if entry.is_empty() or entry.serial != snap.serial or remaining < entry.best - ship.profile.arrival_tolerance:
-			_progress[ship] = {serial = snap.serial, best = remaining, stalled = 0.0}
+		if entry.is_empty() or entry.serial != snap.serial or entry.grants != grants or remaining < entry.best - ship.profile.arrival_tolerance:
+			_progress[ship] = {serial = snap.serial, grants = grants, best = remaining, stalled = 0.0}
 		else:
 			entry.stalled += delta
 	var seen := {}
@@ -469,6 +472,17 @@ static func _deadlocks(by_ship: Dictionary, delta: float) -> void:
 			_deadlocked[lowest] = true
 			if _decisions.has(lowest):
 				_decisions[lowest].status = "traffic deadlock: recovery exhausted"
+
+
+## The grants a ship takes part in, as the instance IDs of its winners and losers (a comparable value).
+static func _grants_of(ship: ShipMovement) -> Array[int]:
+	var ids: Array[int] = []
+	for grant in _grants:
+		if grant.winner == ship:
+			ids.push_back(grant.loser.get_instance_id())
+		elif grant.loser == ship:
+			ids.push_back(-grant.winner.get_instance_id())
+	return ids
 
 
 static func _group(start: ShipMovement) -> Array[ShipMovement]:
