@@ -16,26 +16,25 @@ func configure(style: ShipFeedbackStyle) -> void:
 		style.destination_outer_radius, style.destination_arc_degrees)
 
 
-func show_destination(camera: Camera3D, screen_scale: Vector2, offset: Vector3, selection_radius: float,
-		pending: bool) -> void:
+func show_destination(camera: Camera3D, screen_scale: Vector2, offset: Vector3, pending: bool) -> void:
 	var material := _style.pending_material if pending else _style.material
 	if _connector.material_override != material:
 		_connector.material_override = material
 
 	_destination.position = offset
 	_destination.draw(camera, screen_scale, material.albedo_color, -offset)
-	_connector.visible = _draw_connector(camera, screen_scale, offset, selection_radius)
+	_connector.visible = _draw_connector(camera, screen_scale, offset)
 	show()
 
 
-func _draw_connector(camera: Camera3D, screen_scale: Vector2, offset: Vector3, selection_radius: float) -> bool:
+func _draw_connector(camera: Camera3D, screen_scale: Vector2, offset: Vector3) -> bool:
 	var aspect := GroundFeedbackMesh.floor_aspect(camera)
-	if aspect <= 0.0 or offset.length() <= selection_radius:
+	if aspect <= 0.0 or offset.is_zero_approx():
 		return false
 
-	# Start at the actual circle edge, then trim the destination and gaps in pixels.
-	var start := global_position + offset.normalized() * selection_radius
-	var end := global_position + offset
+	# Clip the world anchors to camera depth before measuring the ring edges in pixels.
+	var start := global_position
+	var end := start + offset
 	var camera_transform := camera.get_camera_transform()
 	var start_depth := camera_transform.basis.z.dot(camera_transform.origin - start)
 	var end_depth := camera_transform.basis.z.dot(camera_transform.origin - end)
@@ -51,7 +50,7 @@ func _draw_connector(camera: Camera3D, screen_scale: Vector2, offset: Vector3, s
 		return false
 	var along := span / distance
 	var ellipse_scale := Vector2(along.x, along.y / aspect).length()
-	var start_trim := _style.line_gap if depth_span.x == 0.0 and selection_radius > 0.0 else 0.0
+	var start_trim := _style.selection_radius / ellipse_scale + _style.line_gap if depth_span.x == 0.0 else 0.0
 	var end_trim := _style.destination_outer_radius / ellipse_scale + _style.line_gap if depth_span.y == 1.0 else 0.0
 	if distance <= start_trim + end_trim:
 		return false

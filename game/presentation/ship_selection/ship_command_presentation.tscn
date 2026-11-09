@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://game/presentation/ship_selection/ship_command_presentation.gd" id="1_presentation"]
 [ext_resource type="Resource" path="res://game/presentation/ship_feedback_style.tres" id="2_style"]
 [ext_resource type="PackedScene" path="res://game/presentation/movement/move_feedback.tscn" id="3_feedback"]
-[ext_resource type="Script" path="res://game/presentation/ship_selection/selection_ring.gd" id="4_ring"]
+[ext_resource type="Script" path="res://game/presentation/ground_feedback_ring.gd" id="4_ring"]
 
 [node name="CommandPresentation" type="Node3D"]
 visible = false
