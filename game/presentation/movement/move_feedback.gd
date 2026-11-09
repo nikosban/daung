@@ -29,12 +29,12 @@ func show_destination(camera: Camera3D, screen_scale: Vector2, offset: Vector3, 
 
 func _draw_connector(camera: Camera3D, screen_scale: Vector2, offset: Vector3) -> bool:
 	var aspect := GroundFeedbackMesh.floor_aspect(camera)
-	if aspect <= 0.0 or offset.is_zero_approx():
+	if aspect <= 0.0 or offset.length() <= _style.selection_radius:
 		return false
 
-	# Clip the world anchors to camera depth before measuring the ring edges in pixels.
-	var start := global_position
-	var end := start + offset
+	# The selection ring has a world-space edge. Gaps and the destination glyph use pixels.
+	var start := global_position + offset.normalized() * _style.selection_radius
+	var end := global_position + offset
 	var camera_transform := camera.get_camera_transform()
 	var start_depth := camera_transform.basis.z.dot(camera_transform.origin - start)
 	var end_depth := camera_transform.basis.z.dot(camera_transform.origin - end)
@@ -50,7 +50,7 @@ func _draw_connector(camera: Camera3D, screen_scale: Vector2, offset: Vector3) -
 		return false
 	var along := span / distance
 	var ellipse_scale := Vector2(along.x, along.y / aspect).length()
-	var start_trim := _style.selection_radius / ellipse_scale + _style.line_gap if depth_span.x == 0.0 else 0.0
+	var start_trim := _style.line_gap if depth_span.x == 0.0 else 0.0
 	var end_trim := _style.destination_outer_radius / ellipse_scale + _style.line_gap if depth_span.y == 1.0 else 0.0
 	if distance <= start_trim + end_trim:
 		return false
