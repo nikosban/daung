@@ -10,16 +10,21 @@
 
 | Boundary | Owns | Dependencies |
 |---|---|---|
-| [Main composition](Main/main.tscn) | World, static obstacles and baked navigation geometry; camera, ship, player input and debugging instances | Shared camera, ship, asteroid, player input and debugging scenes; Godot |
-| [Ship composition](Ships/ship.tscn) | Movement body, collision hull, movement profile, model and command presentation | Movement; shared profile, model and presentation assets |
-| [Movement](Movement/ship_movement.gd) | Commands, authoritative position, planar velocity and yaw; internal pilot/propulsion and navigation | Godot APIs and its own internal components only |
+| [Main composition](Main/main.tscn) | World, static obstacles and baked navigation geometry; camera, three ships, Fleet and debugging instances | Shared camera, ship, asteroid, Fleet and debugging scenes; Godot |
+| [Ship composition](Ships/ship.tscn) | Movement body, collision hull and layers, movement profile, Orders, model and command presentation | Movement; Orders; shared profile, crew, model and presentation assets |
+| [Movement](Movement/ship_movement.gd) | Order activation, authoritative position, planar velocity and yaw; internal pilot/propulsion and navigation | Godot APIs and its own internal components only |
+| [Orders](game/command/orders/ship_orders.gd) | Per-ship command intake, crew reaction delay, FIFO, receipts and log lines; activation into Movement | Movement activation; shared crew profile; Godot |
+| [Fleet](game/command/fleet/fleet_command.tscn) | Roster, ordered selection, selection keys, click picking and player order dispatch | Orders commands; Movement (read-only positions, traffic slot); ship presentation selection; active viewport camera and physics space |
 | [Camera](game/camera/camera_rig.tscn) | Floor focus, view transform and camera input | Shared camera settings; Godot only |
-| [Player input](game/input/player_ship_input.tscn) | Single-ship selection and player move dispatch | Active viewport camera and physics space; Movement commands and ship presentation |
-| [Ship presentation](game/presentation/ship_selection/ship_command_presentation.tscn) | Selection ring, destination marker and straight connector; latest player move receipt per ship | Movement's accepted destination observation; shared presentation style; Godot |
-| [Debugging](debugging/debugging_suite.tscn) | F4 diagnostic stop, telemetry display and diagnostic visuals | Movement requests/read-only observations; injected scene references; Godot |
+| [Ship presentation](game/presentation/ship_selection/ship_command_presentation.tscn) | Selection ring, destination marker and straight connector | Orders' latest receipt and pending point; Movement's planning and accepted destination observations; shared presentation style; Godot |
+| [Debugging](debugging/debugging_suite.tscn) | F4 diagnostic stop, telemetry display and diagnostic visuals for the current selection | Fleet selection; Orders commands and queue observations; Movement read-only observations; injected scene references; Godot |
 | [Display and UI configuration](project.godot) | Window/reference sizing and proportional UI scaling; shared UI theme | Godot; shared [theme resource](game/ui/ui_theme.tres) |
 
-Movement and Camera are independent gameplay modules. Main and Ship are composition boundaries. Movement never depends on Camera or Debugging. New module dependencies require an approved ticket stating the map change.
+Movement and Camera are independent gameplay modules. Command lives outside Movement in two modules: Fleet → Orders → Movement. Fleet also reads Movement and drives ship presentation selection; presentation reads Orders; Debugging reads Fleet and Orders. Movement never depends on Orders, Fleet, Camera or Debugging. Main and Ship are composition boundaries. New module dependencies require an approved ticket stating the map change.
+
+**Physics tick order:** every ship's Orders (`process_physics_priority = -20`) advances its clock and activates due commands in receipt order; then each ship's Movement (priority 0) runs, the first one servicing Navigator; diagnostic trails sample afterwards.
+
+**Physics layers** (bitmask = `1 << (layer − 1)`, names in Project Settings): layer 1 static obstacles; layer 2 navigation floor (layer `2`, mask `0`); layer 3 ships (layer `4`, mask `5`: obstacles and ships). `HullProbe` queries only layer 1 (`STATIC_OBSTACLE_MASK`), so static navigation never sees ships. Selection picking uses the default ray mask. Ships in contact slide; there is no ship avoidance or ship contact stop.
 
 Main supplies the navigation map through Godot's `NavigationRegion3D` and physics geometry. Static obstacle instances share [one scene](Main/asteroid.tscn); geometry changes require rebaking the navigation mesh. The navigation floor is bake geometry and is excluded from the ship's physical collision mask.
 
@@ -29,7 +34,7 @@ The ship's collision shape is navigation's authoritative hull source; hull queri
 
 ### External contract
 
-- Callers use `move_to(world_position)` and `stop()`. Both enter a per-ship FIFO and activate after their reaction delay. The active order continues meanwhile. Activation replaces it and cancels its navigation work without resetting momentum. Destination Y is ignored. A move returns a receipt ID. `get_pending_move_destination(receipt)` exposes the requested point while that move is queued or initially planning. `get_resolved_move_destination(receipt)` exposes the destination while the move is active, accepted and unblocked.
+- Only Orders calls `activate_move(world_position, receipt)` and `activate_stop()`; Movement has no command queue, delay or immediate-execution path. Activation replaces the active order and cancels its navigation work without resetting momentum. Destination Y is ignored. `get_planning_move_destination(receipt)` exposes the requested point while that active move is initially planning. `get_resolved_move_destination(receipt)` exposes the destination while the move is active, accepted and unblocked. `set_traffic_slot(i)` stores Fleet's roster index; nothing uses it yet.
 - `ShipMovement` alone applies authoritative motion through the character body. Read-only observations expose commands, requested/resolved destination, status and telemetry; there are no movement notification signals. Invalid movement configuration disables motion.
 - Arrival requires both distance and speed tolerances. Arrival and stop leave ordinary braking, without position holding or final alignment. Driving into a stationary static obstacle ends the active order and zeroes motion; pending commands survive.
 
@@ -57,17 +62,19 @@ Levels instance the master scene and place its root at their initial floor focus
 
 Consumers obtain Camera3D through `get_camera()`; `set_view(focus_position, height, yaw_degrees)` immediately places the view and synchronizes zoom within its limits. Focus Y defines the camera's floor elevation; this does not change Movement's X/Z gameplay plane.
 
-## Player input and ship presentation
+## Orders, Fleet and ship presentation
 
-One [controller](game/input/player_ship_input.gd) per playable viewport processes unhandled clicks in input order. The physics-space pick selects one ship or clears selection. A right-click projected onto Y = 0 issues a move immediately when selection is settled. An earlier pending pick is processed first in the physics tick.
+[ShipOrders](game/command/orders/ship_orders.gd) is the sole authority for receiving and delaying commands. Each ship instances it as `%Orders`. `move(point)` returns a per-ship receipt; `stop()` is delayed like a move, with no bypass. Every command waits the shared [crew profile](game/command/orders/crew_profile.gd)'s delay on Orders' own physics clock, then activates in receipt order; nothing is cancelled or skipped. Orders exposes its clock, queue, last receipt/activation times, latest receipt and pending points, and logs every receipt and activation.
 
-Each ship instances [command presentation](game/presentation/ship_selection/ship_command_presentation.tscn) under `Visual`. The selected ship displays only its latest player move receipt. Blue feedback marks the requested point during the reaction delay and initial planning. Gray feedback marks the accepted endpoint. All feedback is flat horizontal geometry in world metres at Y = 0, built by one shared [ring builder](game/presentation/ground_feedback_mesh.gd). The selection ring follows the ship's rendered X/Z position. The destination glyph stays at the destination and turns about Y so its outer arc faces the rendered ship position. The connector runs between the selection ring and the outer destination radius, leaving a world gap at each end, and hides when there is no room for both gaps. World depth applies to all feedback. Deselecting hides it. The [preview](game/presentation/movement/move_feedback_preview.tscn) uses the production input, camera and ship scenes.
+One [FleetCommand](game/command/fleet/fleet_command.gd) per playable viewport owns the roster (slot order middle, left, right) and an ordered selection (`get_selection()`, roster order). Input Map actions `select_fleet` and `select_ship_1..3` select the roster or one slot; a missing slot does nothing. It processes unhandled clicks in input order: the physics-space pick selects one roster ship or clears the selection. A right-click projected onto Y = 0 sends the same point to every selected ship's Orders, immediately when no pick is pending. Fleet sets each presentation's selected state.
+
+Each ship instances [command presentation](game/presentation/ship_selection/ship_command_presentation.tscn) under `Visual`. Each selected ship displays only its latest Orders receipt. Blue feedback marks the requested point during the reaction delay and initial planning. Gray feedback marks the accepted endpoint. All feedback is flat horizontal geometry in world metres at Y = 0, built by one shared [ring builder](game/presentation/ground_feedback_mesh.gd). The selection ring follows the ship's rendered X/Z position. The destination glyph stays at the destination and turns about Y so its outer arc faces the rendered ship position. The connector runs between the selection ring and the outer destination radius, leaving a world gap at each end, and hides when there is no room for both gaps. World depth applies to all feedback. Deselecting hides it. The [preview](game/presentation/movement/move_feedback_preview.tscn) uses the production Fleet (two-ship roster), camera and ship scenes.
 
 ## Debugging integration
 
-[DebuggingSuite](debugging/debugging_suite.gd) receives the test ship, collision shapes and reference positions from its host. Removing it cleans up generated outlines attached to external collision shapes.
+[DebuggingSuite](debugging/debugging_suite.gd) receives the fleet, collision shapes and reference positions from its host and follows the fleet's selection each frame. Removing it cleans up generated outlines attached to external collision shapes.
 
-F4 queues a diagnostic stop on the test ship. The overlay reads telemetry and the F3 trail samples actual world positions after movement. Shared visual definitions and settings remain reusable; runtime state belongs to each suite.
+F4 queues a diagnostic stop through Orders on every selected ship. F3 shows the full readout for one selected ship, one compact block per selected ship in roster order for several, or "no ship selected". The suite makes one trail per roster ship from its `MovementTrail` node; F3 shows the selected ships' trails, restarting a trail when its ship becomes selected. Trails sample actual world positions after movement. Shared visual definitions and settings remain reusable; runtime state belongs to each suite.
 
 The suite owns the overlay's scene-based Control layout, margins and wrapping telemetry label. Diagnostic Controls ignore mouse input. The label selects the shared theme's `DebuggerLabel` variation; its outline does not apply to ordinary UI labels. On initialization and viewport resize, the overlay caps its label's nominal screen-pixel font size using that variation's limit and the actual viewport stretch, rounding down. The font override belongs to the label instance; the shared theme and ordinary UI scaling remain unchanged.
 
@@ -82,6 +89,7 @@ The external [UI theme](game/ui/ui_theme.tres) supplies the project-wide default
 Shared Godot Resources hold configuration and are not mutated per instance. Orders, motion and route progress belong to each ship. Tuning values belong in data assets, with defaults, units and approved ranges defined by their resource scripts:
 
 - [MovementProfile](Movement/movement_profile.gd) defines movement configuration; the [frigate resource](Movement/Profiles/frigate_movement_profile.tres) supplies the active hull's values and curves.
+- [CrewProfile](game/command/orders/crew_profile.gd) and the [veteran crew resource](game/command/orders/veteran_crew.tres) define the command reaction delay.
 - [NavigationBudget](Movement/Navigation/navigation_budget.gd) and its [resource](Movement/Navigation/navigation_budget.tres) configure shared navigation limits.
 - [Trail settings](debugging/movement_trail_settings.gd) and their [resource](debugging/movement_trail_settings.tres) configure diagnostic sampling.
 - [Ship feedback style](game/presentation/ship_feedback_style.tres) configures shared materials and all feedback sizes in world metres: selection and destination radii and strokes, connector width and gaps.
