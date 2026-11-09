@@ -11,6 +11,8 @@
 size = Vector3(5.9, 3.2, 20.3)
 
 [node name="Ship" type="CharacterBody3D"]
+collision_layer = 4
+collision_mask = 5
 motion_mode = 1
 script = ExtResource("1_movement")
 profile = ExtResource("2_profile")
