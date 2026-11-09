@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="TrafficSetup" format=3]
+
+[ext_resource type="Script" path="res://debugging/scenarios/traffic_setup.gd" id="1_setup"]
+
+[resource]
+script = ExtResource("1_setup")
+description = "Fleet sweep: slot 0 (middle) cruises west at 14 m/s along z = -60; slot 1 (left) rests at (0, 0) and slot 2 (right) at (60, 20). Press 0 and right-click near (0, 300) within the first two seconds (the test clicks at 1 s). Fleet places follow the ships stopping points: the fast ship, still east of the others, is heading west, so it gets the west place."
+positions = PackedVector3Array(80, 0, -60, 0, 0, 0, 60, 0, 20)
+yaws = PackedFloat32Array(90, 180, 180)
+velocities = PackedVector3Array(-14, 0, 0, 0, 0, 0, 0, 0, 0)
+order_times = PackedFloat32Array(0)
+order_slots = PackedInt32Array(0)
+order_points = PackedVector3Array(-300, 0, -60)
+camera_focus = Vector3(0, 0, 120)
+camera_height = 260

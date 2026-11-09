@@ -12,7 +12,7 @@ class Sampler extends Node:
 
 const SINGLE_CASES: Array[String] = ["clear", "detour", "replacement", "stop", "a2_activate5", "a2_activate6", "a2_activate7"]
 const TRAFFIC_CASES: Array[String] = ["crossing", "acceleration_priority", "committed_priority", "tie", "back_out",
-	"parked_blocker", "exhausted_recovery", "replacement_while_yielding", "contact", "slow_clear", "fleet_line"]
+	"parked_blocker", "exhausted_recovery", "replacement_while_yielding", "contact", "slow_clear", "fleet_line", "fleet_sweep"]
 const BUDGET_USEC := 1500
 
 var _queue: Array[String] = []
@@ -238,6 +238,7 @@ var _min_x: Array[float] = []
 var _max_abs_x: Array[float] = []
 var _tick := 0
 var _quiet := 0
+var _clicked := false
 var _costs := PackedInt32Array()
 var _pass_costs := PackedInt32Array()
 var _case_costs := PackedInt32Array()
@@ -268,6 +269,7 @@ func _start_traffic() -> void:
 		_max_abs_x.push_back(0.0)
 	_tick = 0
 	_quiet = 0
+	_clicked = false
 	_case_costs = PackedInt32Array()
 	_worst_at = Vector2(0, -1)
 	_sampler = Sampler.new()
@@ -287,6 +289,12 @@ func _sample_traffic(_delta: float) -> void:
 		return
 	_tick += 1
 	var time: float = _scenario.get_elapsed()
+	if _case == "fleet_sweep" and not _clicked and time >= 1.0:
+		# The player's fleet order: select the whole roster and right-click (0, 300) through FleetCommand.
+		_clicked = true
+		var fleet: FleetCommand = _scenario.get_node("FleetCommand")
+		fleet._select(fleet.roster)
+		fleet._move_selection(Vector3(0, 100, 300), Vector3.DOWN)
 	var cost := Navigator.get_frame_used()
 	_costs.push_back(cost)
 	_pass_costs.push_back(Traffic.get_last_usec())
@@ -361,6 +369,12 @@ func _check_traffic(time: float) -> void:
 			passed = _no_contact() and _arrived(0) and _arrived(1) and _closest[0].y < _closest[1].y and _saw(1, "yielding to Ship0")
 		"back_out":
 			passed = _no_contact() and _arrived(0) and _arrived(1) and _saw(1, "making room for Ship0") and _min_x[1] < -10.0
+		"fleet_sweep":
+			# Fleet places follow stopping points: the fast ship (heading west) gets the westernmost point.
+			var west := true
+			for i in [1, 2]:
+				west = west and _ships[0].get_requested_destination().x < _ships[i].get_requested_destination().x
+			passed = _no_contact() and _arrived(0) and _arrived(1) and _arrived(2) and west
 		"fleet_line":
 			passed = _no_contact() and _arrived(0) and _arrived(1) and _arrived(2) 				and not _saw(0, "making room") and not _saw(1, "making room") and not _saw(2, "making room")
 		"slow_clear":

@@ -209,6 +209,19 @@ func contact_stop(other: ShipMovement) -> void:
 	print("Movement: %s stopped by ship contact with %s at %.3f s; order ended" % [name, other.name, other._clock])
 
 
+## Where the ship would come to rest braking straight from its current velocity (planar, metres): its position plus
+## v² / (2 × the weakest directional braking) along the travel direction. A conservative read-only prediction (Fleet
+## orders its places by it); it is the position itself at rest.
+func get_stopping_point() -> Vector3:
+	var here := RouteGuidance.planar(global_position)
+	var planar_velocity := RouteGuidance.planar(velocity)
+	var speed := planar_velocity.length()
+	var braking := HullProbe.minimum_braking(profile) if _valid else 0.0
+	if speed == 0.0 or braking <= 0.0:
+		return here
+	return here + planar_velocity / speed * (speed * speed / (2.0 * braking))
+
+
 ## Farthest hull point from the vertical axis (m), for ship traffic.
 func get_hull_reach() -> float:
 	return _probe.reach
