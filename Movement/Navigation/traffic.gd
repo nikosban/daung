@@ -11,7 +11,8 @@ extends RefCounted
 ##   centre first enters the other's capsule is its s; a ship with s at 0 or below its stopping distance is committed.
 ## - Priority: committed first, then rated forward acceleration (cached at registration), then traffic slot.
 ## - A grant (winner, loser) holds until the winner's centre passes the far end of the shared space (and the capsules no
-##   longer overlap), or either ship's order changes. The loser holds at s - (reach + buffer) on its own path, course unchanged.
+##   longer overlap), or either ship's order changes. The loser holds at s - (reach + buffer) on its own path, course
+##   unchanged. The winner keeps its priority but brakes while another ship physically obstructs its passage.
 ## - Making room: a loser that sits in the winner's path tries, once each, a point back along its approach and the
 ##   shorter side point perpendicular to the winner's path (offset reach + reach + buffer, ties to the right).
 ## - Parked blocker: a ship without an order (or blocked) is an obstacle. A moving ship whose path ahead meets it steers
@@ -50,6 +51,9 @@ class Decision:
 	var guide := Vector3.ZERO
 	## Parked-blocker recovery is exhausted: the ship abandons its order.
 	var blocked := false
+	## A ship that this one has right of way over (null when none): the winner keeps its priority but still brakes
+	## when another ship physically obstructs its passage.
+	var right_of_way_over: ShipMovement
 
 
 class Grant:
@@ -244,6 +248,10 @@ static func _outranks(a: Snap, s_a: float, b: Snap, s_b: float) -> bool:
 static func _decide(snap: Snap, snaps: Array[Snap], by_ship: Dictionary, delta: float) -> void:
 	var decision := Decision.new()
 	_decisions[snap.ship] = decision
+	for grant in _grants:
+		if grant.winner == snap.ship:
+			decision.right_of_way_over = grant.loser
+			break
 	# Parked blockers ahead: the nearest one along the path.
 	var blocker: Snap = null
 	var blocker_s := INF

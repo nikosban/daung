@@ -195,7 +195,8 @@ func get_traffic_slot() -> int:
 
 
 ## Ship traffic status (F3): open, yielding to <ship>, making room for <ship>, going around parked ship <ship>,
-## blocked by parked ship <ship>, or traffic deadlock: recovery exhausted.
+## blocked by parked ship <ship>, passage obstructed by <ship> (right of way, braking), or traffic deadlock: recovery
+## exhausted.
 func get_traffic_status() -> String:
 	return _traffic_status
 
@@ -431,6 +432,7 @@ func _physics_process(delta: float) -> void:
 	# targets through the checked reposition; both are checked against other ships and brake when unsafe.
 	var held := false
 	var guided := false
+	var obstructed := false
 	if _has_order and not _blocked:
 		var traffic := Traffic.decision_of(self)
 		_traffic_status = traffic.status
@@ -458,6 +460,12 @@ func _physics_process(delta: float) -> void:
 			_pilot_targets.course_follows = false
 			if not _ships_clear(delta):
 				_pilot_targets.has_order = false
+		elif traffic.right_of_way_over != null and not _ships_clear(delta):
+			# Right of way does not override physics: brake while another ship obstructs the passage; the order and
+			# its priority stay, and the ship resumes once the way is clear. Contact remains the fallback.
+			obstructed = true
+			_pilot_targets.has_order = false
+			_traffic_status = "passage obstructed by %s" % traffic.right_of_way_over.name
 	if _has_order and not _navigation_baseline and not _blocked and not guided:
 		var map := get_world_3d().navigation_map
 		if not _navigation_on_mesh and NavigationServer3D.map_get_iteration_id(map) > 0:
@@ -467,7 +475,7 @@ func _physics_process(delta: float) -> void:
 		if clearance == Navigator.Clearance.SLOW:
 			_clearance_status = "slowing for physical clearance"
 			# Traffic waits never consume static recovery attempts.
-			if velocity.length() <= profile.arrival_speed_tolerance and not held:
+			if velocity.length() <= profile.arrival_speed_tolerance and not held and not obstructed:
 				if not _route_refreshed and _job == null:
 					# The accepted guide may now be behind an obstacle after a momentum-preserving drift.
 					# Refresh once from the actual pose, keeping the same order and resolved destination.
@@ -511,7 +519,7 @@ func _physics_process(delta: float) -> void:
 	Navigator.account(guidance_started, true)
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
 	_brake_first = _pilot_targets.brake_first
-	if _plan == null and not corrected and not held and not guided:
+	if _plan == null and not corrected and not held and not guided and not obstructed:
 		_course_yaw = _pilot_targets.course_yaw
 		_course_follows = _pilot_targets.course_follows
 	if _follow != null:
