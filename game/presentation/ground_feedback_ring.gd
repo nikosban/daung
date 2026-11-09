@@ -8,27 +8,18 @@ var _quad := GroundFeedbackMesh.new()
 var _material := ShaderMaterial.new()
 var _extent: float
 var _arc_radius: float
-var _uses_world_stroke := false
 
 
 func configure(radius: float, stroke: float, arc_radius := 0.0, arc_degrees := 0.0) -> void:
 	_extent = maxf(radius, arc_radius)
 	_arc_radius = arc_radius
-	_uses_world_stroke = false
 	mesh = _quad
 	_material.shader = RING_SHADER
 	_material.set_shader_parameter("ring_radius", radius)
 	_material.set_shader_parameter("stroke", stroke)
-	_material.set_shader_parameter("world_stroke", 0.0)
 	_material.set_shader_parameter("arc_radius", arc_radius)
 	_material.set_shader_parameter("arc_cosine", cos(deg_to_rad(arc_degrees * 0.5)))
 	material_override = _material
-
-
-func configure_world_stroke(radius: float, stroke_metres: float) -> void:
-	configure(radius, 0.0)
-	_uses_world_stroke = true
-	_material.set_shader_parameter("world_stroke", stroke_metres)
 
 
 func draw(camera: Camera3D, screen_scale: Vector2, color: Color, toward := Vector3.ZERO) -> void:
@@ -48,9 +39,6 @@ func draw(camera: Camera3D, screen_scale: Vector2, color: Color, toward := Vecto
 	_material.set_shader_parameter("center", center)
 	_material.set_shader_parameter("floor_aspect", aspect)
 	_material.set_shader_parameter("ring_color", color)
-	if _uses_world_stroke:
-		var clip_to_world := Projection(camera.get_camera_transform()) * camera.get_camera_projection().inverse()
-		_material.set_shader_parameter("clip_to_world", clip_to_world)
 	if _arc_radius > 0.0:
 		# Project a direction at the marker so it still faces a ship behind the camera.
 		var toward_point := global_position + toward.normalized()

@@ -12,7 +12,7 @@ var _latest_move_receipt := 0
 
 
 func _ready() -> void:
-	_selection_ring.configure_world_stroke(style.selection_radius, style.selection_stroke)
+	_selection_ring.configure(style.selection_radius, style.ring_stroke)
 	_move_feedback.configure(style)
 	set_selected(false)
 
