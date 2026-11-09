@@ -126,7 +126,7 @@ shape = SubResource("BoxShape3D_navigation_floor")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.141922, 0.36080933, -0.49822998)
 navigation_mesh = ExtResource("3_navmesh")
 
-[node name="PlayerShipInput" parent="." instance=ExtResource("12_input")]
+[node name="PlayerShipInput" parent="." unique_id=1234073407 instance=ExtResource("12_input")]
 
 [node name="DebuggingSuite" parent="." unique_id=546967684 node_paths=PackedStringArray("ship", "collision_shapes") instance=ExtResource("10_debugging")]
 ship = NodePath("../Ship")
