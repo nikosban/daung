@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="TrafficSetup" format=3]
+
+[ext_resource type="Script" path="res://debugging/scenarios/traffic_setup.gd" id="1_setup"]
+
+[resource]
+script = ExtResource("1_setup")
+description = "Replacement while yielding: the tie case; at 7 s slot 1, yielding to slot 0, receives a new order to (60, 20). The new order takes over and the grant is released."
+positions = PackedVector3Array(-30, 0, 0, 30, 0, 0)
+yaws = PackedFloat32Array(0, 0)
+velocities = PackedVector3Array(0, 0, 0, 0, 0, 0)
+order_times = PackedFloat32Array(0, 0, 7)
+order_slots = PackedInt32Array(0, 1, 1)
+order_points = PackedVector3Array(30, 0, -100, -30, 0, -100, 60, 0, 20)
+camera_focus = Vector3(0, 0, -40)
+camera_height = 140

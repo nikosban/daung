@@ -1,0 +1,42 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://debugging/scenarios/traffic_scenario.gd" id="1_scenario"]
+[ext_resource type="Resource" path="res://debugging/scenarios/setups/crossing.tres" id="2_setup"]
+[ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="3_ship"]
+[ext_resource type="PackedScene" path="res://game/camera/camera_rig.tscn" id="4_camera"]
+[ext_resource type="PackedScene" path="res://game/command/fleet/fleet_command.tscn" id="5_fleet"]
+[ext_resource type="PackedScene" path="res://debugging/debugging_suite.tscn" id="6_debugging"]
+
+[sub_resource type="Environment" id="Environment_scenario"]
+background_mode = 1
+background_color = Color(0.05, 0.06, 0.09, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.6, 0.65, 0.75, 1)
+ambient_light_energy = 0.5
+
+[node name="TrafficScenario" type="Node3D"]
+process_physics_priority = -30
+script = ExtResource("1_scenario")
+setup = ExtResource("2_setup")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_scenario")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, 0.25, -0.433013, 0, 0.866025, 0.5, 0.5, -0.433013, 0.75, 0, 50, 0)
+
+[node name="CameraRig" parent="." instance=ExtResource("4_camera")]
+
+[node name="Ship0" parent="." instance=ExtResource("3_ship")]
+
+[node name="Ship1" parent="." instance=ExtResource("3_ship")]
+
+[node name="Ship2" parent="." instance=ExtResource("3_ship")]
+
+[node name="Asteroids" type="Node3D" parent="."]
+
+[node name="FleetCommand" parent="." node_paths=PackedStringArray("roster") instance=ExtResource("5_fleet")]
+roster = [NodePath("../Ship0"), NodePath("../Ship1"), NodePath("../Ship2")]
+
+[node name="DebuggingSuite" parent="." node_paths=PackedStringArray("fleet") instance=ExtResource("6_debugging")]
+fleet = NodePath("../FleetCommand")

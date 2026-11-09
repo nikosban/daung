@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="TrafficSetup" format=3]
+
+[ext_resource type="Script" path="res://debugging/scenarios/traffic_setup.gd" id="1_setup"]
+
+[resource]
+script = ExtResource("1_setup")
+description = "Unavoidable contact: two ships head-on at 10 m/s, 40 m apart. Both stop in the same tick, their orders end, and the orders queued at 1.0 s still activate afterwards."
+positions = PackedVector3Array(0, 0, 20, 0, 0, -20)
+yaws = PackedFloat32Array(0, 180)
+velocities = PackedVector3Array(0, 0, -10, 0, 0, 10)
+order_times = PackedFloat32Array(0, 0, 1, 1)
+order_slots = PackedInt32Array(0, 1, 0, 1)
+order_points = PackedVector3Array(0, 0, -100, 0, 0, 100, 0, 0, 60, 0, 0, -60)
+camera_focus = Vector3(0, 0, 0)
+camera_height = 80

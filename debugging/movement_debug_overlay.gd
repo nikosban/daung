@@ -5,10 +5,12 @@ extends CanvasLayer
 ## with its reason, arrived, stopped or static-contact stop), and the reaction-delay queue (physics clock, pending count, next
 ## pending command and its due time, last receipt and activation times, from Orders). Reads Movement and Orders only; Movement never calls it. Hidden until F3.
 ## With several selected, one compact block per ship in roster order (name, speed, heading, destination, order status,
-## queue); with none, "no ship selected". Reads Fleet, Movement and Orders only.
+## traffic status, queue); with none, "no ship selected". Reads Fleet, Movement and Orders only.
 ## F3 also shows the selected ships' world-space movement trails (a fresh trace when F3 turns on or a ship becomes
 ## selected) and hides the others.
 ## F3 also shows and hides the red collision-shape outlines (Task #44).
+## Each ship's text includes its ship traffic status (Task 38, #79); after F7, a note that the crossing test is valid
+## only in a fresh run.
 
 @export var fleet: FleetCommand
 ## One trail per roster ship (ShipMovement -> MovementTrail), supplied by the suite.
@@ -17,6 +19,8 @@ var trails := {}
 var _shown: Array[ShipMovement] = []
 ## F3 red outlines of collision shapes (Task #44); shown and hidden with the readout.
 @export var collision_outlines: Array[CollisionShapeOutline] = []
+## Set by the suite when F7 issued the crossing orders.
+var crossing_issued := false
 
 @onready var _label: Label = $Layout/Margins/Telemetry
 
@@ -61,6 +65,8 @@ func _process(_delta: float) -> void:
 		for ship in selection:
 			blocks.push_back(_compact_text(ship))
 		_label.text = "\n\n".join(blocks)
+	if crossing_issued:
+		_label.text += "\n\nF7 crossing orders issued: valid only in a fresh run, from the start positions"
 
 
 ## Starts the trail of each newly selected ship and stops the trails of deselected ones. Returns the selection.
@@ -78,13 +84,13 @@ func _follow_selection() -> Array[ShipMovement]:
 	return selection
 
 
-## One ship's compact block: name, speed, heading, destination, order status and the Orders queue.
+## One ship's compact block: name, speed, heading, destination, order status, traffic status and the Orders queue.
 func _compact_text(ship: ShipMovement) -> String:
 	var orders := ship.get_node("%Orders") as ShipOrders
-	return "%s  speed %6.2f m/s  heading %7.1f°\n%s\norder: %s\nqueue: pending %d%s" % [
+	return "%s  speed %6.2f m/s  heading %7.1f°\n%s\norder: %s\ntraffic: %s\nqueue: pending %d%s" % [
 		ship.name, Vector2(ship.velocity.x, ship.velocity.z).length(), ship.get_heading(),
 		_destination_text(ship, ship.get_destination()) if ship.has_order() else "no active order",
-		ship.get_order_status(), orders.get_pending_count(), _next_pending_text(orders),
+		ship.get_order_status(), ship.get_traffic_status(), orders.get_pending_count(), _next_pending_text(orders),
 	]
 
 
@@ -94,7 +100,7 @@ func _full_text(ship: ShipMovement) -> String:
 	var velocity := Vector3(ship.velocity.x, 0.0, ship.velocity.z)
 	var thruster := ship.get_thruster_command()
 	var destination := ship.get_destination()
-	return "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°  course %7.1f°  steering target %7.1f°  bow–travel %5.1f° (max %5.1f°)\nturn rate %7.2f / %5.2f °/s (permitted at %.2f m/s)  turn accel applied %7.2f of %5.2f °/s² available  shared %4.2f\ndesired %6.2f m/s  planned braking %5.2f m/s²\nforward: main engine %5.3f m/s²  forward thrusters %5.3f m/s² (limit %5.3f)\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)  sideways %5.2f m/s²  directional effectiveness %4.2f×\n%s\norder: %s\n%s\nclock %7.2f s  pending %d%s  last received %s  last activated %s" % [
+	return "speed %6.2f m/s  velocity (x %6.2f, z %6.2f)\nheading %7.1f°  course %7.1f°  steering target %7.1f°  bow–travel %5.1f° (max %5.1f°)\nturn rate %7.2f / %5.2f °/s (permitted at %.2f m/s)  turn accel applied %7.2f of %5.2f °/s² available  shared %4.2f\ndesired %6.2f m/s  planned braking %5.2f m/s²\nforward: main engine %5.3f m/s²  forward thrusters %5.3f m/s² (limit %5.3f)\nthrusters %6.2f m/s²  (x %6.2f, z %6.2f)  sideways %5.2f m/s²  directional effectiveness %4.2f×\n%s\norder: %s\ntraffic: %s\n%s\nclock %7.2f s  pending %d%s  last received %s  last activated %s" % [
 		velocity.length(), velocity.x, velocity.z,
 		ship.get_heading(), ship.get_course_heading(), ship.get_target_heading(), ship.get_bow_travel_angle(), ship.get_max_bow_angle(),
 		ship.get_turn_rate(), ship.get_turn_rate_limit(), velocity.length(), ship.get_turn_acceleration(), ship.get_turn_authority(), ship.get_shared_scale(),
@@ -102,7 +108,7 @@ func _full_text(ship: ShipMovement) -> String:
 		ship.get_main_command(), maxf(thruster.dot(-ship.global_basis.z.normalized()), 0.0), ship.profile.forward_directional_acceleration * ship.get_directional_effectiveness(),
 		thruster.length(), thruster.x, thruster.z, absf(thruster.dot(ship.global_basis.x.normalized())), ship.get_directional_effectiveness(),
 		_destination_text(ship, destination) if ship.has_order() else "no active order",
-		ship.get_order_status(),
+		ship.get_order_status(), ship.get_traffic_status(),
 		_reversal_text(ship),
 		orders.get_clock(), orders.get_pending_count(), _next_pending_text(orders), _time_text(orders.get_last_received_time()), _time_text(orders.get_last_activated_time()),
 	]

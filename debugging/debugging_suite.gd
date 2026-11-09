@@ -46,8 +46,19 @@ func _exit_tree() -> void:
 	_outlines.clear()
 
 
+## F7 (Task 38, #79): three crossing orders through Orders, one per roster slot (middle, left, right), all crossing
+## near (0, -60). Valid only in a fresh run, from the ships' start positions (0, 0), (-30, 0) and (30, 0).
+const CROSSING_ORDERS: Array[Vector3] = [Vector3(0, 0, -120), Vector3(30, 0, -120), Vector3(-30, 0, -120)]
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key != null and key.pressed and not key.echo and key.keycode == KEY_F4:
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode == KEY_F4:
 		for ship in fleet.get_selection():
 			(ship.get_node("%Orders") as ShipOrders).stop()
+	elif key.keycode == KEY_F7:
+		for i in mini(fleet.roster.size(), CROSSING_ORDERS.size()):
+			(fleet.roster[i].get_node("%Orders") as ShipOrders).move(CROSSING_ORDERS[i])
+		$MovementDebugOverlay.crossing_issued = true

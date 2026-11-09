@@ -31,8 +31,9 @@ extends CharacterBody3D
 ## Activation: Orders calls activate_move() or activate_stop() at the start of a physics tick, before any ship moves.
 ## Activation replaces the active order immediately; Movement has no queue or delay of its own.
 ##
-## Static contact (Task #44): driving into a stationary StaticBody3D ends the active order and zeroes planar
-## velocity and turn rate; see _stop_on_static_contact().
+## Contact (Tasks #44 and 38): driving into a stationary StaticBody3D or another ship ends the active order and zeroes
+## planar velocity and turn rate (the other ship's too); see _stop_on_contact(). Ship traffic (Traffic) decides who gives
+## way before any ship moves.
 ##
 ## Reversal rule: when a move activates, the angle between the actual planar velocity and the direction to the click
 ## is measured once (ShipPilot.reversal_angle_of()). At or beyond profile.near_opposite_angle the order commits to
@@ -52,8 +53,12 @@ var _clock := 0.0
 var _active_move_receipt := 0
 ## Whether the profile passed validation; activation is ignored otherwise.
 var _valid := false
-## Roster slot from Fleet (-1 = none). Stored only, for the later ship-traffic tie-break; nothing reads it yet.
+## Roster slot from Fleet (-1 = none): the last ship-traffic tie-break (Task 38, #79).
 var _traffic_slot := -1
+## Changes whenever the active order starts or ends (activation, arrival, contact, blockage); traffic grants end then.
+var _traffic_serial := 0
+## Ship traffic status for F3 (Traffic.Decision.status, or the blockage that ended the order).
+var _traffic_status := Traffic.OPEN
 var _destination := Vector3.ZERO
 ## The requested click of the active or last move (Task #54); _destination becomes the resolved point once planned.
 var _requested := Vector3.ZERO
@@ -117,11 +122,13 @@ func _ready() -> void:
 	_valid = true
 	Navigator.register_ship(self)
 	EndpointReservations.register(self)
+	Traffic.register(self)
 
 
 func _exit_tree() -> void:
 	Navigator.unregister_ship(self)
 	EndpointReservations.unregister(self)
+	Traffic.unregister(self)
 
 
 ## Called only by Orders when a move becomes due: replaces the active order now; the course is taken from the ship's
@@ -138,6 +145,8 @@ func activate_move(world_position: Vector3, move_receipt: int) -> void:
 	_reposition_distance = INF
 	_reposition_route_distance = INF
 	_reposition_used = 0.0
+	_traffic_serial += 1
+	_traffic_status = Traffic.OPEN
 	_destination = Vector3(world_position.x, global_position.y, world_position.z)
 	_requested = _destination
 	_has_order = true
@@ -168,15 +177,59 @@ func activate_stop() -> void:
 	_reversal_angle = -1.0
 	_reversal = false
 	_brake_first = false
+	_traffic_serial += 1
+	_traffic_status = Traffic.OPEN
 	EndpointReservations.release(self)
 	_end_navigation()
 	# Orders activates before this ship's tick advances _clock, so report this tick's time.
 	_order_status = "stopped at %.2f s" % (_clock + get_physics_process_delta_time())
 
 
-## Stores this ship's roster slot (a tie-break number for later ship traffic). No behavior uses it yet.
+## Stores this ship's roster slot: ship traffic's last tie-break (lower slot first; -1 = none).
 func set_traffic_slot(slot: int) -> void:
 	_traffic_slot = slot
+
+
+func get_traffic_slot() -> int:
+	return _traffic_slot
+
+
+## Ship traffic status (F3): open, yielding to <ship>, making room for <ship>, going around parked ship <ship>,
+## blocked by parked ship <ship>, or traffic deadlock: recovery exhausted.
+func get_traffic_status() -> String:
+	return _traffic_status
+
+
+## Called by another ship that drove into this one (Task 38, #79): this ship stops in the same tick. Its active order
+## ends, velocity and turn rate become zero and its reservation is released; commands pending in Orders stay.
+func contact_stop(other: ShipMovement) -> void:
+	_halt("ship-contact stop (%s)" % other.name)
+	# Report the caller's clock: both stop in the same physics frame, whichever ship has run its tick already.
+	print("Movement: %s stopped by ship contact with %s at %.3f s; order ended" % [name, other.name, other._clock])
+
+
+## Farthest hull point from the vertical axis (m), for ship traffic.
+func get_hull_reach() -> float:
+	return _probe.reach
+
+
+## Order serial for ship traffic: it changes whenever the active order starts or ends.
+func get_traffic_serial() -> int:
+	return _traffic_serial
+
+
+## The remaining path from the ship's planar position: the rest of the route, or the straight line to the
+## destination (also while planning). Just the position without an order.
+func get_remaining_path() -> PackedVector3Array:
+	var path := PackedVector3Array([RouteGuidance.planar(global_position)])
+	if not _has_order:
+		return path
+	if _plan != null and _plan.kind != RouteGuidance.Kind.DIRECT and _follow != null:
+		for i in range(_follow.index, _plan.route.size()):
+			path.push_back(RouteGuidance.planar(_plan.route[i]))
+	else:
+		path.push_back(RouteGuidance.planar(_destination))
+	return path
 
 
 ## Endpoint reservation radius in metres (Task 37, #78); Fleet spaces its preferred points by twice this.
@@ -345,6 +398,7 @@ func get_pilot_state() -> ShipPilot.State:
 func _physics_process(delta: float) -> void:
 	_clock += delta
 	Navigator.service()
+	Traffic.update(delta)
 	if _job != null and _job.status != Navigator.Status.PENDING:
 		var handoff_started := Navigator.measure()
 		_take_plan()
@@ -373,7 +427,38 @@ func _physics_process(delta: float) -> void:
 		_pilot_targets.bend_radii = PackedFloat32Array()
 	_pilot_targets.brake_first = _brake_first
 	var corrected := false
-	if _has_order and not _navigation_baseline and not _blocked:
+	# Ship traffic (Task 38, #79): this tick's shared decision. A hold cuts the steering distance; a guide replaces the
+	# targets through the checked reposition; both are checked against other ships and brake when unsafe.
+	var held := false
+	var guided := false
+	if _has_order and not _blocked:
+		var traffic := Traffic.decision_of(self)
+		_traffic_status = traffic.status
+		if traffic.blocked:
+			_blocked = true
+			_traffic_serial += 1
+			EndpointReservations.release(self)
+			_clearance_status = traffic.status
+			print("Movement: %s order abandoned at %.3f s: %s" % [name, _clock, traffic.status])
+		elif traffic.guided:
+			guided = true
+			var candidate := Navigator.reposition(profile, _probe, _pilot_state, _pilot_targets, delta, get_world_3d().navigation_map, traffic.guide, _navigation_on_mesh)
+			if candidate != null:
+				_pilot_targets = candidate
+			if candidate == null or not _ships_clear(delta):
+				_pilot_targets.has_order = false
+		elif traffic.hold:
+			held = true
+			if not _pilot_targets.use_steer:
+				var to_destination := RouteGuidance.planar(_pilot_targets.destination - global_position)
+				_pilot_targets.use_steer = true
+				_pilot_targets.steer_direction = to_destination.normalized() if to_destination != Vector3.ZERO else Vector3.ZERO
+				_pilot_targets.steer_distance = to_destination.length()
+			_pilot_targets.steer_distance = minf(_pilot_targets.steer_distance, traffic.hold_distance)
+			_pilot_targets.course_follows = false
+			if not _ships_clear(delta):
+				_pilot_targets.has_order = false
+	if _has_order and not _navigation_baseline and not _blocked and not guided:
 		var map := get_world_3d().navigation_map
 		if not _navigation_on_mesh and NavigationServer3D.map_get_iteration_id(map) > 0:
 			_navigation_on_mesh = RouteGuidance.planar(NavigationServer3D.map_get_closest_point(map, global_position) - global_position).length() <= NavigationServer3D.map_get_cell_size(map)
@@ -381,7 +466,8 @@ func _physics_process(delta: float) -> void:
 		_clearance_status = "open stopping room" if clearance == Navigator.Clearance.OPEN else "local hull/stop clearance"
 		if clearance == Navigator.Clearance.SLOW:
 			_clearance_status = "slowing for physical clearance"
-			if velocity.length() <= profile.arrival_speed_tolerance:
+			# Traffic waits never consume static recovery attempts.
+			if velocity.length() <= profile.arrival_speed_tolerance and not held:
 				if not _route_refreshed and _job == null:
 					# The accepted guide may now be behind an obstacle after a momentum-preserving drift.
 					# Refresh once from the actual pose, keeping the same order and resolved destination.
@@ -415,6 +501,7 @@ func _physics_process(delta: float) -> void:
 							_clearance_status = "repositioning for physical clearance toward next route guide"
 					elif velocity.length() <= ManeuverRollout.REST_SPEED:
 						_blocked = true
+						_traffic_serial += 1
 						EndpointReservations.release(self)
 						_clearance_status = "Stage 2 distinct-passage recovery needed: ordinary path refresh and checked local corrections could not restore progress"
 			if not corrected:
@@ -424,13 +511,14 @@ func _physics_process(delta: float) -> void:
 	Navigator.account(guidance_started, true)
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
 	_brake_first = _pilot_targets.brake_first
-	if _plan == null and not corrected:
+	if _plan == null and not corrected and not held and not guided:
 		_course_yaw = _pilot_targets.course_yaw
 		_course_follows = _pilot_targets.course_follows
 	if _follow != null:
 		_follow.time += delta
 	if _pilot_out.arrived:
 		_has_order = false
+		_traffic_serial += 1
 		_end_navigation()
 		_order_status = "arrived at (%.1f, %.1f) at %.2f s" % [_destination.x, _destination.z, _clock]
 
@@ -441,31 +529,61 @@ func _physics_process(delta: float) -> void:
 	rotation.y = _pilot_state.yaw
 	var attempted := Vector3(velocity.x, 0.0, velocity.z)
 	move_and_slide()
-	_stop_on_static_contact(attempted)
+	_stop_on_contact(attempted)
 
 
-## Static contact (Task #44): when this tick's slide hit a stationary StaticBody3D (not an AnimatableBody3D) while
-## the attempted planar motion drove into its surface, the active order ends (commands pending in Orders stay) and
-## planar velocity and turn rate become zero at the engine's contact-constrained position. Resting or outward
-## contact never qualifies, so a new order away from a touching obstacle is not stopped.
-func _stop_on_static_contact(attempted: Vector3) -> void:
+## Contact (Tasks #44 and 38): when this tick's slide hit a stationary StaticBody3D (not an AnimatableBody3D) or another
+## ship while the attempted planar motion drove into its surface, the active order ends (commands pending in Orders
+## stay) and planar velocity and turn rate become zero at the engine's contact-constrained position. Another ship is
+## stopped in the same tick (contact_stop()). Resting or outward contact never qualifies, so a new order away from a
+## touching obstacle or ship is not stopped.
+func _stop_on_contact(attempted: Vector3) -> void:
 	for i in get_slide_collision_count():
 		var collision := get_slide_collision(i)
 		var collider := collision.get_collider()
-		if not collider is StaticBody3D or collider is AnimatableBody3D:
+		var ship := collider as ShipMovement
+		if ship == null and (not collider is StaticBody3D or collider is AnimatableBody3D):
 			continue
 		var normal := collision.get_normal()
 		normal.y = 0.0
 		if attempted.dot(normal) >= 0.0:
 			continue
-		_has_order = false
-		EndpointReservations.release(self)
-		_end_navigation()
-		velocity = Vector3.ZERO
-		_turn_rate = 0.0
-		_order_status = "static-contact stop (%s) at %.2f s" % [collider.name, _clock]
+		if ship != null:
+			_halt("ship-contact stop (%s)" % ship.name)
+			print("Movement: %s ship contact with %s at %.3f s, normal (%.2f, %.2f), speed %.2f m/s; order ended" % [name, ship.name, _clock, normal.x, normal.z, attempted.length()])
+			ship.contact_stop(self)
+			return
+		_halt("static-contact stop (%s)" % collider.name)
 		print("Movement: static contact with %s at %.3f s, normal (%.2f, %.2f), speed %.2f m/s; order ended" % [collider.name, _clock, normal.x, normal.z, attempted.length()])
 		return
+
+
+## Ends the active order at once: zero planar velocity and turn rate, reservation released, navigation cancelled.
+func _halt(reason: String) -> void:
+	_has_order = false
+	_traffic_serial += 1
+	EndpointReservations.release(self)
+	_end_navigation()
+	velocity = Vector3.ZERO
+	_turn_rate = 0.0
+	_order_status = "%s at %.2f s" % [reason, _clock]
+
+
+## Ship traffic check for this tick's targets: the next pilot step and the stopping room after it, with the rotating
+## hull against other ships (layer 3). False asks for ordinary braking.
+func _ships_clear(delta: float) -> bool:
+	var state := _pilot_state.copy()
+	var aim := ManeuverRollout._copy_targets(_pilot_targets)
+	ShipPilot.step(profile, state, aim, delta, ShipPilot.Output.new())
+	var motion := state.velocity * delta
+	if not _probe.ship_step_clear(global_position, rotation.y, motion, state.yaw - rotation.y):
+		return false
+	var speed := state.velocity.length()
+	var braking := HullProbe.minimum_braking(profile)
+	if speed == 0.0 or braking <= 0.0:
+		return speed == 0.0
+	var distance := speed * speed / (2.0 * braking) + speed * (profile.pilot_response_time + delta)
+	return _probe.ship_step_clear(global_position + motion, state.yaw, state.velocity / speed * distance, 0.0)
 
 
 ## Hands the finished planning job's result to the pilot once (or ends a declined order).
