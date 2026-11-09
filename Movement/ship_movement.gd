@@ -98,6 +98,8 @@ var _reposition_distance := INF
 var _reposition_route_distance := INF
 var _reposition_used := 0.0
 var _navigation_on_mesh := false
+## Endpoint reservation radius (Task 37, #78, m): hull reach + plan_clearance_buffer + arrival allowance.
+var _reservation_radius := 0.0
 
 
 func _ready() -> void:
@@ -111,12 +113,15 @@ func _ready() -> void:
 			hull = child
 			break
 	_probe = HullProbe.new(self, hull)
+	_reservation_radius = _probe.reach + profile.plan_clearance_buffer + RoutePlanner.arrival_allowance_of(profile)
 	_valid = true
 	Navigator.register_ship(self)
+	EndpointReservations.register(self)
 
 
 func _exit_tree() -> void:
 	Navigator.unregister_ship(self)
+	EndpointReservations.unregister(self)
 
 
 ## Called only by Orders when a move becomes due: replaces the active order now; the course is taken from the ship's
@@ -145,6 +150,7 @@ func activate_move(world_position: Vector3, move_receipt: int) -> void:
 	_reversal_angle = ShipPilot.reversal_angle_of(profile, velocity, course)
 	_reversal = ShipPilot.is_reversal(profile, _reversal_angle)
 	_brake_first = _reversal
+	EndpointReservations.release(self)
 	_end_navigation()
 	_job = Navigator.start_job(self, _probe, world_position, _brake_first)
 	_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
@@ -162,6 +168,7 @@ func activate_stop() -> void:
 	_reversal_angle = -1.0
 	_reversal = false
 	_brake_first = false
+	EndpointReservations.release(self)
 	_end_navigation()
 	# Orders activates before this ship's tick advances _clock, so report this tick's time.
 	_order_status = "stopped at %.2f s" % (_clock + get_physics_process_delta_time())
@@ -170,6 +177,16 @@ func activate_stop() -> void:
 ## Stores this ship's roster slot (a tie-break number for later ship traffic). No behavior uses it yet.
 func set_traffic_slot(slot: int) -> void:
 	_traffic_slot = slot
+
+
+## Endpoint reservation radius in metres (Task 37, #78); Fleet spaces its preferred points by twice this.
+func get_reservation_radius() -> float:
+	return _reservation_radius
+
+
+## Whether the active order is abandoned after exhausted local recovery (it then holds no reservation).
+func is_blocked() -> bool:
+	return _blocked
 
 
 ## Whether an order is active (activated and not yet arrived or stopped; also while its plan is being made).
@@ -398,6 +415,7 @@ func _physics_process(delta: float) -> void:
 							_clearance_status = "repositioning for physical clearance toward next route guide"
 					elif velocity.length() <= ManeuverRollout.REST_SPEED:
 						_blocked = true
+						EndpointReservations.release(self)
 						_clearance_status = "Stage 2 distinct-passage recovery needed: ordinary path refresh and checked local corrections could not restore progress"
 			if not corrected:
 				_pilot_targets.has_order = false
@@ -441,6 +459,7 @@ func _stop_on_static_contact(attempted: Vector3) -> void:
 		if attempted.dot(normal) >= 0.0:
 			continue
 		_has_order = false
+		EndpointReservations.release(self)
 		_end_navigation()
 		velocity = Vector3.ZERO
 		_turn_rate = 0.0

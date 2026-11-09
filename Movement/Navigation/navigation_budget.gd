@@ -12,3 +12,7 @@ extends Resource
 ## exhausted". Candidates rejected by the arrival-allowance and hull checks do not count; the search horizon (the
 ## navigation regions' bounds) bounds those. Provisional technical guardrail.
 @export_range(1, 64, 1) var destination_candidates_per_order: int = 16
+## Destination limit (Task 37, #78): destination resolution accepts no point farther than this from the ship's
+## requested point; 0 = no additional limit (the search stays bounded by the navigation area and the budgets above).
+## Provisional; gameplay decides.
+@export_range(0.0, 1000.0, 0.5, "or_greater", "suffix:m") var max_destination_displacement: float = 30.0

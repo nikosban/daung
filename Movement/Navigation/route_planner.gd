@@ -24,6 +24,11 @@ extends RefCounted
 ## (2 a_min) bounds where a resolved order comes to rest; a_min is the weakest planned braking (a_t / 2, or the
 ## no-retro cap). The search never claims a destination is unreachable: it ends "search exhausted" (path tests used
 ## up) or "no destination found in bounded search" (queue empty at the horizon).
+##
+## Destination limit and reservations (Task 37, #78): with NavigationBudget.max_destination_displacement above 0, the
+## horizon and every ring radius are capped at the limit (the last ring lies on it) and candidates farther than the
+## limit from the click are rejected. A click inside another ship's area (EndpointReservations) starts resolution; a
+## path test only succeeds, and an arrival check only passes, where this ship's area overlaps no other ship's.
 
 enum { RUNNING, BASELINE, DECLINED, ROUTE }
 enum Step { SYNC, CLASSIFY, PATH, RESOLVE }
@@ -76,9 +81,14 @@ var _allowance := 0.0
 var _tested := 0
 var _path_tests := 0
 var _keep_destination := false
+var _ship: ShipMovement
+## Destination limit (m); 0 = none.
+var _limit := 0.0
 
 
-func _init(map: RID, probe: HullProbe, profile: MovementProfile, click: Vector3, live_state: Callable, path_limit: int, keep_destination := false) -> void:
+func _init(ship: ShipMovement, map: RID, probe: HullProbe, profile: MovementProfile, click: Vector3, live_state: Callable, path_limit: int, limit: float, keep_destination := false) -> void:
+	_ship = ship
+	_limit = limit
 	_map = map
 	_probe = probe
 	_profile = profile
@@ -168,6 +178,10 @@ func _classify() -> void:
 		_start_resolution("inside a no-go zone, %.2f m off the navigation mesh" % off_mesh)
 		_add_candidate(_click, nearest, "nearest navigable point")
 		return
+	var conflict := EndpointReservations.conflict(_ship, _click, true)
+	if conflict != "":
+		_start_resolution(conflict)
+		return
 	_step = Step.PATH
 
 
@@ -177,7 +191,11 @@ func _path() -> void:
 	var position: Vector3 = (_live_state.call() as ShipPilot.State).position
 	var path := _query_path(position, _click)
 	if not path.is_empty() and _leg_on_mesh(path[path.size() - 1], _click):
-		_build_route(path, position)
+		var conflict := "" if _keep_destination else EndpointReservations.conflict(_ship, _click, false)
+		if conflict == "":
+			_build_route(path, position)
+		else:
+			_start_resolution(conflict)
 		return
 	if _keep_destination:
 		_decline_search("ordinary path refresh does not reach the retained destination")
@@ -254,6 +272,8 @@ func _start_resolution(reason: String) -> void:
 		var bounds := NavigationServer3D.region_get_bounds(region)
 		for corner in [Vector2(bounds.position.x, bounds.position.z), Vector2(bounds.end.x, bounds.position.z), Vector2(bounds.position.x, bounds.end.z), Vector2(bounds.end.x, bounds.end.z)]:
 			_horizon = maxf(_horizon, (corner - click).length())
+	if _limit > 0.0:
+		_horizon = minf(_horizon, _limit)
 	_seen.push_back(_click)
 	_step = Step.RESOLVE
 
@@ -266,8 +286,9 @@ func _resolve_item() -> void:
 		_awaiting = {}
 		_path_test(awaiting)
 		return
-	var radius := _ring_step * pow(2.0, _ring - 1)
-	var can_generate := _ring == 1 or _ring_step * pow(2.0, _ring - 2) <= _horizon
+	var radius := _ring_radius(_ring)
+	var previous := _ring_radius(_ring - 1)
+	var can_generate := _ring == 1 or (previous <= _horizon and not (_limit > 0.0 and previous >= _limit))
 	# Finish the ring before testing anything at its radius or beyond (an unmoved ring point lies exactly on it, within
 	# float noise; one cell absorbs that).
 	if can_generate and (_candidates.is_empty() or _candidates[0].distance >= radius - _cell):
@@ -280,10 +301,16 @@ func _resolve_item() -> void:
 			_ring += 1
 		return
 	if _candidates.is_empty():
-		_decline_search("no destination found in bounded search (horizon %.0f m reached, %d candidates rejected)" % [_horizon, _tested])
+		if _limit > 0.0 and _horizon >= _limit:
+			_decline_search("no destination found within the %.0f m destination limit (%d candidates rejected)" % [_limit, _tested])
+		else:
+			_decline_search("no destination found in bounded search (horizon %.0f m reached, %d candidates rejected)" % [_horizon, _tested])
 		return
 	var candidate: Dictionary = _candidates.pop_front()
 	_tested += 1
+	if _limit > 0.0 and candidate.distance > _limit + DUPLICATE_DISTANCE:
+		_reject(candidate, "beyond the destination limit (%.0f m)" % _limit)
+		return
 	var reason := _arrival_check(candidate.position)
 	if reason != "":
 		_reject(candidate, reason)
@@ -306,7 +333,7 @@ func _arrival_check(point: Vector3) -> String:
 			return "no arrival allowance (%.2f m beyond the mesh at (%.2f, %.2f))" % [beyond, sample.x, sample.z]
 	if not _probe.cylinder_clear(point, _probe.reach + _profile.plan_clearance_buffer + _allowance):
 		return "hull does not fit"
-	return ""
+	return EndpointReservations.conflict(_ship, point, false)
 
 
 ## One path query from the ship to the candidate: the route when the path reaches it; otherwise the path's end becomes
@@ -323,6 +350,11 @@ func _path_test(candidate: Dictionary) -> void:
 	if not _leg_on_mesh(end, point):
 		_reject(candidate, "unreachable from the ship (path ends at (%.2f, %.2f))" % [end.x, end.z])
 		_add_candidate(point, end, "path end")
+		return
+	# Re-checked here: another job may have reserved an overlapping endpoint since the arrival check.
+	var conflict := EndpointReservations.conflict(_ship, point, false)
+	if conflict != "":
+		_reject(candidate, conflict)
 		return
 	resolved = true
 	destination = point
@@ -349,6 +381,12 @@ func _add_candidate(source: Vector3, projected: Vector3, label: String) -> void:
 			index = i
 			break
 	_candidates.insert(index, {position = point, distance = distance, source = label})
+
+
+## Ring k's radius: step x 2^(k - 1), capped at the destination limit when one is set.
+func _ring_radius(ring: int) -> float:
+	var radius := _ring_step * pow(2.0, ring - 1)
+	return minf(radius, _limit) if _limit > 0.0 else radius
 
 
 func _reject(candidate: Dictionary, reason: String) -> void:

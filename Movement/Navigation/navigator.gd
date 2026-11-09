@@ -163,8 +163,9 @@ class Job:
 		refresh = p_refresh
 		destination = click
 		probe.queries = 0
-		_route = RoutePlanner.new(ship.get_world_3d().navigation_map, probe, ship.profile, click,
-			ship.get_pilot_state, Navigator.BUDGET.destination_candidates_per_order, refresh)
+		_route = RoutePlanner.new(ship, ship.get_world_3d().navigation_map, probe, ship.profile, click,
+			ship.get_pilot_state, Navigator.BUDGET.destination_candidates_per_order,
+			Navigator.BUDGET.max_destination_displacement, refresh)
 
 	func cancel() -> void:
 		status = Status.CANCELLED
@@ -189,6 +190,8 @@ class Job:
 				baseline = true
 				status = Status.DONE
 				summary = _route.note
+				# Task 37 (#78): reserved here, so jobs finishing later in this service call see it.
+				EndpointReservations.reserve(_ship, click)
 			RoutePlanner.DECLINED:
 				status = Status.DECLINED
 				reason = _route.note
@@ -196,6 +199,7 @@ class Job:
 				plan = _route.primary_plan
 				destination = plan.destination
 				status = Status.DONE
+				EndpointReservations.reserve(_ship, destination)
 				summary = "path guidance; clearance checked from actual motion"
 		resolution = _route.resolution
 		resolution_log = _route.resolution_log
