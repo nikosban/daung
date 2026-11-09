@@ -52,6 +52,8 @@ var _clock := 0.0
 var _active_move_receipt := 0
 ## Whether the profile passed validation; activation is ignored otherwise.
 var _valid := false
+## Roster slot from Fleet (-1 = none). Stored only, for the later ship-traffic tie-break; nothing reads it yet.
+var _traffic_slot := -1
 var _destination := Vector3.ZERO
 ## The requested click of the active or last move (Task #54); _destination becomes the resolved point once planned.
 var _requested := Vector3.ZERO
@@ -163,6 +165,11 @@ func activate_stop() -> void:
 	_end_navigation()
 	# Orders activates before this ship's tick advances _clock, so report this tick's time.
 	_order_status = "stopped at %.2f s" % (_clock + get_physics_process_delta_time())
+
+
+## Stores this ship's roster slot (a tie-break number for later ship traffic). No behavior uses it yet.
+func set_traffic_slot(slot: int) -> void:
+	_traffic_slot = slot
 
 
 ## Whether an order is active (activated and not yet arrived or stopped; also while its plan is being made).

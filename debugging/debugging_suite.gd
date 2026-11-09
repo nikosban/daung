@@ -4,7 +4,8 @@ extends Node3D
 
 const MARKER_SCENE := preload("res://debugging/debug_marker.tscn")
 
-@export var ship: ShipMovement
+## The fleet whose current selection the diagnostics follow.
+@export var fleet: FleetCommand
 @export var collision_shapes: Array[CollisionShape3D] = []
 ## World-space positions of the optional amber reference rings, supplied by the host scene.
 @export var reference_marker_positions := PackedVector3Array()
@@ -13,8 +14,17 @@ var _outlines: Array[CollisionShapeOutline] = []
 
 
 func _ready() -> void:
-	$MovementTrail.ship = ship
-	$MovementDebugOverlay.ship = ship
+	# One trail per roster ship, all from the suite's MovementTrail node.
+	var trails := {}
+	var template := $MovementTrail as MovementTrail
+	for i in fleet.roster.size():
+		var trail := template if i == 0 else template.duplicate() as MovementTrail
+		trail.ship = fleet.roster[i]
+		if i > 0:
+			add_child(trail)
+		trails[fleet.roster[i]] = trail
+	$MovementDebugOverlay.fleet = fleet
+	$MovementDebugOverlay.trails = trails
 	for shape in collision_shapes:
 		var outline := CollisionShapeOutline.new()
 		outline.name = "CollisionOutline"
@@ -39,5 +49,5 @@ func _exit_tree() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key != null and key.pressed and not key.echo and key.keycode == KEY_F4:
-		if is_instance_valid(ship):
+		for ship in fleet.get_selection():
 			(ship.get_node("%Orders") as ShipOrders).stop()

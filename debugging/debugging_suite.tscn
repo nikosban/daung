@@ -13,9 +13,8 @@ script = ExtResource("1_suite")
 script = ExtResource("4_trail")
 settings = ExtResource("5_settings")
 
-[node name="MovementDebugOverlay" type="CanvasLayer" parent="." node_paths=PackedStringArray("trail")]
+[node name="MovementDebugOverlay" type="CanvasLayer" parent="."]
 script = ExtResource("6_overlay")
-trail = NodePath("../MovementTrail")
 
 [node name="Layout" type="Control" parent="MovementDebugOverlay"]
 layout_mode = 3

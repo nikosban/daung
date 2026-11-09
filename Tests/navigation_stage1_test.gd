@@ -59,7 +59,7 @@ func _initialize() -> void:
 func _start_scene() -> void:
 	_game = load("res://Main/main.tscn").instantiate()
 	root.add_child(_game)
-	_ship = _game.get_node("Ship")
+	_ship = _game.get_node("ShipMiddle")
 	_orders = _ship.get_node("%Orders")
 	for body in get_nodes_in_group("navigation_source"):
 		if body is StaticBody3D and body.get_node_or_null("CollisionShape3D").shape is SphereShape3D:

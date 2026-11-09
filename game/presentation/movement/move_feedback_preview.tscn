@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="1_ship"]
 [ext_resource type="PackedScene" path="res://game/camera/camera_rig.tscn" id="2_camera"]
-[ext_resource type="PackedScene" path="res://game/input/player_ship_input.tscn" id="3_input"]
+[ext_resource type="PackedScene" path="res://game/command/fleet/fleet_command.tscn" id="3_fleet"]
 
 [sub_resource type="Environment" id="Environment_preview"]
 background_mode = 1
@@ -28,4 +28,5 @@ position = Vector3(-18, 0, 0)
 [node name="ShipB" parent="." instance=ExtResource("1_ship")]
 position = Vector3(18, 0, 0)
 
-[node name="PlayerShipInput" parent="." instance=ExtResource("3_input")]
+[node name="FleetCommand" parent="." node_paths=PackedStringArray("roster") instance=ExtResource("3_fleet")]
+roster = [NodePath("../ShipA"), NodePath("../ShipB")]
