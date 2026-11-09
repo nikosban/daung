@@ -29,7 +29,7 @@ The ship's collision shape is navigation's authoritative hull source; hull queri
 
 ### External contract
 
-- Callers use `move_to(world_position)` and `stop()`. Both enter a per-ship FIFO and activate after their reaction delay; the active order continues meanwhile. Activation replaces the previous order and cancels its navigation work without resetting momentum. Destination Y is ignored. A move returns a receipt ID; `get_resolved_move_destination(receipt)` returns its destination only while that move is active, accepted and unblocked.
+- Callers use `move_to(world_position)` and `stop()`. Both enter a per-ship FIFO and activate after their reaction delay. The active order continues meanwhile. Activation replaces it and cancels its navigation work without resetting momentum. Destination Y is ignored. A move returns a receipt ID. `get_pending_move_destination(receipt)` exposes the requested point while that move is queued or initially planning. `get_resolved_move_destination(receipt)` exposes the destination while the move is active, accepted and unblocked.
 - `ShipMovement` alone applies authoritative motion through the character body. Read-only observations expose commands, requested/resolved destination, status and telemetry; there are no movement notification signals. Invalid movement configuration disables motion.
 - Arrival requires both distance and speed tolerances. Arrival and stop leave ordinary braking, without position holding or final alignment. Driving into a stationary static obstacle ends the active order and zeroes motion; pending commands survive.
 
@@ -59,9 +59,9 @@ Consumers obtain Camera3D through `get_camera()`; `set_view(focus_position, heig
 
 ## Player input and ship presentation
 
-One [controller](game/input/player_ship_input.gd) per playable viewport processes unhandled clicks in input order. The physics-space pick selects one ship or clears selection. A right-click projected onto Y = 0 issues a move to the selected ship.
+One [controller](game/input/player_ship_input.gd) per playable viewport processes unhandled clicks in input order. The physics-space pick selects one ship or clears selection. A right-click projected onto Y = 0 issues a move immediately when selection is settled. An earlier pending pick is processed first in the physics tick.
 
-Each ship instances [command presentation](game/presentation/ship_selection/ship_command_presentation.tscn) under `Visual`. A new player move receipt clears movement feedback while its destination resolves. The selected ship's accepted destination stays fixed in world space as the straight connector and outer arc track the rendered ship position. Deselecting hides the feedback. The [preview](game/presentation/movement/move_feedback_preview.tscn) uses the production input, camera and ship scenes.
+Each ship instances [command presentation](game/presentation/ship_selection/ship_command_presentation.tscn) under `Visual`. The selected ship displays only its latest player move receipt. Blue feedback marks the requested point during the reaction delay and initial planning. Gray feedback marks the accepted endpoint. The straight connector and outer arc track the rendered ship position. Markers and connector lie on Y = 0, use world depth and derive their sizes and gaps from viewport output pixels. Deselecting hides the feedback. The [preview](game/presentation/movement/move_feedback_preview.tscn) uses the production input, camera and ship scenes.
 
 ## Debugging integration
 
@@ -84,7 +84,7 @@ Shared Godot Resources hold configuration and are not mutated per instance. Orde
 - [MovementProfile](Movement/movement_profile.gd) defines movement configuration; the [frigate resource](Movement/Profiles/frigate_movement_profile.tres) supplies the active hull's values and curves.
 - [NavigationBudget](Movement/Navigation/navigation_budget.gd) and its [resource](Movement/Navigation/navigation_budget.tres) configure shared navigation limits.
 - [Trail settings](debugging/movement_trail_settings.gd) and their [resource](debugging/movement_trail_settings.tres) configure diagnostic sampling.
-- [Ship feedback style](game/presentation/ship_feedback_style.tres) configures the shared material and the geometry of the rings and connector.
+- [Ship feedback style](game/presentation/ship_feedback_style.tres) configures the shared materials, ring and line sizes, and connector gaps in output pixels.
 - [Camera settings](game/camera/camera_settings.gd) and their [resource](game/camera/camera_settings.tres) configure view, zoom, orbit and pan behavior.
 
 One world unit is one metre. Gameplay motion uses world X/Z; the bow points along local -Z. Speed uses m/s, acceleration m/s², distances metres and durations seconds. Angles use degrees in data/debug output and radians internally; angular acceleration/rate use °/s² and °/s in data. Gameplay mass is a dimensionless divisor for thruster strength; main-engine and turning acceleration are specified directly.

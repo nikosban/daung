@@ -158,6 +158,18 @@ func get_resolved_move_destination(move_receipt: int) -> Variant:
 	return _destination
 
 
+## Returns the requested point while this move is queued or its first plan is pending.
+func get_pending_move_destination(move_receipt: int) -> Variant:
+	if move_receipt <= 0:
+		return null
+	if move_receipt == _active_move_receipt and _has_order and not _blocked and _job != null and not _job.refresh:
+		return _requested
+	for command in _pending:
+		if command.move_receipt == move_receipt:
+			return command.position
+	return null
+
+
 ## The requested click of the active or last move (Task #54).
 func get_requested_destination() -> Vector3:
 	return _requested

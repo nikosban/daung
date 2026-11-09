@@ -18,12 +18,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
 		return
-	_clicks.append({
-		picking = picking,
-		origin = camera.project_ray_origin(click.position),
-		direction = camera.project_ray_normal(click.position),
-		reach = camera.far,
-	})
+	var origin := camera.project_ray_origin(click.position)
+	var direction := camera.project_ray_normal(click.position)
+	if moving and _clicks.is_empty():
+		_move_ship(origin, direction)
+	else:
+		_clicks.append({picking = picking, origin = origin, direction = direction, reach = camera.far})
 	get_viewport().set_input_as_handled()
 
 
@@ -31,11 +31,17 @@ func _physics_process(_delta: float) -> void:
 	for click in _clicks:
 		if click.picking:
 			_select_ship(click.origin, click.origin + click.direction * click.reach)
-		elif is_instance_valid(_selection):
-			var target: Variant = MOVE_PLANE.intersects_ray(click.origin, click.direction)
-			if target != null:
-				_selection.record_move(_selection.ship.move_to(target))
+		else:
+			_move_ship(click.origin, click.direction)
 	_clicks.clear()
+
+
+func _move_ship(origin: Vector3, direction: Vector3) -> void:
+	if not is_instance_valid(_selection):
+		return
+	var target: Variant = MOVE_PLANE.intersects_ray(origin, direction)
+	if target != null:
+		_selection.record_move(_selection.ship.move_to(target))
 
 
 func _select_ship(from: Vector3, to: Vector3) -> void:
