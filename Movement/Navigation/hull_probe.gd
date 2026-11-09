@@ -20,6 +20,8 @@ var queries := 0
 ## Physics layer 1 (static obstacles) as a bitmask. Static navigation queries only this layer, so ships
 ## (layer 3) never appear in another ship's static clearance checks.
 const STATIC_OBSTACLE_MASK := 1 << (1 - 1)
+## Physics layer 3 (ships) as a bitmask: only ship traffic checks query it (ship_step_clear()).
+const SHIP_MASK := 1 << (3 - 1)
 
 var _valid := false
 var _size := Vector3.ZERO
@@ -356,6 +358,15 @@ func step_clear(position: Vector3, yaw: float, motion: Vector3, dyaw: float, che
 	var fractions := _space.cast_motion(_query)
 	_query.motion = Vector3.ZERO
 	return fractions[0] >= 1.0
+
+
+## Ship traffic (Task 38, #79): the same one-tick test as step_clear(), against other ships (layer 3) instead of
+## static obstacles. The start pose is not tested on its own (a touching ship may still move away).
+func ship_step_clear(position: Vector3, yaw: float, motion: Vector3, dyaw: float) -> bool:
+	_query.collision_mask = SHIP_MASK
+	var clear := step_clear(position, yaw, motion, dyaw, false)
+	_query.collision_mask = _mask
+	return clear
 
 
 func _pose(position: Vector3, yaw: float) -> Transform3D:

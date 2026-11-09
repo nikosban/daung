@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="TrafficSetup" format=3]
+
+[ext_resource type="Script" path="res://debugging/scenarios/traffic_setup.gd" id="1_setup"]
+
+[resource]
+script = ExtResource("1_setup")
+description = "Exhausted recovery: slot 1 is parked at (0, -60) inside an asteroid corridor (x = +/-13). Slot 0 cannot pass on either side; F3 reports blocked by parked ship."
+positions = PackedVector3Array(0, 0, 20, 0, 0, -60)
+yaws = PackedFloat32Array(0, 0)
+velocities = PackedVector3Array(0, 0, 0, 0, 0, 0)
+order_times = PackedFloat32Array(0)
+order_slots = PackedInt32Array(0)
+order_points = PackedVector3Array(0, 0, -140)
+asteroids = PackedVector3Array(-13, 0, -10, 13, 0, -10, -13, 0, -22, 13, 0, -22, -13, 0, -34, 13, 0, -34, -13, 0, -46, 13, 0, -46, -13, 0, -58, 13, 0, -58, -13, 0, -70, 13, 0, -70, -13, 0, -82, 13, 0, -82, -13, 0, -94, 13, 0, -94, -13, 0, -106, 13, 0, -106)
+camera_focus = Vector3(0, 0, -50)
+camera_height = 140

@@ -4,7 +4,7 @@ extends Node3D
 ## orders to every selected ship through its Orders. Preserve input order when picking in the physics tick.
 ## Keys: select_fleet selects the whole roster; select_ship_1..3 select one roster slot (a missing slot does nothing).
 ## Fleet orders (Task 37, #78): with several ships selected, each gets its own preferred point across the direction of
-## travel, keeping their left-to-right order; one ship gets the click itself. While any of that order's ships is still
+## travel, keeping the left-to-right order of their stopping points; one ship gets the click itself. While any of that order's ships is still
 ## pending in Orders or planning in Movement, one shared pending marker stays at the click.
 
 const MOVE_PLANE := Plane(Vector3.UP, 0.0)
@@ -104,7 +104,9 @@ func _move_selection(origin: Vector3, direction: Vector3) -> void:
 
 
 ## Each ship's preferred point (ShipMovement -> Vector3): travel direction d from the ships' centroid to the click,
-## across-axis r = d x up (world +X when the click is at the centroid); ships sorted along r (roster order on ties),
+## across-axis r = d x up (world +X when the click is at the centroid); ships sorted along r by their stopping points
+## (Movement's prediction of where each comes to rest, so a fast ship that will sweep across gets the place on the side
+## it is heading to; the position itself at rest), roster order on ties,
 ## the k-th of n at click + r (k - (n - 1) / 2) spacing, spacing twice the largest reservation radius.
 func _preferred_points(ships: Array[ShipMovement], click: Vector3) -> Dictionary:
 	var centroid := Vector3.ZERO
@@ -117,8 +119,8 @@ func _preferred_points(ships: Array[ShipMovement], click: Vector3) -> Dictionary
 	var across := Vector3.RIGHT if travel.is_zero_approx() else travel.normalized().cross(Vector3.UP)
 	var sorted := ships.duplicate()
 	sorted.sort_custom(func(a: ShipMovement, b: ShipMovement) -> bool:
-		var offset_a := a.global_position.dot(across)
-		var offset_b := b.global_position.dot(across)
+		var offset_a := a.get_stopping_point().dot(across)
+		var offset_b := b.get_stopping_point().dot(across)
 		if offset_a != offset_b:
 			return offset_a < offset_b
 		return roster.find(a) < roster.find(b))

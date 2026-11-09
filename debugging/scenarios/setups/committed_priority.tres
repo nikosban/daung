@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="TrafficSetup" format=3]
+
+[ext_resource type="Script" path="res://debugging/scenarios/traffic_setup.gd" id="1_setup"]
+
+[resource]
+script = ExtResource("1_setup")
+description = "Committed priority: slot 1 (main acceleration 0.5 m/s2) starts at 10 m/s heading east along z = -60 and is committed when the conflict appears; slot 0 (1.0 m/s2) starts from rest at (0, 0) heading north and yields although it accelerates harder and has the lower slot."
+positions = PackedVector3Array(0, 0, 0, -80, 0, -60)
+yaws = PackedFloat32Array(0, -90)
+velocities = PackedVector3Array(0, 0, 0, 10, 0, 0)
+main_accelerations = PackedFloat32Array(1, 0.5)
+order_times = PackedFloat32Array(0, 0)
+order_slots = PackedInt32Array(0, 1)
+order_points = PackedVector3Array(0, 0, -120, 80, 0, -60)
+camera_focus = Vector3(0, 0, -50)
+camera_height = 140
