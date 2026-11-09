@@ -3,80 +3,49 @@ extends Node3D
 ## Draws a straight connector and the destination glyph relative to the ship's display origin.
 
 @onready var _connector: MeshInstance3D = $Connector
-@onready var _destination: GroundFeedbackRing = $Destination
+@onready var _destination: MeshInstance3D = $Destination
 
 var _style: ShipFeedbackStyle
-var _ribbon := GroundFeedbackMesh.new()
+var _ribbon := ImmediateMesh.new()
 
 
 func configure(style: ShipFeedbackStyle) -> void:
 	_style = style
 	_connector.mesh = _ribbon
-	_destination.configure(style.destination_inner_radius, style.ring_stroke,
-		style.destination_outer_radius, style.destination_arc_degrees)
+	var glyph := ImmediateMesh.new()
+	GroundFeedbackMesh.add_band(glyph, style.destination_inner_radius, style.ring_stroke)
+	GroundFeedbackMesh.add_band(glyph, style.destination_outer_radius, style.ring_stroke,
+		style.destination_arc_degrees)
+	_destination.mesh = glyph
 
 
-func show_destination(camera: Camera3D, screen_scale: Vector2, offset: Vector3, pending: bool) -> void:
+func show_destination(offset: Vector3, pending: bool) -> void:
 	var material := _style.pending_material if pending else _style.material
-	if _connector.material_override != material:
+	if _destination.material_override != material:
+		_destination.material_override = material
 		_connector.material_override = material
 
 	_destination.position = offset
-	_destination.draw(camera, screen_scale, material.albedo_color, -offset)
-	_connector.visible = _draw_connector(camera, screen_scale, offset)
+	if not offset.is_zero_approx():
+		# The outer arc is centred on local -Z, so it faces the ship.
+		_destination.basis = Basis.looking_at(-offset)
+	_connector.visible = _draw_connector(offset)
 	show()
 
 
-func _draw_connector(camera: Camera3D, screen_scale: Vector2, offset: Vector3) -> bool:
-	var aspect := GroundFeedbackMesh.floor_aspect(camera)
-	if aspect <= 0.0 or offset.length() <= _style.selection_radius:
+func _draw_connector(offset: Vector3) -> bool:
+	var distance := offset.length()
+	var start := _style.selection_radius + _style.line_gap
+	var end := distance - _style.destination_outer_radius - _style.line_gap
+	if end <= start:
 		return false
 
-	# The selection ring has a world-space edge. Gaps and the destination glyph use pixels.
-	var start := global_position + offset.normalized() * _style.selection_radius
-	var end := global_position + offset
-	var camera_transform := camera.get_camera_transform()
-	var start_depth := camera_transform.basis.z.dot(camera_transform.origin - start)
-	var end_depth := camera_transform.basis.z.dot(camera_transform.origin - end)
-	var depth_span := _clip_axis(Vector2(0.0, 1.0), start_depth, end_depth, camera.near, camera.far)
-	if depth_span.x >= depth_span.y:
-		return false
-
-	var a := camera.unproject_position(start.lerp(end, depth_span.x)) * screen_scale
-	var b := camera.unproject_position(start.lerp(end, depth_span.y)) * screen_scale
-	var span := b - a
-	var distance := span.length()
-	if is_zero_approx(distance):
-		return false
-	var along := span / distance
-	var ellipse_scale := Vector2(along.x, along.y / aspect).length()
-	var start_trim := _style.line_gap if depth_span.x == 0.0 else 0.0
-	var end_trim := _style.destination_outer_radius / ellipse_scale + _style.line_gap if depth_span.y == 1.0 else 0.0
-	if distance <= start_trim + end_trim:
-		return false
-	a += along * start_trim
-	b -= along * end_trim
-
-	# Clip the centerline before casting the ribbon corners back onto the ground.
-	var half_width := _style.line_width * 0.5
-	var view := Rect2(Vector2.ZERO, GroundFeedbackMesh.viewport_pixels(camera, screen_scale)).grow(half_width)
-	var screen_span := _clip_axis(Vector2(0.0, 1.0), a.x, b.x, view.position.x, view.end.x)
-	screen_span = _clip_axis(screen_span, a.y, b.y, view.position.y, view.end.y)
-	if screen_span.x >= screen_span.y:
-		return false
-
-	var from := a.lerp(b, screen_span.x)
-	var to := a.lerp(b, screen_span.y)
-	var normal := along.orthogonal() * half_width
-	return _ribbon.draw_quad(camera, screen_scale, global_position,
-		PackedVector2Array([from + normal, from - normal, to + normal, to - normal]))
-
-
-## Intersect a segment's parameter interval with the slab for one coordinate.
-static func _clip_axis(span: Vector2, from: float, to: float, lower: float, upper: float) -> Vector2:
-	var delta := to - from
-	if delta == 0.0:
-		return span if from >= lower and from <= upper else Vector2(1.0, 0.0)
-	var enter := (lower - from) / delta
-	var leave := (upper - from) / delta
-	return Vector2(maxf(span.x, minf(enter, leave)), minf(span.y, maxf(enter, leave)))
+	var along := offset / distance
+	var side := Vector3(-along.z, 0.0, along.x) * (_style.line_width * 0.5)
+	_ribbon.clear_surfaces()
+	_ribbon.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	for point in [along * start, along * end]:
+		_ribbon.surface_add_vertex(point + side)
+		_ribbon.surface_add_vertex(point - side)
+	_ribbon.surface_end()
+	return true

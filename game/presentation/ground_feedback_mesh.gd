@@ -1,36 +1,19 @@
 class_name GroundFeedbackMesh
-extends ImmediateMesh
-## Projects a screen-space quad onto Y = 0 so feedback uses world depth.
+## Builds flat feedback geometry on the local X/Z plane in world metres.
 
-const GROUND := Plane(Vector3.UP, 0.0)
-
-
-static func viewport_pixels(camera: Camera3D, screen_scale: Vector2) -> Vector2:
-	return camera.get_viewport().get_visible_rect().size * screen_scale
+const SEGMENTS_PER_TURN := 96
 
 
-static func floor_aspect(camera: Camera3D) -> float:
-	# The shared rig has pitch and yaw, with no roll.
-	return absf(camera.get_camera_transform().basis.z.y)
-
-
-func draw_quad(camera: Camera3D, screen_scale: Vector2, origin: Vector3,
-		corners: PackedVector2Array) -> bool:
-	var vertices := PackedVector3Array()
-	for corner in corners:
-		var pixel := corner / screen_scale
-		# project_position inverts unproject_position in viewport coordinates.
-		# The input-ray methods apply the canvas transform as well.
-		var near_point := camera.project_position(pixel, camera.near)
-		var far_point := camera.project_position(pixel, camera.far)
-		var hit: Variant = GROUND.intersects_ray(near_point, far_point - near_point)
-		if hit == null:
-			return false
-		vertices.append(Vector3(hit.x - origin.x, 0.0, hit.z - origin.z))
-
-	clear_surfaces()
-	surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
-	for vertex in vertices:
-		surface_add_vertex(vertex)
-	surface_end()
-	return true
+## Appends a band whose outer edge lies at the radius and whose stroke extends inward.
+## A partial arc is centred on local -Z.
+static func add_band(mesh: ImmediateMesh, radius: float, stroke: float, arc_degrees := 360.0) -> void:
+	var inner := maxf(0.0, radius - stroke)
+	var span := deg_to_rad(arc_degrees)
+	var segments := maxi(1, ceili(SEGMENTS_PER_TURN * arc_degrees / 360.0))
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	for index in range(segments + 1):
+		var angle := span * (float(index) / segments - 0.5)
+		var direction := Vector3(sin(angle), 0.0, -cos(angle))
+		mesh.surface_add_vertex(direction * radius)
+		mesh.surface_add_vertex(direction * inner)
+	mesh.surface_end()
