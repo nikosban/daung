@@ -2,13 +2,17 @@ class_name ShipCommandPresentation
 extends Node3D
 ## Per-ship visual state. Only the selected instance needs frame updates.
 
+const HULL_MASK := preload("res://game/presentation/ship_selection/selected_hull_mask.tres")
+
 @export var ship: ShipMovement
 @export var style: ShipFeedbackStyle
+@export var hull_visual: Node3D
 
 @onready var _selection_ring: GroundFeedbackRing = $SelectionRing
 @onready var _move_feedback: ShipMoveFeedback = $MoveFeedback
 
 var _latest_move_receipt := 0
+var _original_hull_overlays: Dictionary[MeshInstance3D, Material] = {}
 
 
 func _ready() -> void:
@@ -20,8 +24,43 @@ func _ready() -> void:
 func set_selected(selected: bool) -> void:
 	set_process(selected)
 	visible = selected
-	if not selected:
+	if selected:
+		_apply_hull_mask()
+	else:
+		_clear_hull_mask()
 		_move_feedback.hide()
+
+
+func _exit_tree() -> void:
+	_clear_hull_mask()
+
+
+func _apply_hull_mask() -> void:
+	if hull_visual == null or not _original_hull_overlays.is_empty():
+		return
+	if hull_visual is MeshInstance3D:
+		_mask_mesh(hull_visual as MeshInstance3D)
+	for mesh in hull_visual.find_children("*", "MeshInstance3D", true, false):
+		_mask_mesh(mesh as MeshInstance3D)
+
+
+func _mask_mesh(mesh: MeshInstance3D) -> void:
+	var original := mesh.material_overlay
+	_original_hull_overlays[mesh] = original
+	if original == null:
+		mesh.material_overlay = HULL_MASK
+	else:
+		# Keep an authored overlay active without editing either shared material.
+		var mask := HULL_MASK.duplicate() as ShaderMaterial
+		mask.next_pass = original
+		mesh.material_overlay = mask
+
+
+func _clear_hull_mask() -> void:
+	for mesh in _original_hull_overlays:
+		if is_instance_valid(mesh):
+			mesh.material_overlay = _original_hull_overlays[mesh]
+	_original_hull_overlays.clear()
 
 
 func record_move(receipt: int) -> void:

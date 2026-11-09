@@ -21,6 +21,7 @@ shape = SubResource("BoxShape3D_hull")
 
 [node name="Model" parent="Visual" instance=ExtResource("3_model")]
 
-[node name="CommandPresentation" parent="Visual" node_paths=PackedStringArray("ship") instance=ExtResource("4_presentation")]
+[node name="CommandPresentation" parent="Visual" node_paths=PackedStringArray("ship", "hull_visual") instance=ExtResource("4_presentation")]
 unique_name_in_owner = true
 ship = NodePath("../..")
+hull_visual = NodePath("../Model")

@@ -1,9 +1,10 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://game/presentation/ship_selection/ship_command_presentation.gd" id="1_presentation"]
 [ext_resource type="Resource" path="res://game/presentation/ship_feedback_style.tres" id="2_style"]
 [ext_resource type="PackedScene" path="res://game/presentation/movement/move_feedback.tscn" id="3_feedback"]
 [ext_resource type="Script" path="res://game/presentation/ground_feedback_ring.gd" id="4_ring"]
+[ext_resource type="Shader" path="res://game/presentation/ship_selection/selected_hull_ring.gdshader" id="5_hull_ring"]
 
 [node name="CommandPresentation" type="Node3D"]
 visible = false
@@ -15,5 +16,6 @@ style = ExtResource("2_style")
 [node name="SelectionRing" type="MeshInstance3D" parent="."]
 cast_shadow = 0
 script = ExtResource("4_ring")
+hull_overlay_shader = ExtResource("5_hull_ring")
 
 [node name="MoveFeedback" parent="." instance=ExtResource("3_feedback")]
