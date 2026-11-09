@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" path="res://Main/asteroid.tscn" id="9_asteroid"]
 [ext_resource type="PackedScene" path="res://debugging/debugging_suite.tscn" id="10_debugging"]
 [ext_resource type="PackedScene" path="res://game/camera/camera_rig.tscn" id="11_camera"]
+[ext_resource type="PackedScene" path="res://game/input/player_ship_input.tscn" id="12_input"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
@@ -125,8 +126,9 @@ shape = SubResource("BoxShape3D_navigation_floor")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.141922, 0.36080933, -0.49822998)
 navigation_mesh = ExtResource("3_navmesh")
 
-[node name="DebuggingSuite" parent="." unique_id=546967684 node_paths=PackedStringArray("ship", "camera", "collision_shapes") instance=ExtResource("10_debugging")]
+[node name="PlayerShipInput" parent="." instance=ExtResource("12_input")]
+
+[node name="DebuggingSuite" parent="." unique_id=546967684 node_paths=PackedStringArray("ship", "collision_shapes") instance=ExtResource("10_debugging")]
 ship = NodePath("../Ship")
-camera = NodePath("../CameraRig/PitchPivot/Camera3D")
 collision_shapes = [NodePath("../Ship/CollisionShape3D"), NodePath("../TestObstacle/CollisionShape3D"), NodePath("../ClusterA/A1/CollisionShape3D"), NodePath("../ClusterA/A2/CollisionShape3D"), NodePath("../ClusterA/A3/CollisionShape3D"), NodePath("../ClusterA/A4/CollisionShape3D"), NodePath("../ClusterB/B1/CollisionShape3D"), NodePath("../ClusterB/B2/CollisionShape3D"), NodePath("../ClusterB/B3/CollisionShape3D"), NodePath("../ClusterB/B4/CollisionShape3D"), NodePath("../ClusterB/B5/CollisionShape3D"), NodePath("../ClusterB/B6/CollisionShape3D"), NodePath("../ClusterB/B7/CollisionShape3D"), NodePath("../ClusterB/B8/CollisionShape3D"), NodePath("../ClusterC/C1/CollisionShape3D"), NodePath("../ClusterC/C2/CollisionShape3D"), NodePath("../ClusterC/C3/CollisionShape3D"), NodePath("../ClusterC/C4/CollisionShape3D"), NodePath("../ClusterC/C5/CollisionShape3D"), NodePath("../ClusterC/C6/CollisionShape3D"), NodePath("../ClusterC/C7/CollisionShape3D"), NodePath("../ClusterC/C8/CollisionShape3D"), NodePath("../ClusterC/C9/CollisionShape3D"), NodePath("../ClusterC/C10/CollisionShape3D"), NodePath("../ClusterC/C11/CollisionShape3D"), NodePath("../ClusterC/C12/CollisionShape3D")]
 reference_marker_positions = PackedVector3Array(130, 0, 0, 0, 0, 0, 60, 0, 0, 60, 0, -40, 20, 0, -40)

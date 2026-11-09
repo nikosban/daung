@@ -10,11 +10,13 @@
 
 | Boundary | Owns | Dependencies |
 |---|---|---|
-| [Main composition](Main/main.tscn) | World, static obstacles and baked navigation geometry; camera, ship and debugging instances | Shared camera, ship, asteroid and debugging scenes; Godot |
-| [Ship composition](Ships/ship.tscn) | Movement body, collision hull, movement profile and visual/model child | Movement; shared profile and model assets |
+| [Main composition](Main/main.tscn) | World, static obstacles and baked navigation geometry; camera, ship, player input and debugging instances | Shared camera, ship, asteroid, player input and debugging scenes; Godot |
+| [Ship composition](Ships/ship.tscn) | Movement body, collision hull, movement profile, model and command presentation | Movement; shared profile, model and presentation assets |
 | [Movement](Movement/ship_movement.gd) | Commands, authoritative position, planar velocity and yaw; internal pilot/propulsion and navigation | Godot APIs and its own internal components only |
 | [Camera](game/camera/camera_rig.tscn) | Floor focus, view transform and camera input | Shared camera settings; Godot only |
-| [Debugging](debugging/debugging_suite.tscn) | Temporary movement input, telemetry display and diagnostic visuals | Movement requests/read-only observations; injected Camera3D and scene references; Godot |
+| [Player input](game/input/player_ship_input.tscn) | Single-ship selection and player move dispatch | Active viewport camera and physics space; Movement commands and ship presentation |
+| [Ship presentation](game/presentation/ship_selection/ship_command_presentation.tscn) | Selection ring, destination marker and straight connector; latest player move receipt per ship | Movement's accepted destination observation; shared presentation style; Godot |
+| [Debugging](debugging/debugging_suite.tscn) | F4 diagnostic stop, telemetry display and diagnostic visuals | Movement requests/read-only observations; injected scene references; Godot |
 | [Display and UI configuration](project.godot) | Window/reference sizing and proportional UI scaling; shared UI theme | Godot; shared [theme resource](game/ui/ui_theme.tres) |
 
 Movement and Camera are independent gameplay modules. Main and Ship are composition boundaries. Movement never depends on Camera or Debugging. New module dependencies require an approved ticket stating the map change.
@@ -27,7 +29,7 @@ The ship's collision shape is navigation's authoritative hull source; hull queri
 
 ### External contract
 
-- Callers use `move_to(world_position)` and `stop()`. Both enter a per-ship FIFO and activate after their reaction delay; the active order continues meanwhile. Activation replaces the previous order and cancels its navigation work without resetting momentum. Destination Y is ignored.
+- Callers use `move_to(world_position)` and `stop()`. Both enter a per-ship FIFO and activate after their reaction delay; the active order continues meanwhile. Activation replaces the previous order and cancels its navigation work without resetting momentum. Destination Y is ignored. A move returns a receipt ID; `get_resolved_move_destination(receipt)` returns its destination only while that move is active, accepted and unblocked.
 - `ShipMovement` alone applies authoritative motion through the character body. Read-only observations expose commands, requested/resolved destination, status and telemetry; there are no movement notification signals. Invalid movement configuration disables motion.
 - Arrival requires both distance and speed tolerances. Arrival and stop leave ordinary braking, without position holding or final alignment. Driving into a stationary static obstacle ends the active order and zeroes motion; pending commands survive.
 
@@ -55,11 +57,17 @@ Levels instance the master scene and place its root at their initial floor focus
 
 Consumers obtain Camera3D through `get_camera()`; `set_view(focus_position, height, yaw_degrees)` immediately places the view and synchronizes zoom within its limits. Focus Y defines the camera's floor elevation; this does not change Movement's X/Z gameplay plane.
 
+## Player input and ship presentation
+
+One [controller](game/input/player_ship_input.gd) per playable viewport processes unhandled clicks in input order. The physics-space pick selects one ship or clears selection. A right-click projected onto Y = 0 issues a move to the selected ship.
+
+Each ship instances [command presentation](game/presentation/ship_selection/ship_command_presentation.tscn) under `Visual`. A new player move receipt clears movement feedback while its destination resolves. The selected ship's accepted destination stays fixed in world space as the straight connector and outer arc track the rendered ship position. Deselecting hides the feedback. The [preview](game/presentation/movement/move_feedback_preview.tscn) uses the production input, camera and ship scenes.
+
 ## Debugging integration
 
-[DebuggingSuite](debugging/debugging_suite.gd) receives ship, camera, collision shapes and reference positions from its host. Removing it removes its controls and cleans up generated outlines attached to external collision shapes.
+[DebuggingSuite](debugging/debugging_suite.gd) receives the test ship, collision shapes and reference positions from its host. Removing it cleans up generated outlines attached to external collision shapes.
 
-Input sends Movement requests using the supplied Camera3D for right-click projection only. The overlay reads telemetry; the trail samples actual world positions after movement; markers/outlines change presentation only. Debugging does not control the camera transform. Shared visual definitions/settings remain reusable; runtime state belongs to each suite.
+F4 queues a diagnostic stop on the test ship. The overlay reads telemetry and the F3 trail samples actual world positions after movement. Shared visual definitions and settings remain reusable; runtime state belongs to each suite.
 
 The suite owns the overlay's scene-based Control layout, margins and wrapping telemetry label. Diagnostic Controls ignore mouse input. The label selects the shared theme's `DebuggerLabel` variation; its outline does not apply to ordinary UI labels. On initialization and viewport resize, the overlay caps its label's nominal screen-pixel font size using that variation's limit and the actual viewport stretch, rounding down. The font override belongs to the label instance; the shared theme and ordinary UI scaling remain unchanged.
 
@@ -76,6 +84,7 @@ Shared Godot Resources hold configuration and are not mutated per instance. Orde
 - [MovementProfile](Movement/movement_profile.gd) defines movement configuration; the [frigate resource](Movement/Profiles/frigate_movement_profile.tres) supplies the active hull's values and curves.
 - [NavigationBudget](Movement/Navigation/navigation_budget.gd) and its [resource](Movement/Navigation/navigation_budget.tres) configure shared navigation limits.
 - [Trail settings](debugging/movement_trail_settings.gd) and their [resource](debugging/movement_trail_settings.tres) configure diagnostic sampling.
+- [Ship feedback style](game/presentation/ship_feedback_style.tres) configures the shared material and the geometry of the rings and connector.
 - [Camera settings](game/camera/camera_settings.gd) and their [resource](game/camera/camera_settings.tres) configure view, zoom, orbit and pan behavior.
 
 One world unit is one metre. Gameplay motion uses world X/Z; the bow points along local -Z. Speed uses m/s, acceleration m/s², distances metres and durations seconds. Angles use degrees in data/debug output and radians internally; angular acceleration/rate use °/s² and °/s in data. Gameplay mass is a dimensionless divisor for thruster strength; main-engine and turning acceleration are specified directly.

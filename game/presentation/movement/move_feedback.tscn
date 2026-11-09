@@ -1,0 +1,22 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://game/presentation/movement/move_feedback.gd" id="1_feedback"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_connector"]
+size = Vector2(1, 1)
+
+[node name="MoveFeedback" type="Node3D"]
+visible = false
+script = ExtResource("1_feedback")
+
+[node name="Connector" type="MeshInstance3D" parent="."]
+cast_shadow = 0
+mesh = SubResource("PlaneMesh_connector")
+
+[node name="Destination" type="Node3D" parent="."]
+
+[node name="InnerRing" type="MeshInstance3D" parent="Destination"]
+cast_shadow = 0
+
+[node name="OuterArc" type="MeshInstance3D" parent="Destination"]
+cast_shadow = 0

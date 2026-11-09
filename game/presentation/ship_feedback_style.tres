@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="ShipFeedbackStyle" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://game/presentation/ship_feedback_style.gd" id="1_style"]
+
+[sub_resource type="StandardMaterial3D" id="Material_feedback"]
+cull_mode = 2
+shading_mode = 0
+albedo_color = Color(0.522, 0.557, 0.58, 1)
+
+[resource]
+script = ExtResource("1_style")
+material = SubResource("Material_feedback")

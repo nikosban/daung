@@ -5,7 +5,6 @@ extends Node3D
 const MARKER_SCENE := preload("res://debugging/debug_marker.tscn")
 
 @export var ship: ShipMovement
-@export var camera: Camera3D
 @export var collision_shapes: Array[CollisionShape3D] = []
 ## World-space positions of the optional amber reference rings, supplied by the host scene.
 @export var reference_marker_positions := PackedVector3Array()
@@ -14,8 +13,6 @@ var _outlines: Array[CollisionShapeOutline] = []
 
 
 func _ready() -> void:
-	$RightClickMoveInput.ship = ship
-	$RightClickMoveInput.camera = camera
 	$MovementTrail.ship = ship
 	$MovementDebugOverlay.ship = ship
 	for shape in collision_shapes:
@@ -37,3 +34,10 @@ func _exit_tree() -> void:
 		if is_instance_valid(outline):
 			outline.queue_free()
 	_outlines.clear()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key != null and key.pressed and not key.echo and key.keycode == KEY_F4:
+		if is_instance_valid(ship):
+			ship.stop()
