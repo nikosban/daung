@@ -38,7 +38,8 @@ func _process(_delta: float) -> void:
 
 	var ship_position := ship.get_global_transform_interpolated().origin
 	global_position = Vector3(ship_position.x, 0.0, ship_position.z)
-	var screen_scale := viewport.get_screen_transform().get_scale()
+	# Camera coordinates need only the viewport's stretch into its render target.
+	var screen_scale := viewport.get_stretch_transform().get_scale()
 	_selection_ring.draw(camera, screen_scale, style.material.albedo_color)
 
 	var target: Variant = ship.get_resolved_move_destination(_latest_move_receipt)

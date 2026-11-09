@@ -19,7 +19,11 @@ func draw_quad(camera: Camera3D, screen_scale: Vector2, origin: Vector3,
 	var vertices := PackedVector3Array()
 	for corner in corners:
 		var pixel := corner / screen_scale
-		var hit: Variant = GROUND.intersects_ray(camera.project_ray_origin(pixel), camera.project_ray_normal(pixel))
+		# project_position inverts unproject_position in viewport coordinates.
+		# The input-ray methods apply the canvas transform as well.
+		var near_point := camera.project_position(pixel, camera.near)
+		var far_point := camera.project_position(pixel, camera.far)
+		var hit: Variant = GROUND.intersects_ray(near_point, far_point - near_point)
 		if hit == null:
 			return false
 		vertices.append(Vector3(hit.x - origin.x, 0.0, hit.z - origin.z))
