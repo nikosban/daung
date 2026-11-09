@@ -17,12 +17,16 @@ var half_width := 0.0
 ## Shape queries made since the counter was last reset (evidence and cost reports).
 var queries := 0
 
+## Physics layer 1 (static obstacles) as a bitmask. Static navigation queries only this layer, so ships
+## (layer 3) never appear in another ship's static clearance checks.
+const STATIC_OBSTACLE_MASK := 1 << (1 - 1)
+
 var _valid := false
 var _size := Vector3.ZERO
 var _offset := Transform3D.IDENTITY
 var _height := 0.0
 var _exclude: Array[RID] = []
-var _mask := 1
+var _mask := STATIC_OBSTACLE_MASK
 var _space: PhysicsDirectSpaceState3D
 var _box := BoxShape3D.new()
 var _cylinder := CylinderShape3D.new()
@@ -292,7 +296,7 @@ func _init(body: CollisionObject3D, collision_shape: CollisionShape3D) -> void:
 	reach = Vector2(corner_x, corner_z).length()
 	half_width = minf(half.x, half.z)
 	_exclude = [body.get_rid()]
-	_mask = body.collision_mask
+	_mask = STATIC_OBSTACLE_MASK
 	_space = body.get_world_3d().direct_space_state
 	_query.collision_mask = _mask
 	_query.exclude = _exclude

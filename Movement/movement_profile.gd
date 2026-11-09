@@ -50,9 +50,6 @@ extends Resource
 ## (arrival_speed_tolerance) with no commanded turn, then continues as an order from rest. Judged by the velocity, not
 ## the bow.
 @export_range(90.0, 180.0, 0.1, "suffix:°") var near_opposite_angle: float = 150.0
-## Crew reaction delay: time between receiving a move or stop command and the pilot acting on it. Every
-## command waits its own delay; the active order stands until then. 0 acts on the next physics tick.
-@export_range(0.0, 5.0, 0.01, "suffix:s") var reaction_delay: float = 0.3
 ## Route guidance (Task #46): the pilot aims at the point this far ahead along the planned route, so it rounds bends
 ## instead of chasing each route vertex. Only used for orders the navigator routes around obstacles.
 @export_range(2.0, 60.0, 0.1, "suffix:m") var detour_lookahead_distance: float = 10.0

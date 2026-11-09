@@ -1,8 +1,8 @@
 class_name ShipMovement
 extends CharacterBody3D
 ## Authoritative planar movement for a ship (Movement v3): the only writer of its XZ position, its one
-## world-space planar velocity (the built-in velocity) and its yaw. Callers request movement through
-## move_to() and stop().
+## world-space planar velocity (the built-in velocity) and its yaw. Only Orders (game/command/orders) activates
+## commands, through activate_move() and activate_stop(); command intake and the crew delay belong to Orders.
 ##
 ## Each physics tick the pilot computes a desired velocity toward the destination that falls with the
 ## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
@@ -16,7 +16,7 @@ extends CharacterBody3D
 ## second and forward assistance last, and the approach is planned with the braking the thrusters can actually deliver
 ## against the travel direction. Turning demand is computed first, so the approach speed is planned
 ## with the braking that sharing will leave. The pilot also steers the hull toward the order's course heading
-## (set once by move_to(), toward the destination) with bounded angular acceleration and a turn-rate limit, both
+## (set once by activate_move(), toward the destination) with bounded angular acceleration and a turn-rate limit, both
 ## curves of actual speed (weak at rest, peaking at low speed, falling toward cruise). Planar
 ## and turning demand share the directional thrusters' capacity proportionally. Only applied acceleration
 ## is integrated; yaw never rotates the velocity, and rotation does not persist without powered turning.
@@ -28,9 +28,8 @@ extends CharacterBody3D
 ## untouched, nothing is scaled up). The pilot plans its approach braking with the same limit, projected onto
 ## the direction of the velocity it must slow (the direction to the destination only at a standstill).
 ##
-## Reaction delay: move_to() and stop() only receive a command. Each waits its own profile.reaction_delay on
-## the physics clock in one FIFO queue and is then activated at the start of a physics tick, in receipt order;
-## nothing is cancelled or skipped. Until then the active order stands.
+## Activation: Orders calls activate_move() or activate_stop() at the start of a physics tick, before any ship moves.
+## Activation replaces the active order immediately; Movement has no queue or delay of its own.
 ##
 ## Static contact (Task #44): driving into a stationary StaticBody3D ends the active order and zeroes planar
 ## velocity and turn rate; see _stop_on_static_contact().
@@ -48,20 +47,18 @@ extends CharacterBody3D
 
 @export var profile: MovementProfile
 
-## Physics clock in seconds: the sum of physics ticks so far.
+## Physics clock in seconds (the sum of physics ticks so far), used only for status and log text.
 var _clock := 0.0
-## Received commands waiting for activation, in receipt order: {kind, position, received, due, move_receipt}.
-var _pending: Array[Dictionary] = []
-var _last_move_receipt := 0
 var _active_move_receipt := 0
-## Physics clock of the last receipt and the last activation (-1 = none yet).
-var _last_received := -1.0
-var _last_activated := -1.0
+## Whether the profile passed validation; activation is ignored otherwise.
+var _valid := false
+## Roster slot from Fleet (-1 = none). Stored only, for the later ship-traffic tie-break; nothing reads it yet.
+var _traffic_slot := -1
 var _destination := Vector3.ZERO
 ## The requested click of the active or last move (Task #54); _destination becomes the resolved point once planned.
 var _requested := Vector3.ZERO
 var _has_order := false
-## Course heading of the current order (yaw in radians), set by move_to(); no course for a zero-length order.
+## Course heading of the current order (yaw in radians), set by activate_move(); no course for a zero-length order.
 var _course_yaw := 0.0
 var _has_course := false
 ## Turn rate in rad/s (per ship); zero whenever powered turning is not requested.
@@ -105,7 +102,7 @@ var _navigation_on_mesh := false
 
 func _ready() -> void:
 	if not _profile_valid():
-		push_error("ShipMovement needs a MovementProfile with every value above 0 (reaction_delay at least 0), turn acceleration and turn rate curves, a directional thrust curve, forward_directional_acceleration at least 0 and a bow alignment curve; the ship will not move.")
+		push_error("ShipMovement needs a MovementProfile with every value above 0, turn acceleration and turn rate curves, a directional thrust curve, forward_directional_acceleration at least 0 and a bow alignment curve; the ship will not move.")
 		set_physics_process(false)
 		return
 	var hull: CollisionShape3D = null
@@ -114,6 +111,7 @@ func _ready() -> void:
 			hull = child
 			break
 	_probe = HullProbe.new(self, hull)
+	_valid = true
 	Navigator.register_ship(self)
 
 
@@ -121,23 +119,61 @@ func _exit_tree() -> void:
 	Navigator.unregister_ship(self)
 
 
-## Receives an order to the point. After the reaction delay it replaces the active order; the course is
-## taken from the ship's position then. Y is ignored. The current velocity carries over.
-## Returns a positive per-ship receipt ID for observing this particular move.
-func move_to(world_position: Vector3) -> int:
-	_last_move_receipt += 1
-	_receive("move", world_position, _last_move_receipt)
-	return _last_move_receipt
+## Called only by Orders when a move becomes due: replaces the active order now; the course is taken from the ship's
+## position. Y is ignored. The current velocity carries over. move_receipt is the Orders receipt of this move.
+func activate_move(world_position: Vector3, move_receipt: int) -> void:
+	if not _valid:
+		return
+	_active_move_receipt = move_receipt
+	_navigation_baseline = false
+	_clearance_status = ""
+	_blocked = false
+	_route_refreshed = false
+	_reposition_guide = Vector3.ZERO
+	_reposition_distance = INF
+	_reposition_route_distance = INF
+	_reposition_used = 0.0
+	_destination = Vector3(world_position.x, global_position.y, world_position.z)
+	_requested = _destination
+	_has_order = true
+	var course := _destination - global_position
+	course.y = 0.0
+	_has_course = course != Vector3.ZERO
+	_course_follows = _has_course
+	if _has_course:
+		_course_yaw = atan2(-course.x, -course.z)
+	_reversal_angle = ShipPilot.reversal_angle_of(profile, velocity, course)
+	_reversal = ShipPilot.is_reversal(profile, _reversal_angle)
+	_brake_first = _reversal
+	_end_navigation()
+	_job = Navigator.start_job(self, _probe, world_position, _brake_first)
+	_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
 
 
-## Receives a stop. After the reaction delay it ends the active order; the ship then brakes toward zero
+## Called only by Orders when a stop becomes due: ends the active order now; the ship then brakes toward zero
 ## velocity with its thrusters and does not hold position.
-func stop() -> void:
-	_receive("stop", Vector3.ZERO)
+func activate_stop() -> void:
+	if not _valid:
+		return
+	_clearance_status = ""
+	_blocked = false
+	_route_refreshed = false
+	_has_order = false
+	_reversal_angle = -1.0
+	_reversal = false
+	_brake_first = false
+	_end_navigation()
+	# Orders activates before this ship's tick advances _clock, so report this tick's time.
+	_order_status = "stopped at %.2f s" % (_clock + get_physics_process_delta_time())
+
+
+## Stores this ship's roster slot (a tie-break number for later ship traffic). No behavior uses it yet.
+func set_traffic_slot(slot: int) -> void:
+	_traffic_slot = slot
 
 
 ## Whether an order is active (activated and not yet arrived or stopped; also while its plan is being made).
-## Pending commands do not count.
+## Commands waiting in Orders do not count.
 func has_order() -> bool:
 	return _has_order
 
@@ -158,50 +194,16 @@ func get_resolved_move_destination(move_receipt: int) -> Variant:
 	return _destination
 
 
-## Returns the requested point while this move is queued or its first plan is pending.
-func get_pending_move_destination(move_receipt: int) -> Variant:
-	if move_receipt <= 0:
-		return null
-	if move_receipt == _active_move_receipt and _has_order and not _blocked and _job != null and not _job.refresh:
+## Returns the requested point while this active move's first plan is pending, or null.
+func get_planning_move_destination(move_receipt: int) -> Variant:
+	if move_receipt > 0 and move_receipt == _active_move_receipt and _has_order and not _blocked and _job != null and not _job.refresh:
 		return _requested
-	for command in _pending:
-		if command.move_receipt == move_receipt:
-			return command.position
 	return null
 
 
 ## The requested click of the active or last move (Task #54).
 func get_requested_destination() -> Vector3:
 	return _requested
-
-
-## Physics clock in seconds.
-func get_clock() -> float:
-	return _clock
-
-
-## Number of received commands waiting for activation.
-func get_pending_count() -> int:
-	return _pending.size()
-
-
-## The next command to activate ({kind, position, received, due}), or an empty Dictionary if none is pending.
-func get_next_pending() -> Dictionary:
-	if _pending.is_empty():
-		return {}
-	var command := _pending[0].duplicate()
-	command.erase("move_receipt")
-	return command
-
-
-## Physics clock of the last received command, or -1 if none.
-func get_last_received_time() -> float:
-	return _last_received
-
-
-## Physics clock of the last activated command, or -1 if none.
-func get_last_activated_time() -> float:
-	return _last_activated
 
 
 ## Heading in degrees of yaw (0 = bow toward −Z, positive = counter-clockwise seen from above).
@@ -325,8 +327,6 @@ func get_pilot_state() -> ShipPilot.State:
 
 func _physics_process(delta: float) -> void:
 	_clock += delta
-	while not _pending.is_empty() and _pending[0].due <= _clock:
-		_activate(_pending.pop_front())
 	Navigator.service()
 	if _job != null and _job.status != Navigator.Status.PENDING:
 		var handoff_started := Navigator.measure()
@@ -427,7 +427,7 @@ func _physics_process(delta: float) -> void:
 
 
 ## Static contact (Task #44): when this tick's slide hit a stationary StaticBody3D (not an AnimatableBody3D) while
-## the attempted planar motion drove into its surface, the active order ends (pending commands stay queued) and
+## the attempted planar motion drove into its surface, the active order ends (commands pending in Orders stay) and
 ## planar velocity and turn rate become zero at the engine's contact-constrained position. Resting or outward
 ## contact never qualifies, so a new order away from a touching obstacle is not stopped.
 func _stop_on_static_contact(attempted: Vector3) -> void:
@@ -447,56 +447,6 @@ func _stop_on_static_contact(attempted: Vector3) -> void:
 		_order_status = "static-contact stop (%s) at %.2f s" % [collider.name, _clock]
 		print("Movement: static contact with %s at %.3f s, normal (%.2f, %.2f), speed %.2f m/s; order ended" % [collider.name, _clock, normal.x, normal.z, attempted.length()])
 		return
-
-
-func _receive(kind: String, world_position: Vector3, move_receipt := 0) -> void:
-	var delay := profile.reaction_delay if profile != null else 0.0
-	var command := {kind = kind, position = world_position, received = _clock, due = _clock + delay,
-		move_receipt = move_receipt}
-	_pending.push_back(command)
-	_last_received = _clock
-	print("Movement: received %s at %.3f s, due %.3f s" % [_describe(command), command.received, command.due])
-
-
-func _activate(command: Dictionary) -> void:
-	if command.kind == "move":
-		_active_move_receipt = command.move_receipt
-		_navigation_baseline = false
-		_clearance_status = ""
-		_blocked = false
-		_route_refreshed = false
-		_reposition_guide = Vector3.ZERO
-		_reposition_distance = INF
-		_reposition_route_distance = INF
-		_reposition_used = 0.0
-		var world_position: Vector3 = command.position
-		_destination = Vector3(world_position.x, global_position.y, world_position.z)
-		_requested = _destination
-		_has_order = true
-		var course := _destination - global_position
-		course.y = 0.0
-		_has_course = course != Vector3.ZERO
-		_course_follows = _has_course
-		if _has_course:
-			_course_yaw = atan2(-course.x, -course.z)
-		_reversal_angle = ShipPilot.reversal_angle_of(profile, velocity, course)
-		_reversal = ShipPilot.is_reversal(profile, _reversal_angle)
-		_brake_first = _reversal
-		_end_navigation()
-		_job = Navigator.start_job(self, _probe, world_position, _brake_first)
-		_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
-	else:
-		_clearance_status = ""
-		_blocked = false
-		_route_refreshed = false
-		_has_order = false
-		_reversal_angle = -1.0
-		_reversal = false
-		_brake_first = false
-		_end_navigation()
-		_order_status = "stopped at %.2f s" % _clock
-	_last_activated = _clock
-	print("Movement: activated %s at %.3f s (%.3f s after receipt)" % [_describe(command), _clock, _clock - command.received])
 
 
 ## Hands the finished planning job's result to the pilot once (or ends a declined order).
@@ -565,17 +515,11 @@ func _end_navigation() -> void:
 	Navigator.account(start)
 
 
-func _describe(command: Dictionary) -> String:
-	if command.kind == "move":
-		return "move (%.1f, %.1f)" % [command.position.x, command.position.z]
-	return "stop"
-
-
 func _profile_valid() -> bool:
 	return profile != null and profile.mass > 0.0 and profile.main_acceleration > 0.0 \
 		and profile.thruster_strength > 0.0 and profile.max_speed > 0.0 and profile.pilot_response_time > 0.0 \
 		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
-		and profile.no_retro_braking_effectiveness > 0.0 and profile.reaction_delay >= 0.0 and profile.no_go_tolerance >= 0.0 \
+		and profile.no_retro_braking_effectiveness > 0.0 and profile.no_go_tolerance >= 0.0 \
 		and profile.turn_acceleration_curve != null and profile.turn_rate_curve != null \
 		and profile.directional_thrust_curve != null and profile.forward_directional_acceleration >= 0.0 \
 		and profile.bow_alignment_curve != null

@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="CrewProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/command/orders/crew_profile.gd" id="1_crew"]
+
+[resource]
+script = ExtResource("1_crew")
+reaction_delay = 0.3
