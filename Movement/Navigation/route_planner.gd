@@ -408,7 +408,13 @@ func _query_path(from: Vector3, to: Vector3) -> PackedVector3Array:
 	return NavigationServer3D.map_get_path(_map, from, to, true)
 
 
+## The direct-movement fallback. It has no destination resolution, so a requested point whose area overlaps another
+## ship's reserved or occupied area is declined (Task 37, #78). A refresh keeps its own reservation.
 func _baseline(reason: String) -> void:
+	var conflict := "" if _keep_destination else EndpointReservations.conflict(_ship, _click, false)
+	if conflict != "":
+		_decline_search("%s; %s" % [reason.trim_suffix(": direct (baseline)"), conflict])
+		return
 	result = BASELINE
 	note = reason
 
