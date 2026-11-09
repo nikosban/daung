@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://game/presentation/movement/move_feedback.gd" id="1_feedback"]
+[ext_resource type="Script" path="res://game/presentation/ground_feedback_ring.gd" id="2_ring"]
 
 [node name="MoveFeedback" type="Node3D"]
 visible = false
@@ -9,10 +10,6 @@ script = ExtResource("1_feedback")
 [node name="Connector" type="MeshInstance3D" parent="."]
 cast_shadow = 0
 
-[node name="Destination" type="Node3D" parent="."]
-
-[node name="InnerRing" type="MeshInstance3D" parent="Destination"]
+[node name="Destination" type="MeshInstance3D" parent="."]
 cast_shadow = 0
-
-[node name="OuterArc" type="MeshInstance3D" parent="Destination"]
-cast_shadow = 0
+script = ExtResource("2_ring")
