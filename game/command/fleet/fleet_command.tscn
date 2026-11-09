@@ -1,6 +1,11 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://game/command/fleet/fleet_command.gd" id="1_fleet"]
+[ext_resource type="Resource" path="res://game/presentation/ship_feedback_style.tres" id="2_style"]
+[ext_resource type="PackedScene" path="res://game/presentation/movement/move_feedback.tscn" id="3_feedback"]
 
 [node name="FleetCommand" type="Node3D"]
 script = ExtResource("1_fleet")
+style = ExtResource("2_style")
+
+[node name="PendingMarker" parent="." instance=ExtResource("3_feedback")]

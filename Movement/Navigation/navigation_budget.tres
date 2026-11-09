@@ -1,9 +1,6 @@
-[gd_resource type="Resource" script_class="NavigationBudget" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="NavigationBudget" format=3 uid="uid://bks00uiymtnvi"]
 
-[ext_resource type="Script" path="res://Movement/Navigation/navigation_budget.gd" id="1_budget"]
+[ext_resource type="Script" uid="uid://c3752lc5yqi8" path="res://Movement/Navigation/navigation_budget.gd" id="1_budget"]
 
 [resource]
 script = ExtResource("1_budget")
-plan_time_per_tick = 1500
-plan_prediction_per_order = 120.0
-destination_candidates_per_order = 16

@@ -19,7 +19,8 @@ func configure(style: ShipFeedbackStyle) -> void:
 	_destination.mesh = glyph
 
 
-func show_destination(offset: Vector3, pending: bool) -> void:
+## glyph and connector false hide that part (Task 37, #78: a fleet order's shared marker and its ships' connectors).
+func show_destination(offset: Vector3, pending: bool, glyph := true, connector := true) -> void:
 	var material := _style.pending_material if pending else _style.material
 	if _destination.material_override != material:
 		_destination.material_override = material
@@ -29,7 +30,8 @@ func show_destination(offset: Vector3, pending: bool) -> void:
 	if not offset.is_zero_approx():
 		# The outer arc is centred on local -Z, so it faces the ship.
 		_destination.basis = Basis.looking_at(-offset)
-	_connector.visible = _draw_connector(offset)
+	_destination.visible = glyph
+	_connector.visible = connector and _draw_connector(offset)
 	show()
 
 

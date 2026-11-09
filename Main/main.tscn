@@ -30,10 +30,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, 0, 5)
 
 [node name="ShipMiddle" parent="." unique_id=2125529357 instance=ExtResource("1_ship")]
 
-[node name="ShipLeft" parent="." instance=ExtResource("1_ship")]
+[node name="ShipLeft" parent="." unique_id=893337983 instance=ExtResource("1_ship")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0, 0)
 
-[node name="ShipRight" parent="." instance=ExtResource("1_ship")]
+[node name="ShipRight" parent="." unique_id=1644257326 instance=ExtResource("1_ship")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 0, 0)
 
 [node name="TestObstacle" parent="." unique_id=222604826 instance=ExtResource("9_asteroid")]
