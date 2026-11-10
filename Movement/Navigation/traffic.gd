@@ -5,16 +5,24 @@ extends RefCounted
 ## registered ship and decides who gives way. Every ship then reads the same decision (decision_of()) in its own tick;
 ## ShipMovement stays the only writer of motion.
 ##
-## - Path ahead: the remaining route polyline, or the straight line to the destination, cut at stopping distance
-##   (v² / 2 HullProbe.minimum_braking) + detour_lookahead_distance. Each ship sweeps a capsule of radius
-##   reach + plan_clearance_buffer along it; two capsules that overlap share space. The path distance at which a ship's
-##   centre first enters the other's capsule is its s; a ship with s at 0 or below its stopping distance is committed.
-## - Priority: committed first, then rated forward acceleration (cached at registration), then traffic slot.
+## - Two paths per ship (#83): the predicted path (ShipMovement.get_predicted_path(): the wide turn a moving ship
+##   really flies, then its remaining route) for anticipation, and the remaining route (get_remaining_path()) for
+##   progress and recovery. A path distance is only ever used on the path it was measured on.
+## - Path ahead: the predicted path cut at stopping distance (v² / 2 HullProbe.minimum_braking) +
+##   detour_lookahead_distance. Each ship sweeps a capsule of radius reach + plan_clearance_buffer along it; two capsules
+##   that overlap share space. The path distance at which a ship's centre first enters the other's capsule is its s; a
+##   ship with s at 0 or below its stopping distance is committed.
+## - Anticipation (predicted path): conflicts, committed test, hold point and distance, grant far end and release,
+##   parked-ship detection, and making room out of the winner's path. Progress (route): the deadlock rule's remaining
+##   distance, whether a parked ship stays ahead, the back-out direction and the going-around guides.
+## - Priority: committed first, then rated forward acceleration (cached at registration), then traffic slot. A ship that
+##   already has right of way over the other through a chain of grants keeps it, so grants never form a cycle (#83).
 ## - A grant (winner, loser) holds until the winner's centre passes the far end of the shared space (and the capsules no
 ##   longer overlap), or either ship's order changes. The loser holds at s - (reach + buffer) on its own path, course
 ##   unchanged. The winner keeps its priority but brakes while another ship physically obstructs its passage.
-## - Making room: a loser that sits in the winner's path tries, once each, a point back along its approach and the
-##   shorter side point perpendicular to the winner's path (offset reach + reach + buffer, ties to the right).
+## - Making room: a loser that sits in the winner's predicted path tries, once each, a point back along its approach
+##   (route) and the shorter side point perpendicular to the winner's predicted path (offset reach + reach + buffer,
+##   ties to the right).
 ## - Parked blocker: a ship without an order (or blocked) is an obstacle. A moving ship whose path ahead meets it steers
 ##   to a guide beside it (shorter side first), then back onto its path beyond it; exhaustion blocks the order.
 ## - Deadlock: when no ship of a conflict group improves its remaining path by arrival_tolerance within
@@ -93,8 +101,10 @@ class Snap:
 	var active := false
 	var serial := 0
 	var map: RID
-	## Remaining path from the ship (full) and the part ahead within the traffic horizon.
+	## Remaining route from the ship (full, progress and recovery), the predicted path (anticipation) and its part ahead
+	## within the traffic horizon.
 	var full: PackedVector3Array
+	var predicted: PackedVector3Array
 	var ahead: PackedVector3Array
 	var ahead_lengths: PackedFloat32Array
 
@@ -166,7 +176,8 @@ static func _snap(ship: ShipMovement) -> Snap:
 	snap.serial = ship.get_traffic_serial()
 	snap.map = ship.get_world_3d().navigation_map
 	snap.full = ship.get_remaining_path()
-	snap.ahead = _cut(snap.full, snap.stopping + ship.profile.detour_lookahead_distance)
+	snap.predicted = ship.get_predicted_path()
+	snap.ahead = _cut(snap.predicted, snap.stopping + ship.profile.detour_lookahead_distance)
 	snap.ahead_lengths = _lengths(snap.ahead)
 	return snap
 
@@ -184,7 +195,7 @@ static func _update_grants(snaps: Array[Snap], by_ship: Dictionary) -> void:
 			if overlap.is_empty():
 				# A held loser's horizon is short; release only when the winner also clears one more loser radius
 				# beyond it, so the loser does not resume and stop again on every other tick.
-				var reach := _cut(loser.full, loser.ahead_lengths[loser.ahead_lengths.size() - 1] + loser.radius)
+				var reach := _cut(loser.predicted, loser.ahead_lengths[loser.ahead_lengths.size() - 1] + loser.radius)
 				if not _overlap(winner.ahead, winner.ahead_lengths, reach, _lengths(reach), winner.radius + loser.radius).is_empty():
 					continue
 				release = (winner.position - grant.far_point).dot(grant.far_direction) > 0.0
@@ -203,6 +214,12 @@ static func _update_grants(snaps: Array[Snap], by_ship: Dictionary) -> void:
 			if overlap.is_empty():
 				continue
 			var first_wins := _outranks(first, overlap.a_in, second, overlap.b_in)
+			# Grants stay acyclic (#83): one that would close a cycle goes to the ship that already precedes the other
+			# through existing grants, so no group can end up waiting on itself.
+			if first_wins and _precedes(second.ship, first.ship):
+				first_wins = false
+			elif not first_wins and _precedes(first.ship, second.ship):
+				first_wins = true
 			var grant := Grant.new()
 			grant.winner = first.ship if first_wins else second.ship
 			grant.loser = second.ship if first_wins else first.ship
@@ -219,6 +236,20 @@ static func _refresh_grant(grant: Grant, winner: Snap, loser: Snap, overlap: Dic
 	grant.far_point = _point_at(winner.ahead, winner.ahead_lengths, far)
 	grant.far_direction = _direction_at(winner.ahead, winner.ahead_lengths, far)
 	grant.hold_point = _point_at(loser.ahead, loser.ahead_lengths, maxf(float(overlap.b_in) - loser.radius, 0.0))
+
+
+## Whether a already has right of way over b through a chain of grants (a wins over x, x over ..., over b).
+static func _precedes(a: ShipMovement, b: ShipMovement) -> bool:
+	var reached: Array[ShipMovement] = [a]
+	var i := 0
+	while i < reached.size():
+		for grant in _grants:
+			if grant.winner == reached[i] and not reached.has(grant.loser):
+				if grant.loser == b:
+					return true
+				reached.push_back(grant.loser)
+		i += 1
+	return false
 
 
 static func _granted(a: ShipMovement, b: ShipMovement) -> bool:
@@ -272,7 +303,8 @@ static func _decide(snap: Snap, snaps: Array[Snap], by_ship: Dictionary, delta: 
 		_escapes.erase(snap.ship)
 		escape = null
 	if blocker != null and escape == null:
-		escape = _escape(snap, blocker, blocker_s)
+		# blocker_s was measured on the predicted path; the guides are placed on the route.
+		escape = _escape(snap, blocker, _nearest(snap.full, _lengths(snap.full), blocker.position).s)
 		_escapes[snap.ship] = escape
 	if escape != null:
 		_advance(escape, snap, delta)
@@ -291,7 +323,8 @@ static func _decide(snap: Snap, snaps: Array[Snap], by_ship: Dictionary, delta: 
 	for grant in _grants:
 		if grant.loser != snap.ship:
 			continue
-		var hold := _nearest(snap.full, _lengths(snap.full), grant.hold_point)
+		# The hold point lies on the predicted path, which is where the ship travels to it.
+		var hold := _nearest(snap.predicted, _lengths(snap.predicted), grant.hold_point)
 		if winner == null or hold.s < hold_s:
 			winner = grant.winner
 			hold_s = hold.s
@@ -334,13 +367,13 @@ static func _still_ahead(snap: Snap, parked: Snap) -> bool:
 	return hit.s > 0.0 and hit.distance < snap.radius + parked.radius
 
 
-## Whether the loser's centre sits within the winner's swept capsule ahead of the winner.
+## Whether the loser's centre sits within the winner's swept capsule ahead of the winner (predicted path).
 static func _in_path(loser: Snap, winner: Snap) -> bool:
 	var hit := _nearest(winner.ahead, winner.ahead_lengths, loser.position)
 	return hit.s > 0.0 and hit.distance < winner.radius + loser.radius
 
 
-## Making room: back along the approach, then the shorter side of the winner's path.
+## Making room: back along the approach (route), then the shorter side of the winner's predicted path.
 static func _room(loser: Snap, winner: Snap) -> Recovery:
 	var recovery := Recovery.new()
 	recovery.other = winner.ship
