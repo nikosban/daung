@@ -11,9 +11,7 @@ static var _jobs: Array[Job] = []
 static var _ships: Array[ShipMovement] = []
 static var _frame := -1
 static var _frame_used := 0
-static var _guided := 0
-static var _runtime_peak := 0
-static var _prepared_frame := -1
+static var _serviced_frame := -1
 
 
 static func register_ship(ship: ShipMovement) -> void:
@@ -37,20 +35,16 @@ static func _begin_frame() -> void:
 	if _frame != Engine.get_physics_frames():
 		_frame = Engine.get_physics_frames()
 		_frame_used = 0
-		_guided = 0
 
 
+## Telemetry only (Task #84): navigation time measured this frame. Nothing may branch on a time value.
 static func measure() -> int:
 	_begin_frame()
 	return Time.get_ticks_usec()
 
 
-static func account(start: int, runtime := false) -> void:
-	var used := Time.get_ticks_usec() - start
-	_frame_used += used
-	if runtime:
-		_runtime_peak = maxi(_runtime_peak, used)
-		_guided += 1
+static func account(start: int) -> void:
+	_frame_used += Time.get_ticks_usec() - start
 
 
 static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, _brake_first := false, refresh := false) -> Job:
@@ -61,42 +55,35 @@ static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, _bra
 	return job
 
 
-## Cache preparation, path queries and resolver work all run under the existing clock. Reserve the measured cost
-## of live guidance for ships still to move this frame. Geometry checks are charged by the caller as well.
+## Runs once per physics frame, on the first call; later calls in the same frame return at once (Task #84).
+## Cache preparation and route work are each bounded by a count of work items, never by measured time, so an
+## unfinished cache or job simply continues next frame. Live guidance is never limited by this budget.
 static func service() -> void:
 	var start := measure()
-	if _jobs.is_empty() and _prepared_frame == _frame:
+	if _serviced_frame == _frame:
 		account(start)
-		return # No route work; this frame's cache preparation has already had its slice.
-	# Do not cap this at half the allowance: several ships beside hazards can need more than half
-	# for live checks alone. Only route/preparation work yields; physical guidance still runs this tick.
-	var reserve := _runtime_peak * maxi(_ships.size() - _guided, 0)
-	var allowance := BUDGET.plan_time_per_tick - _frame_used - reserve
-	if allowance > 0:
-		var clock := PlanClock.new(start + allowance, BUDGET.plan_time_per_tick)
-		if _prepared_frame != _frame:
-			_prepared_frame = _frame
-			# Static boundary preparation is background work. Leave half this slice for live guidance/dispatch,
-			# as PlanClock already does for its largest atomic item; an unfinished cache never freezes movement.
-			var preparation := PlanClock.new(start + allowance / 2, BUDGET.plan_time_per_tick)
-			var maps: Array[RID] = []
-			for ship in _ships:
-				var map := ship.get_world_3d().navigation_map
-				if not maps.has(map):
-					maps.push_back(map)
-					if preparation.has_time():
-						HullProbe.prepare_space(map, ship.get_tree().root, preparation)
-		var i := 0
-		while i < _jobs.size() and clock.has_time():
-			var job := _jobs[i]
-			if job.status == Status.PENDING:
-				job.advance(clock)
-			if job.status != Status.PENDING:
-				_jobs.remove_at(i)
-			elif job.waiting:
-				i += 1
-			else:
-				break
+		return
+	_serviced_frame = _frame
+	var preparation := PlanClock.new(BUDGET.preparation_items_per_tick)
+	var maps: Array[RID] = []
+	for ship in _ships:
+		var map := ship.get_world_3d().navigation_map
+		if not maps.has(map):
+			maps.push_back(map)
+			if preparation.has_time():
+				HullProbe.prepare_space(map, ship.get_tree().root, preparation)
+	var clock := PlanClock.new(BUDGET.plan_items_per_tick)
+	var i := 0
+	while i < _jobs.size() and clock.has_time():
+		var job := _jobs[i]
+		if job.status == Status.PENDING:
+			job.advance(clock)
+		if job.status != Status.PENDING:
+			_jobs.remove_at(i)
+		elif job.waiting:
+			i += 1
+		else:
+			break
 	account(start)
 
 

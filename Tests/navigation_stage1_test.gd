@@ -2,6 +2,7 @@ extends SceneTree
 ## Focused real-scene evidence for #60. No game controls or movement implementation.
 ## --script res://Tests/navigation_stage1_test.gd -- --case=clear --output=res://.godot/issue60/baseline
 ## A2 names explicitly distinguish command receipt from activation timing.
+## --busy-wait adds a 5 ms busy-wait every tick at physics priority -30 to any case; "starved" (#84) always has it.
 
 class Sampler extends Node:
 	var sample: Callable
@@ -43,6 +44,12 @@ var _nw_refreshes := 0
 var _nw_refresh_job: Navigator.Job
 var _nw_translate_turn_ticks := 0
 var _nw_terminal := false
+var _busy_wait := false
+var _space_ready_frame := -1
+var _starved_job: Navigator.Job
+var _activation_frame := -1
+var _first_advance_frame := -1
+var _job_ticks_at_3s := -1
 
 func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
@@ -54,6 +61,9 @@ func _initialize() -> void:
 			_warmup_limit = int(arg.trim_prefix("--warmup="))
 		if arg == "--check":
 			_check = true
+		if arg == "--busy-wait":
+			_busy_wait = true
+	_busy_wait = _busy_wait or _case == "starved"
 	_start_scene.call_deferred()
 
 func _start_scene() -> void:
@@ -64,12 +74,34 @@ func _start_scene() -> void:
 	for body in get_nodes_in_group("navigation_source"):
 		if body is StaticBody3D and body.get_node_or_null("CollisionShape3D").shape is SphereShape3D:
 			_asteroids.push_back(body)
+	if _busy_wait:
+		# #84: a slow frame outside navigation's own work; planning must not depend on it.
+		var busy := Sampler.new()
+		busy.process_physics_priority = -30
+		busy.sample = func(_delta: float) -> void:
+			var begin := Time.get_ticks_usec()
+			while Time.get_ticks_usec() - begin < 5000:
+				pass
+		root.add_child(busy)
+	var watcher := Sampler.new()
+	watcher.process_physics_priority = -10 # After Orders' activation, before Movement can finish the job.
+	watcher.sample = _watch_job
+	root.add_child(watcher)
 	var sampler := Sampler.new()
 	sampler.process_physics_priority = 10
 	sampler.sample = _sample
 	root.add_child(sampler)
 
+func _watch_job(_delta: float) -> void:
+	if _armed and _starved_job == null and _ship._job != null:
+		_starved_job = _ship._job
+		_activation_frame = Engine.get_physics_frames()
+
 func _sample(_delta: float) -> void:
+	var map := _ship.get_world_3d().navigation_map
+	if _space_ready_frame < 0 and HullProbe._spaces.has(map) and HullProbe._spaces[map].ready:
+		_space_ready_frame = Engine.get_physics_frames()
+		print("STAGE1_SPACE_READY physics frame %d" % _space_ready_frame)
 	if not _armed:
 		_warmup += 1
 		if _warmup < _warmup_limit:
@@ -100,6 +132,10 @@ func _sample(_delta: float) -> void:
 			_redirect_at = seconds - (_orders.crew.reaction_delay if _case.begins_with("a2_activate") else 0.0)
 			_orders.move(Vector3(170, 0, -90))
 		elif _case == "detour":
+			_orders.move(Vector3(130, 0, 0))
+		elif _case == "starved":
+			_game.get_node("ShipLeft").global_position = Vector3(-300, 0, 300)
+			_game.get_node("ShipRight").global_position = Vector3(-300, 0, -300)
 			_orders.move(Vector3(130, 0, 0))
 		elif _case == "tight":
 			_ship.global_position = Vector3(120, 0, 235)
@@ -137,6 +173,11 @@ func _sample(_delta: float) -> void:
 		_events.push_back({event = "redirect_received", time = time, due = time + _orders.crew.reaction_delay})
 	if _first_activation < 0.0 and _orders.get_last_activated_time() >= _start:
 		_first_activation = time
+	if _starved_job != null:
+		if _first_advance_frame < 0 and _starved_job.ticks > 0:
+			_first_advance_frame = Engine.get_physics_frames()
+		if _job_ticks_at_3s < 0 and Engine.get_physics_frames() - _activation_frame >= 3 * Engine.physics_ticks_per_second:
+			_job_ticks_at_3s = _starved_job.ticks
 	var status := _ship.get_order_status()
 	if _case == "nw_redirect":
 		if _ship._job != null and _ship._job.refresh and _ship._job != _nw_refresh_job:
@@ -198,6 +239,8 @@ func _finish(time: float) -> void:
 		worst_mesh_sample = _worst_mesh_sample, closest_asteroid_centre = _closest_centre,
 		redirect_min_speed = _min_speed if _min_speed < INF else null, contacts = _contacts,
 		worst_counted_navigation_usec = _worst_navigation, counted_overruns = _overruns, overrun_events = _overrun_events,
+		busy_wait = _busy_wait, space_ready_frame = _space_ready_frame, activation_frame = _activation_frame,
+		first_advance_frame = _first_advance_frame, job_ticks_at_3s = _job_ticks_at_3s,
 		status = _ship.get_order_status(), trace_sha256 = hashing.finish().hex_encode(), events = _events}
 	if _case == "nw_redirect":
 		summary.nw = {representative_not_exact_replay = true, course_change_degrees = _ship.get_reversal_angle(),
@@ -212,6 +255,10 @@ func _finish(time: float) -> void:
 	print("STAGE1_SCENE_RESULT ", JSON.stringify(summary))
 	var finished := (_arrival >= 0.0) if _case != "stop" else (not _ship.has_order() and _ship.velocity.length() < 0.01)
 	var passed := finished and _contacts == 0 and _intrusion_after_entry <= _ship.profile.no_go_tolerance + 1e-4 and _overruns == 0
+	if _case == "starved":
+		# #84 decisive check: planning advances within 3 ticks of activation despite the busy-wait. Navigation-cost
+		# overruns stay counted and reported in the summary but do not decide this case.
+		passed = finished and _contacts == 0 and _intrusion_after_entry <= _ship.profile.no_go_tolerance + 1e-4 			and _first_advance_frame >= 0 and _first_advance_frame - _activation_frame <= 3
 	if _case == "nw_redirect":
 		passed = passed and summary.nw.same_order and summary.nw.retained_destination and not _nw_terminal and _nw_refreshes == 1 and _nw_translate_turn_ticks > 0
 		print("NW_CHECK ", JSON.stringify(summary.nw))

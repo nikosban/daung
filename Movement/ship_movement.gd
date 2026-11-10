@@ -621,7 +621,7 @@ func _physics_process(delta: float) -> void:
 				_pilot_targets.has_order = false
 	if _blocked:
 		_pilot_targets.has_order = false
-	Navigator.account(guidance_started, true)
+	Navigator.account(guidance_started)
 	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
 	_brake_first = _pilot_targets.brake_first
 	if _plan == null and not corrected and not held and not guided and not obstructed:
