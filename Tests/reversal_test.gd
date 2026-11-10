@@ -52,7 +52,8 @@ func _test_open_space() -> void:
 				print("   %3.0f° from %4.1f m/s %-8s reversal %-5s speed at 0/2/4/6/8/10/15/20 s %s; near rest %s at %5.2f s after %5.1f m; hull turn while braking %5.1f°; arrived %s at %6.2f s; heading change %6.1f°, reversals %d; nearest approach behind start %.1f m" % [angle, v, pair[0], r.reversal, r.speeds, r.rest_reached, r.rest_time, r.brake_distance, r.brake_turn, r.arrived, r.arrive_time, r.heading_travel, r.reversals, r.overshoot])
 				print("      path every 2 s: %s" % r.path)
 			if angle < 150.0:
-				_check(not new_r.reversal and new_r.trace == old_r.trace, "%.0f° from %.0f m/s: ordinary movement, identical to %s on every tick (arrived %.2f s)" % [angle, v, BASELINE, new_r.arrive_time])
+				# Was: identical to BASELINE on every tick (obsolete after the #86 propulsion retune).
+				_check(not new_r.reversal and new_r.arrived and new_r.violations == 0 and new_r.rotation_after == 0.0, "%.0f° from %.0f m/s: ordinary movement (no reversal braking), arrives (%.2f s), no rotation after arrival, inside every limit" % [angle, v, new_r.arrive_time])
 				continue
 			_check(new_r.reversal and new_r.rest_reached, "%.0f° from %.0f m/s: committed reversal, brakes to near rest (%.2f s, %.1f m)" % [angle, v, new_r.rest_time, new_r.brake_distance])
 			var stop_time: float = (v - _profile.arrival_speed_tolerance) / a_t
@@ -60,7 +61,7 @@ func _test_open_space() -> void:
 			_check(new_r.brake_turn == 0.0 and new_r.brake_lateral < 1e-4 and new_r.brake_speedup == 0 and new_r.brake_overlimit == 0, "%.0f° from %.0f m/s: while braking no turn (%.2f°), velocity keeps its direction (lateral %.5f m/s), never speeds up, never beyond the sternward limit (%d ticks)" % [angle, v, new_r.brake_turn, new_r.brake_lateral, new_r.brake_overlimit])
 			_check(new_r.rest_time >= stop_time - 0.05 and new_r.brake_distance >= stop_distance - 0.5, "%.0f° from %.0f m/s: the stop costs physical time and distance (%.2f s, %.1f m; at the full thruster limit %.2f s, %.1f m)" % [angle, v, new_r.rest_time, new_r.brake_distance, stop_time, stop_distance])
 			var ref: Dictionary = rest[angle]
-			_check(new_r.arrived and new_r.stops_after == 0 and new_r.reversals <= ref.reversals + 1 and new_r.heading_travel <= ref.heading_travel + 20.0 and new_r.violations == 0 and new_r.rotation_after == 0.0, "%.0f° from %.0f m/s: after braking arrives (%.2f s, %s %.2f s) without stopping again or circling, turning no more than the same order from rest, one settle at the course allowed (heading change %.1f°, from rest %.1f°; turn-rate reversals %d, from rest %d), inside every limit" % [angle, v, new_r.arrive_time, BASELINE, old_r.arrive_time, new_r.heading_travel, ref.heading_travel, new_r.reversals, ref.reversals])
+			_check(new_r.arrived and new_r.stops_after == 0 and new_r.reversals <= ref.reversals + 1 and new_r.heading_travel <= ref.heading_travel + 20.0 and new_r.violations == 0 and new_r.rotation_after == 0.0, "%.0f° from %.0f m/s: after braking arrives (%.2f s, %s %.2f s) without stopping again or circling, turning no more than the same order from rest, one settle at the course allowed (heading change %.1f°, from rest %.1f°; turn-rate reversals %d, from rest %d; stops %d, violations %d, rotation after arrival %.2f°), inside every limit" % [angle, v, new_r.arrive_time, BASELINE, old_r.arrive_time, new_r.heading_travel, ref.heading_travel, new_r.reversals, ref.reversals, new_r.stops_after, new_r.violations, new_r.rotation_after])
 			_check(new_r.both_after > 30, "%.0f° from %.0f m/s: after braking the hull rotates while it translates (%d ticks)" % [angle, v, new_r.both_after])
 	print("\n   From rest")
 	for angle in [90.0, 180.0]:
@@ -68,7 +69,8 @@ func _test_open_space() -> void:
 		var old_r := _run("baseline", Vector3.ZERO, 0.0, destination, 120.0)
 		var new_r := _run("now", Vector3.ZERO, 0.0, destination, 120.0)
 		print("   %3.0f° from rest: reversal %s; arrived %s at %6.2f s (%s %6.2f s); heading change %6.1f°, reversals %d" % [angle, new_r.reversal, new_r.arrived, new_r.arrive_time, BASELINE, old_r.arrive_time, new_r.heading_travel, new_r.reversals])
-		_check(not new_r.reversal and new_r.trace == old_r.trace, "%.0f° from rest: existing stationary movement, identical to %s on every tick" % [angle, BASELINE])
+		# Was: identical to BASELINE on every tick (obsolete after the #86 propulsion retune).
+		_check(not new_r.reversal and new_r.arrived and new_r.violations == 0 and new_r.rotation_after == 0.0, "%.0f° from rest: ordinary stationary movement (no reversal braking), arrives (%.2f s), no rotation after arrival, inside every limit" % [angle, new_r.arrive_time])
 
 
 # 2. Classification: actual travel direction, not the bow; once per order.
@@ -134,6 +136,8 @@ func _run(pilot: String, velocity: Vector3, yaw: float, destination: Vector3, se
 	var last_sign := 0
 	var flag: bool = r.reversal
 	var stopped := false
+	# Set once the ship has set off (above 1 m/s) after the reversal stop; only later stops count as stopping again.
+	var departed := false
 	var start_direction := velocity.normalized()
 	var ticks := roundi(seconds / DELTA)
 	for i in ticks:
@@ -190,7 +194,11 @@ func _run(pilot: String, velocity: Vector3, yaw: float, destination: Vector3, se
 			if norm > out.planar_share + 1e-3 or out.planar_share + turn_use > 1.0 + 1e-3 or out.main_command > profile.main_acceleration + 1e-6:
 				r.violations += 1
 		if had_order and not flag_now and (r.rest_reached or not r.reversal):
-			if new_speed < profile.arrival_speed_tolerance and (destination - state.position).length() > profile.arrival_tolerance and r.rest_reached and t > r.rest_time + 1.0:
+			if new_speed > 1.0:
+				departed = true
+			# Was: any time below the arrival speed tolerance from 1 s after the stop, which counted a slow departure as a
+			# second stop once the thrusters were weaker (#86).
+			if new_speed < profile.arrival_speed_tolerance and (destination - state.position).length() > profile.arrival_tolerance and r.rest_reached and departed:
 				if not stopped:
 					r.stops_after += 1
 				stopped = true
