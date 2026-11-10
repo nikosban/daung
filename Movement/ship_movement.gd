@@ -48,6 +48,11 @@ extends CharacterBody3D
 
 @export var profile: MovementProfile
 
+## Predicted sweep (#83): the largest turn of the travel direction per arc segment, and the segment bound (12 × 15° covers
+## a full reversal of the travel direction). Geometric resolution of the estimate, not movement tuning.
+const PREDICTION_SEGMENT_ANGLE := deg_to_rad(15.0)
+const PREDICTION_MAX_SEGMENTS := 12
+
 ## Physics clock in seconds (the sum of physics ticks so far), used only for status and log text.
 var _clock := 0.0
 var _active_move_receipt := 0
@@ -243,6 +248,93 @@ func get_remaining_path() -> PackedVector3Array:
 			path.push_back(RouteGuidance.planar(_plan.route[i]))
 	else:
 		path.push_back(RouteGuidance.planar(_destination))
+	return path
+
+
+## The path the ship is expected to fly from its planar position (#83), for ship traffic's anticipation; a lightweight
+## geometric estimate, never a pilot rollout. get_remaining_path() stays the route the ship's progress is measured on.
+## - Sweeping (moving bow-first with the next guide point beyond one response step, the pilot's own condition): arc
+##   segments from the actual velocity and yaw. In each, the speed drops to the pilot's turn-then-stop limit when that is
+##   lower (ShipPilot.step: the turning circle must leave a straight leg to the steering point as long as the stopping
+##   distance), and the travel direction turns by ShipPilot.redirect_acceleration_of() at that speed for the bow the pilot
+##   commands: the travel direction turned one response step toward the guide point, within ShipPilot.alignment_limit_of(),
+##   reached from the actual yaw at the turn-rate curve's pace. The sweep ends once the travel direction is within one
+##   response step of the guide point; the remaining route follows.
+## - Reversal braking: straight to the stopping point (get_stopping_point()), then the remaining route.
+## - Otherwise (no order, at rest, stern-first, already aligned): get_remaining_path().
+## Speed never rises in the estimate, and arrival braking along the remaining route is not modelled.
+func get_predicted_path() -> PackedVector3Array:
+	var route := get_remaining_path()
+	var speed := RouteGuidance.planar(velocity).length()
+	if not _valid or route.size() < 2 or speed == 0.0:
+		return route
+	if _brake_first:
+		var braking := PackedVector3Array([route[0], get_stopping_point()])
+		braking.append_array(route.slice(1))
+		return braking
+	var travel := RouteGuidance.planar(velocity) / speed
+	var yaw := rotation.y
+	if travel.dot(ShipPilot.bow_of(yaw)) <= 0.0:
+		return route
+	var thruster_limit := profile.thruster_strength / profile.mass
+	var sternward_limit := ShipPilot.sternward_limit_of(profile, thruster_limit)
+	var guide := route[1]
+	var beyond := 0.0
+	for i in range(1, route.size() - 1):
+		beyond += RouteGuidance.planar(route[i + 1] - route[i]).length()
+	var position := route[0]
+	var path := PackedVector3Array([position])
+	for _i in PREDICTION_MAX_SEGMENTS:
+		var to_guide := guide - position
+		if to_guide == Vector3.ZERO:
+			break
+		var angle := travel.angle_to(to_guide)
+		var side := signf(travel.cross(to_guide).y)
+		if side == 0.0:
+			side = 1.0
+		var across := travel.rotated(Vector3.UP, side * PI / 2.0)
+		var bow := ShipPilot.bow_of(yaw)
+		var effectiveness := ShipPilot.effectiveness_of(profile, speed)
+		var sideways_limit := thruster_limit * effectiveness
+		var forward_limit := profile.forward_directional_acceleration * effectiveness
+		var accel := ShipPilot.redirect_acceleration_of(across, bow, profile.main_acceleration, 1.0, thruster_limit, sideways_limit, forward_limit, sternward_limit)
+		var reach := accel * profile.pilot_response_time / speed
+		if accel <= 0.0 or reach >= 1.0 or angle <= asin(reach):
+			break
+		# The pilot's turn-then-stop limit: the speed whose turning circle leaves a straight leg to the steering point at
+		# least as long as the stopping distance (ShipPilot.step); the ship slows to it, which tightens the turn.
+		var braking := ShipPilot.reach_of(-travel, bow, thruster_limit, sideways_limit, sideways_limit)
+		if travel.dot(bow) > 0.0:
+			braking = minf(braking, sternward_limit / travel.dot(bow))
+		var distance := to_guide.length() + beyond
+		var lateral := distance * (sin(angle) if angle < PI / 2.0 else 1.0)
+		if braking > 0.0:
+			var quad := 1.0 / (4.0 * braking * braking)
+			var lin := 2.0 * lateral / accel
+			var limit := sqrt(maxf((-lin + sqrt(lin * lin + 4.0 * quad * distance * distance)) / (2.0 * quad), 0.0))
+			if limit < speed:
+				speed = maxf(limit, profile.arrival_speed_tolerance)
+				effectiveness = ShipPilot.effectiveness_of(profile, speed)
+				sideways_limit = thruster_limit * effectiveness
+				forward_limit = profile.forward_directional_acceleration * effectiveness
+				accel = ShipPilot.redirect_acceleration_of(across, bow, profile.main_acceleration, 1.0, thruster_limit, sideways_limit, forward_limit, sternward_limit)
+				reach = accel * profile.pilot_response_time / speed
+				if reach >= 1.0 or angle <= asin(reach):
+					break
+		# One arc segment of radius v² / a: its chord, then the new travel direction.
+		var turn := minf(angle, PREDICTION_SEGMENT_ANGLE)
+		var duration := turn * speed / accel
+		position += travel.rotated(Vector3.UP, side * turn / 2.0) * (2.0 * speed * speed / accel * sin(turn / 2.0))
+		travel = travel.rotated(Vector3.UP, side * turn)
+		path.push_back(position)
+		# The bow the pilot commands next: one response step ahead of the travel direction, within the bow alignment
+		# limit, reached from the current yaw no faster than the turn-rate limit allows over the segment.
+		var lead := minf(asin(reach), ShipPilot.alignment_limit_of(profile, speed))
+		var commanded := travel.rotated(Vector3.UP, side * lead)
+		var error := wrapf(atan2(-commanded.x, -commanded.z) - yaw, -PI, PI)
+		var rate_limit := deg_to_rad(maxf(profile.turn_rate_curve.sample(speed), 0.0))
+		yaw += clampf(error, -rate_limit * duration, rate_limit * duration)
+	path.append_array(route.slice(1))
 	return path
 
 
