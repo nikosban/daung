@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://bpd7mojokwuy2"]
 
 [ext_resource type="Script" uid="uid://cdkcsmfcrfmt5" path="res://debugging/scenarios/traffic_scenario.gd" id="1_scenario"]
-[ext_resource type="Resource" path="res://debugging/scenarios/setups/acceleration_priority.tres" id="2_whc4e"]
+[ext_resource type="Resource" path="res://debugging/scenarios/setups/wide_turn.tres" id="2_whc4e"]
 [ext_resource type="PackedScene" path="res://Ships/ship.tscn" id="3_ship"]
 [ext_resource type="PackedScene" path="res://game/camera/camera_rig.tscn" id="4_camera"]
 [ext_resource type="PackedScene" path="res://game/command/fleet/fleet_command.tscn" id="5_fleet"]
