@@ -16,11 +16,19 @@ var _old: GDScript
 var _profile: MovementProfile
 ## BASELINE's own frigate profile.
 var _old_profile: Resource
+## Test copy of the frigate profile with bow alignment unrestricted at every speed (180°); the shared profile is untouched.
+var _unaligned: MovementProfile
 
 
 func _init() -> void:
 	_profile = load(PROFILE_PATH)
 	var before := _snapshot(_profile)
+	_unaligned = _profile.duplicate()
+	var open := Curve.new()
+	open.max_domain = 15.0
+	open.max_value = 180.0
+	open.add_point(Vector2(0.0, 180.0))
+	_unaligned.bow_alignment_curve = open
 	_old = Baseline.load_pilot(BASELINE)
 	_old_profile = Baseline.load_profile(BASELINE)
 	if _old == null or _old_profile == null:
@@ -64,11 +72,12 @@ func _test_stationary() -> void:
 	print("\n2. From rest: order 40 m abeam (translate while rotating) and 60 m at 60° off the bow")
 	for destination in [Vector3(40, 0, 0), Vector3(60 * sin(deg_to_rad(60.0)), 0, -60 * cos(deg_to_rad(60.0)))]:
 		var rows := {}
-		for pilot in ["baseline", "now"]:
+		for pilot in ["baseline", "unaligned", "now"]:
 			rows[pilot] = _run(pilot, Vector3.ZERO, destination, 40.0)
 			_print_run(pilot, rows[pilot])
 		_check(rows["now"].arrived and rows["now"].both_ticks > 60, "translates and rotates at once and arrives (%s)" % destination)
-		_check(absf(rows["now"].arrive_time - rows["baseline"].arrive_time) < 0.5, "arrival within 0.5 s of the baseline (%.2f vs %.2f s)" % [rows["now"].arrive_time, rows["baseline"].arrive_time])
+		# Was: within 0.5 s of BASELINE (obsolete after the #86 propulsion retune). Bow alignment must not slow the order.
+		_check(rows["unaligned"].arrived and absf(rows["now"].arrive_time - rows["unaligned"].arrive_time) < 0.5, "arrival within 0.5 s of the same order with bow alignment unrestricted (%.2f vs %.2f s)" % [rows["now"].arrive_time, rows["unaligned"].arrive_time])
 		_check(rows["now"].limit_breaches == 0, "commanded target never beyond the limit (%s)" % destination)
 
 
@@ -79,7 +88,8 @@ func _test_straight() -> void:
 	for pilot in ["baseline", "now"]:
 		rows[pilot] = _run(pilot, Vector3.ZERO, Vector3(0, 0, -1000), 30.0)
 		_print_run(pilot, rows[pilot])
-	_check(rows["now"].trace == rows["baseline"].trace, "identical to %s on every tick" % BASELINE)
+	# Was: identical to BASELINE on every tick (obsolete after the #86 propulsion retune).
+	_check(rows["now"].heading_travel == 0.0 and rows["now"].limit_breaches == 0 and rows["now"].final_position.z < -100.0, "no hull rotation (%.4f°), accelerates along the bow (%.1f m in 30 s)" % [rows["now"].heading_travel, -rows["now"].final_position.z])
 
 
 # 4–6 and 10. A course change at cruise: the commanded target stays within the curve, the trajectory makes progress,
@@ -111,7 +121,8 @@ func _test_stern_first() -> void:
 	for pilot in ["baseline", "now"]:
 		rows[pilot] = _run(pilot, Vector3.BACK * 5.0, Vector3.ZERO, 20.0, false)
 		_print_run(pilot, rows[pilot])
-	_check(rows["now"].trace == rows["baseline"].trace, "stern-first stop from 5 m/s (no order) identical to %s" % BASELINE)
+	# Was: identical to BASELINE on every tick (obsolete after the #86 propulsion retune).
+	_check(rows["now"].heading_travel == 0.0 and rows["now"].min_speed < 0.01, "stern-first stop from 5 m/s (no order): no hull rotation (%.4f°), comes to rest" % rows["now"].heading_travel)
 	rows = {}
 	for pilot in ["baseline", "now"]:
 		rows[pilot] = _run(pilot, Vector3.BACK * 5.0, Vector3(40, 0, -100), 60.0)
@@ -130,9 +141,11 @@ func _test_braking_and_arrival() -> void:
 	for destination in [Vector3.ZERO, Vector3(0, 0, -80)]:
 		var rows := {}
 		for pilot in ["baseline", "now"]:
-			rows[pilot] = _run(pilot, Vector3.FORWARD * 15.0, destination, 30.0, destination != Vector3.ZERO)
+			rows[pilot] = _run(pilot, Vector3.FORWARD * 15.0, destination, 40.0, destination != Vector3.ZERO)
 			_print_run(pilot, rows[pilot])
-		_check(rows["now"].trace == rows["baseline"].trace, "identical to %s on every tick (%s)" % [BASELINE, "stop" if destination == Vector3.ZERO else "arrival 80 m ahead"])
+		# Was: identical to BASELINE on every tick (obsolete after the #86 propulsion retune).
+		var done: bool = rows["now"].min_speed < 0.01 if destination == Vector3.ZERO else rows["now"].arrived
+		_check(rows["now"].heading_travel == 0.0 and done, "%s: no hull rotation (%.4f°), %s" % ["stop" if destination == Vector3.ZERO else "arrival 80 m ahead", rows["now"].heading_travel, "comes to rest" if destination == Vector3.ZERO else "arrives (%.2f s)" % rows["now"].arrive_time])
 
 
 # 8. A moving turn that ends in an arrival.
@@ -201,7 +214,7 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 			for field in ["destination", "use_steer", "steer_direction", "steer_distance", "has_course", "course_yaw", "course_follows", "bend_lengths", "bend_radii", "bend_from", "bend_s"]:
 				targets.set(field, guided.get(field))
 			course = targets.course_yaw
-		script.step(_profile if pilot == "now" else _old_profile, state, targets, DELTA, out)
+		script.step(_profile if pilot == "now" else (_unaligned if pilot == "unaligned" else _old_profile), state, targets, DELTA, out)
 		state.position += state.velocity * DELTA
 		if follow != null:
 			follow.time += DELTA

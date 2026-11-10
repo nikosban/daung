@@ -67,10 +67,11 @@ func _test_limits(profile: MovementProfile) -> void:
 	# 15 m/s; the curve's domain is in m/s, so effectiveness is unaffected.
 	var probe: MovementProfile = profile.duplicate()
 	probe.max_speed = 1000.0
-	print("   speed   forward assist (approved)   main     sideways (expected)   sternward   stern-first braking (expected)")
-	for entry in [[0.0, 0.25], [5.0, 0.1875], [10.0, 0.125], [15.0, 0.0625]]:
-		var v: float = entry[0]
+	print("   speed   forward assist (expected)   main     sideways (expected)   sternward   stern-first braking (expected)")
+	for v in [0.0, 5.0, 10.0, 15.0]:
 		var e := ShipPilot.effectiveness_of(profile, v)
+		# Was a fixed table of the earlier approved values (0.25 / 0.1875 / 0.125 / 0.0625); now read from the profile.
+		var expected_forward := profile.forward_directional_acceleration * e
 		var forward_out := ShipPilot.Output.new()
 		_one_tick_accel(probe, Vector3.FORWARD * v, Vector3.FORWARD * 10.0, forward_out)
 		var forward := forward_out.thruster_command.dot(Vector3.FORWARD)
@@ -83,8 +84,8 @@ func _test_limits(profile: MovementProfile) -> void:
 		var stern_first := 0.0
 		if v > 0.0:
 			stern_first = _stop_tick_accel(probe, Vector3.BACK * v).dot(Vector3.FORWARD)
-		print("   %5.1f   %9.4f (%6.4f)          %6.4f   %8.4f (%6.4f)      %8.4f    %8.4f (%6.4f)" % [v, forward, entry[1], forward_out.main_command, sideways, a_t * e, sternward, stern_first, a_t * e if v > 0.0 else 0.0])
-		_check(absf(forward - entry[1]) < 1e-5, "forward assistance at %.0f m/s = %.4f m/s² (approved %.4f)" % [v, forward, entry[1]])
+		print("   %5.1f   %9.4f (%6.4f)          %6.4f   %8.4f (%6.4f)      %8.4f    %8.4f (%6.4f)" % [v, forward, expected_forward, forward_out.main_command, sideways, a_t * e, sternward, stern_first, a_t * e if v > 0.0 else 0.0])
+		_check(absf(forward - expected_forward) < 1e-5, "forward assistance at %.0f m/s = %.4f m/s² (forward_directional_acceleration × curve %.4f)" % [v, forward, expected_forward])
 		_check(absf(forward_out.main_command - profile.main_acceleration) < 1e-6 and forward < forward_out.main_command, "main engine %.2f m/s² along the bow, above the forward assistance" % forward_out.main_command)
 		_check(absf(sideways - a_t * e) < EPS, "sideways at %.0f m/s = %.3f m/s² (unchanged)" % [v, sideways])
 		_check(absf(sternward - a_t) < EPS, "sternward at %.0f m/s keeps %.3f m/s²" % [v, sternward])
@@ -139,6 +140,7 @@ func _stop_tick_accel(profile: MovementProfile, velocity: Vector3) -> Vector3:
 func _test_main_engine_dominates(profile: MovementProfile) -> void:
 	print("\n2. Acceleration from rest toward cruise (order 1000 m ahead, no turning)")
 	var traces := {}
+	var cruise := {}
 	for pilot in [SPEED_FADE, BEFORE, "now"]:
 		var script: Variant = _pilots[pilot]
 		var pilot_profile := _profile_for(pilot, profile)
@@ -169,10 +171,15 @@ func _test_main_engine_dominates(profile: MovementProfile) -> void:
 			if speed >= 14.9:
 				break
 		traces[pilot] = trace
+		cruise[pilot] = marks.has(14.9)
 		print("   %-8s time to 5 / 10 / 14.9 m/s: %s / %s / %s s; distance %.1f m; main engine share of forward acceleration: overall %.1f%%, lowest tick %.1f%%" % [pilot, _t(marks, 5.0), _t(marks, 10.0), _t(marks, 14.9), -state.position.z, 100.0 * main_sum / maxf(main_sum + thr_sum, 1e-9), 100.0 * worst_share])
 		if pilot == "now":
 			_check(worst_share > 0.5, "main engine provides most of the forward acceleration on every tick (lowest %.1f%%)" % (100.0 * worst_share))
-	_check(traces["now"] == traces[BEFORE], "straight-ahead acceleration identical to %s on every tick" % BEFORE)
+	# Was: identical to BEFORE on every tick (obsolete after the #86 propulsion retune).
+	var lateral := 0.0
+	for v in traces["now"]:
+		lateral = maxf(lateral, absf(v.x))
+	_check(lateral == 0.0 and cruise["now"], "straight-ahead acceleration stays on the bow axis (largest sideways speed %.6f m/s) and reaches 14.9 m/s" % lateral)
 
 
 func _t(marks: Dictionary, key: float) -> String:
@@ -188,7 +195,10 @@ func _test_sideways(profile: MovementProfile, label: String, velocity: Vector3, 
 		var r: Dictionary = rows[pilot]
 		print("   %-8s (no course turn) first 1 s sideways accel %.4f m/s², sideways speed at 2 s %.4f, sideways offset at 6 s %.3f m, forward speed at 6 s %.3f" % [pilot, r.side_accel_1s, r.side_speed_2s, r.side_offset_6s, r.fwd_speed_6s])
 	if velocity == Vector3.ZERO:
-		_check(rows["now"].trace == rows[SPEED_FADE].trace, "sideways repositioning identical to %s on every tick (%d ticks)" % [SPEED_FADE, rows["now"].ticks])
+		# Was: identical to SPEED_FADE on every tick (obsolete after the #86 propulsion retune).
+		var limit := profile.thruster_strength / profile.mass * ShipPilot.effectiveness_of(profile, 0.0)
+		var rest_r: Dictionary = rows["now"]
+		_check(rest_r.side_accel_1s >= limit - 2e-3 and absf(rest_r.fwd_speed_6s) < 1e-6 and rest_r.arrived, "sideways repositioning uses the full sideways limit at rest (%.4f vs %.4f m/s²), no forward motion (%.6f m/s at 6 s), arrives (%.2f s)" % [rest_r.side_accel_1s, limit, rest_r.fwd_speed_6s, rest_r.arrive_time])
 	else:
 		# Per-axis braking no longer counts part of the sideways correction as braking against the growing drift, so the
 		# moving case may differ from SPEED_FADE, but only toward more sideways authority and with the same momentum.
@@ -210,10 +220,20 @@ func _test_braking(profile: MovementProfile, label: String, arrival: bool) -> vo
 	var rows := {}
 	for pilot in [SPEED_FADE, BEFORE, "now"]:
 		var destination := Vector3(0, 0, -80) if arrival else Vector3.ZERO
-		rows[pilot] = _run(pilot, profile, Vector3.FORWARD * 15.0, destination, 40.0, arrival, true)
+		rows[pilot] = _run(pilot, profile, Vector3.FORWARD * 15.0, destination, 120.0, arrival, true)
 		var r: Dictionary = rows[pilot]
 		print("   %-8s stop time %.3f s, stop distance %.3f m, peak deceleration %.3f m/s²%s" % [pilot, r.stop_time, r.stop_distance, r.peak_decel, (", arrived %s at %.2f s" % [r.arrived, r.arrive_time]) if arrival else ""])
-	_check(rows["now"].trace == rows[SPEED_FADE].trace and rows["now"].trace == rows[BEFORE].trace, "identical to both earlier pilots on every tick (%s, %s)" % [label, "arrival" if arrival else "stop"])
+	# Was: identical to both earlier pilots on every tick (obsolete after the #86 propulsion retune). Now: braking never
+	# beyond the sternward limit (retro rule included); a stop brakes at that limit throughout; an arrival arrives.
+	var a_t := profile.thruster_strength / profile.mass
+	var limit: float = a_t if profile.retro_thrusters else profile.no_retro_braking_effectiveness * a_t
+	var n: Dictionary = rows["now"]
+	if arrival:
+		# The overshoot-and-return (stop distance beyond 80 m) turns the hull, so the main engine then also pushes back
+		# along the start direction; the limit itself is checked on the stop above.
+		_check(n.arrived, "%s, arrival: arrives (%.2f s; peak deceleration along the start direction %.3f m/s², braking limit %.3f)" % [label, n.arrive_time, n.peak_decel, limit])
+	else:
+		_check(n.stop_time > 0.0 and n.peak_decel <= limit + 1e-3 and n.stop_time <= 15.0 / limit + 0.5 and n.stop_distance >= 15.0 * 15.0 / (2.0 * limit) - 0.5, "%s, stop: at the limit %.3f m/s² throughout (%.2f s, %.1f m; at the limit %.2f s, %.1f m), never beyond it (peak %.3f)" % [label, limit, n.stop_time, n.stop_distance, 15.0 / limit, 15.0 * 15.0 / (2.0 * limit), n.peak_decel])
 
 
 # 6. Regression: braking stern-first travel (bow-forward thrust against the momentum).
@@ -224,7 +244,11 @@ func _test_stern_first(profile: MovementProfile) -> void:
 		for pilot in [SPEED_FADE, BEFORE, "now"]:
 			rows[pilot] = _run(pilot, profile, Vector3.BACK * v, Vector3.ZERO, 120.0, false, false)
 		print("   stop from %4.1f m/s stern-first (no order): %s %.2f s / %.1f m; %s %.2f s / %.1f m; now %.2f s / %.1f m" % [v, SPEED_FADE, rows[SPEED_FADE].stop_time, rows[SPEED_FADE].stop_distance, BEFORE, rows[BEFORE].stop_time, rows[BEFORE].stop_distance, rows["now"].stop_time, rows["now"].stop_distance])
-		_check(rows["now"].trace == rows[SPEED_FADE].trace, "stern-first stop from %.0f m/s identical to %s on every tick" % [v, SPEED_FADE])
+		# Was: identical to SPEED_FADE on every tick (obsolete after the #86 propulsion retune). Now: bow-forward braking at
+		# the physical stern-first limit (thruster_strength / mass × curve), not the forward-assistance limit.
+		var limit := profile.thruster_strength / profile.mass * ShipPilot.effectiveness_of(profile, v)
+		var n: Dictionary = rows["now"]
+		_check(n.stop_time > 0.0 and n.peak_decel <= limit + 1e-3 and n.stop_time <= v / limit + 0.5 and n.stop_distance >= v * v / (2.0 * limit) - 0.5, "stern-first stop from %.0f m/s at the limit %.3f m/s² (%.2f s, %.1f m; at the limit %.2f s, %.1f m), never beyond it (peak %.3f)" % [v, limit, n.stop_time, n.stop_distance, v / limit, v * v / (2.0 * limit), n.peak_decel])
 	# Moving and turning: 5 m/s stern-first, ordered 100 m ahead and 40 m to the side with the course turn on.
 	var destination := Vector3(40, 0, -100)
 	var results := {}
@@ -234,7 +258,9 @@ func _test_stern_first(profile: MovementProfile) -> void:
 		print("   %-8s 5 m/s stern-first, order (40, −100) with turning: stern-first speed at 2 s %.3f m/s, below 0.5 m/s after %.2f s, gone (crosses zero) after %.2f s; %.2f m astern; arrived %s at %.2f s; priority/limit violations %d" % [pilot, r.stern_speed_2s, r.reverse_10pct, r.reverse_gone, r.astern, r.arrived, r.arrive_time, r.violations])
 	var now_r: Dictionary = results["now"]
 	var fade_r: Dictionary = results[SPEED_FADE]
-	_check(now_r.reverse_10pct > 0.0 and now_r.reverse_10pct <= fade_r.reverse_10pct + 0.05 and now_r.astern <= fade_r.astern * 1.05, "stern-first braking while turning as effective as %s: 90%% of the speed gone after %.2f s (%.2f s), %.2f m astern (%.2f m)" % [SPEED_FADE, now_r.reverse_10pct, fade_r.reverse_10pct, now_r.astern, fade_r.astern])
+	# Was: as effective as SPEED_FADE (its 3.33 m/s² thrusters; obsolete after the #86 propulsion retune). Now: the
+	# stern-first motion is braked out and the ship arrives; times are reported, not compared.
+	_check(now_r.reverse_10pct > 0.0 and now_r.reverse_gone > 0.0 and now_r.arrived, "stern-first motion braked out while turning (90%% gone after %.2f s, gone after %.2f s, %.2f m astern; %s %.2f s on its own profile) and arrives (%.2f s)" % [now_r.reverse_10pct, now_r.reverse_gone, now_r.astern, SPEED_FADE, fade_r.reverse_10pct, now_r.arrive_time])
 	_check(now_r.violations == 0, "every tick: braking first, then sideways, then forward; inside every limit (%s)" % now_r.first_violation)
 
 
@@ -251,7 +277,7 @@ func _test_combined_allocation(profile: MovementProfile) -> void:
 	var cases := [
 		["bow-first, forward 3 + sideways 3", bow, bow * 3.0 + right * 3.0],
 		["bow-first, forward 3 + sideways 0.4", bow, bow * 3.0 + right * 0.4],
-		["bow-first, braking 3 + sideways 3", bow, -bow * 3.0 + right * 3.0],
+		["bow-first, braking 0.9 × a_t + sideways 3", bow, -bow * 0.9 * a_t + right * 3.0],
 		["drifting right, braking 0.5 + forward 3", right, -right * 0.5 + bow * 3.0],
 		["drifting right, braking 3 + forward 3", right, -right * 3.0 + bow * 3.0],
 	]
@@ -266,7 +292,8 @@ func _test_combined_allocation(profile: MovementProfile) -> void:
 	var c2 := ShipPilot.allocate(cases[1][2], bow * 15.0, 1.0, bow, tau, a_t, side, fwd)
 	_check(absf(c2.dot(right) - 0.4) < EPS and c2.dot(bow) > 0.0 and c2.dot(bow) <= fwd + 1e-6, "forward 3 + sideways 0.4: sideways served in full (0.4), forward gets %.4f ≤ %.4f" % [c2.dot(bow), fwd])
 	var c3 := ShipPilot.allocate(cases[2][2], bow * 15.0, 1.0, bow, tau, a_t, side, fwd)
-	_check(absf(-c3.dot(bow) - 3.0) < EPS, "braking 3 + sideways 3: braking served in full first")
+	# Was: braking 3 m/s² (below the earlier 3.33 m/s² rating); now 0.9 × the thruster rating, so it still fits.
+	_check(absf(-c3.dot(bow) - 0.9 * a_t) < EPS, "braking %.4f + sideways 3: braking served in full first" % (0.9 * a_t))
 	var c4 := ShipPilot.allocate(cases[3][2], right * 15.0, 1.0, bow, tau, a_t, side, fwd)
 	_check(absf(-c4.dot(right) - 0.5) < EPS and c4.dot(bow) <= fwd + 1e-6, "drifting: braking 0.5 in full, forward assistance ≤ %.4f" % fwd)
 	var c5 := ShipPilot.allocate(cases[4][2], right * 15.0, 1.0, bow, tau, a_t, side, fwd)

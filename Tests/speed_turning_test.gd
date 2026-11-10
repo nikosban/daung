@@ -103,9 +103,11 @@ func _test_low_speed() -> void:
 	_check(rest.peak_rate <= 1.8 + 1e-3 and rest.both_ticks > 30, "at rest the hull turns at most 1.8 °/s while translating at once (peak %.3f °/s in the first second)" % rest.peak_rate)
 
 
-# 4. Scenarios that do not turn: identical to the baseline.
+# 4. Scenarios that do not turn: the hull never rotates and the ship still does what was asked. (These were identical-tick
+# comparisons with BASELINE; propulsion retuning (#86) made the baseline's numbers obsolete.)
 func _test_unchanged() -> void:
-	print("\n4. No turning involved: identical to %s" % BASELINE)
+	print("
+4. No turning involved: no hull rotation")
 	var cases := [
 		["straight acceleration from rest (1000 m ahead)", Vector3.ZERO, Vector3(0, 0, -1000), true],
 		["straight stop from 15 m/s", Vector3.FORWARD * 15.0, Vector3.ZERO, false],
@@ -113,17 +115,17 @@ func _test_unchanged() -> void:
 		["stern-first stop from 5 m/s", Vector3.BACK * 5.0, Vector3.ZERO, false],
 	]
 	for case in cases:
-		var old_r := _run("baseline", case[1], case[2], 40.0, case[3])
 		var new_r := _run("now", case[1], case[2], 40.0, case[3])
-		_check(old_r.trace == new_r.trace, "%s identical on every tick" % case[0])
-	var side_old := _run("baseline", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 40.0, true, PackedVector3Array(), false)
+		var stop: bool = not case[3]
+		var arrival: bool = case[3] and (case[2] as Vector3).length() < 100.0
+		var outcome: bool = (new_r.min_speed < 0.01) if stop else (new_r.arrived if arrival else new_r.final_position.z < -100.0)
+		_check(new_r.heading_travel == 0.0 and new_r.rate_jumps == 0 and outcome, "%s: no hull rotation (%.4f°) and %s" % [case[0], new_r.heading_travel, "comes to rest" if stop else ("arrives (%.2f s)" % new_r.arrive_time if arrival else "accelerates along the bow (%.1f m in 40 s)" % -new_r.final_position.z)])
 	var side_new := _run("now", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 40.0, true, PackedVector3Array(), false)
-	# A moving redirect: the guidance now turns the velocity progressively (momentum-preserving course changes), so it is
-	# no longer identical tick by tick; it must still reach the offset and arrive no later.
-	_check(side_new.arrived and side_new.arrive_time <= side_old.arrive_time + 0.05, "sideways repositioning at cruise without a course turn arrives no later (%.2f vs %.2f s)" % [side_new.arrive_time, side_old.arrive_time])
-	var rest_old := _run("baseline", Vector3.ZERO, Vector3(40, 0, 0), 20.0, true, PackedVector3Array(), false)
+	# A moving redirect: the guidance turns the velocity progressively (momentum-preserving course changes); it must reach
+	# the offset and arrive without rotating afterwards.
+	_check(side_new.arrived and side_new.rotation_after == 0.0 and side_new.rate_jumps == 0, "sideways repositioning at cruise without a course turn arrives (%.2f s), no rotation after arrival, no abrupt rate change" % side_new.arrive_time)
 	var rest_new := _run("now", Vector3.ZERO, Vector3(40, 0, 0), 20.0, true, PackedVector3Array(), false)
-	_check(rest_old.trace == rest_new.trace, "sideways repositioning from rest without a course turn identical on every tick")
+	_check(rest_new.heading_travel == 0.0 and rest_new.arrived, "sideways repositioning from rest without a course turn: no hull rotation (%.4f°), arrives (%.2f s)" % [rest_new.heading_travel, rest_new.arrive_time])
 
 
 # 5. Moving turns followed by arrival, stern-first with turning.

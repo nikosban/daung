@@ -95,15 +95,24 @@ func _test_regressions() -> void:
 		["stern-first stop from 5 m/s", Vector3.BACK * 5.0, Vector3.ZERO, false],
 		["short arrival 30 m abeam from rest", Vector3.ZERO, Vector3(30, 0, 0), true],
 	]
+	# Was: identical to BASELINE on every tick (obsolete after the #86 propulsion retune). Now: inside every limit, the
+	# hull does not rotate on the bow axis, stops come to rest, arrivals arrive without rotation afterwards.
 	for case in same:
-		var old_r := _run("baseline", case[1], case[2], 60.0, case[3])
 		var new_r := _run("now", case[1], case[2], 60.0, case[3])
-		var first := -1.0
-		for k in mini(old_r.trace.size(), new_r.trace.size()):
-			if old_r.trace[k] != new_r.trace[k]:
-				first = (k / 2 + 1) * DELTA
-				break
-		_check(old_r.trace == new_r.trace and new_r.violations == 0, "%s: identical to %s on every tick (arrived %s at %.2f s, %s %.2f s; first difference at %.2f s)" % [case[0], BASELINE, new_r.arrived, new_r.arrive_time, BASELINE, old_r.arrive_time, first])
+		var destination: Vector3 = case[2]
+		var on_axis := destination.x == 0.0
+		var outcome: bool
+		var text: String
+		if not case[3]:
+			outcome = new_r.final_speed < 0.01
+			text = "comes to rest"
+		elif destination.length() > 500.0:
+			outcome = new_r.stops == 0 and new_r.min_speed_after_5 > 1.0
+			text = "accelerates without stopping"
+		else:
+			outcome = new_r.arrived and new_r.rotation_after == 0.0
+			text = "arrives (%.2f s; stops before arrival %d), no rotation after arrival" % [new_r.arrive_time, new_r.stops]
+		_check(new_r.violations == 0 and outcome and (not on_axis or new_r.heading_travel == 0.0), "%s: %s, %sinside every limit (%d violations)" % [case[0], text, "no hull rotation (%.4f°), " % new_r.heading_travel if on_axis else "", new_r.violations])
 	# Orders whose course now follows the bearing (the order-time course is replaced, PR #32 revised): no longer
 	# identical tick by tick to the baseline; they must still translate and turn together, arrive promptly and not spin.
 	var followed := [
@@ -112,9 +121,10 @@ func _test_regressions() -> void:
 		["stern-first, order ahead-right (40, −100)", Vector3.BACK * 5.0, Vector3(40, 0, -100)],
 	]
 	for case in followed:
-		var old_f := _run("baseline", case[1], case[2], 60.0)
 		var new_f := _run("now", case[1], case[2], 60.0)
-		_check(new_f.arrived and new_f.arrive_time <= old_f.arrive_time + 0.5 and new_f.rotation_after == 0.0 and new_f.reversals <= old_f.reversals + 1 and new_f.violations == 0 and new_f.stops == 0, "%s: arrives (%.2f s, %s %.2f s), no rotation after arrival, turn-rate reversals %d (%d), inside every limit" % [case[0], new_f.arrive_time, BASELINE, old_f.arrive_time, new_f.reversals, old_f.reversals])
+		# Was: arrival within 0.5 s of BASELINE and reversals at most BASELINE's + 1 (obsolete after the #86 propulsion
+		# retune). Now: at most one settle at the course.
+		_check(new_f.arrived and new_f.rotation_after == 0.0 and new_f.reversals <= 1 and new_f.violations == 0 and new_f.stops == 0, "%s: arrives (%.2f s), no rotation after arrival (%.2f°), turn-rate reversals %d (at most 1), no stop (%d), inside every limit (%d violations)" % [case[0], new_f.arrive_time, new_f.rotation_after, new_f.reversals, new_f.stops, new_f.violations])
 	var rest := _run("now", Vector3.ZERO, Vector3(40, 0, 0), 2.0)
 	_check(rest.both_ticks > 60, "at rest the hull rotates while it translates (%d ticks of both in 2 s)" % rest.both_ticks)
 	var straight := _run("now", Vector3.ZERO, Vector3(0, 0, -1000), 30.0)
@@ -128,10 +138,13 @@ func _test_regressions() -> void:
 		var sideways := ShipPilot.allocate(Vector3.RIGHT * 1000.0, Vector3.FORWARD * v, 1.0, Vector3.FORWARD, _profile.pilot_response_time, a_t, a_t * e, _profile.forward_directional_acceleration * e).dot(Vector3.RIGHT)
 		row += " %.0f m/s %.4f;" % [v, sideways]
 		ok = ok and absf(sideways - a_t * e) < EPS
-	_check(ok, "sideways thruster limit follows the effectiveness curve (%s expected 3.3333 / 2.5000 / 1.6667 / 0.8333 m/s²)" % row)
+	var expected := []
+	for v in [0.0, 5.0, 10.0, 15.0]:
+		expected.push_back("%.4f" % (a_t * ShipPilot.effectiveness_of(_profile, v)))
+	_check(ok, "sideways thruster limit follows the effectiveness curve (%s expected %s m/s²)" % [row, " / ".join(expected)])
 	var moving := _run("now", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 30.0, true, PackedVector3Array(), false)
-	var moving_old := _run("baseline", Vector3.FORWARD * 15.0, Vector3(40, 0, -300), 30.0, true, PackedVector3Array(), false)
-	_check(moving.arrived and moving.peak_sideways >= a_t * ShipPilot.effectiveness_of(_profile, 15.0) - 1e-3 and moving.violations == 0 and moving.arrive_time <= moving_old.arrive_time + 0.05, "moving sideways repositioning (15 m/s, 40 m abeam, 300 m ahead) uses the full sideways limit at its speed (peak %.4f m/s², limit at 15 m/s 0.8333) and arrives (%.2f s, %s %.2f s)" % [moving.peak_sideways, moving.arrive_time, BASELINE, moving_old.arrive_time])
+	# Was also: arrives no later than BASELINE + 0.05 s (obsolete after the #86 propulsion retune).
+	_check(moving.arrived and moving.peak_sideways >= a_t * ShipPilot.effectiveness_of(_profile, 15.0) - 1e-3 and moving.violations == 0, "moving sideways repositioning (15 m/s, 40 m abeam, 300 m ahead) uses the full sideways limit at its speed (peak %.4f m/s², limit at 15 m/s %.4f) and arrives (%.2f s)" % [moving.peak_sideways, a_t * ShipPilot.effectiveness_of(_profile, 15.0), moving.arrive_time])
 	# Bow alignment during sustained movement and weaker turning at speed.
 	var cruise := _run("now", Vector3.FORWARD * 15.0, _at(45.0, 1500.0), 120.0)
 	_check(cruise.target_breaches == 0 and cruise.final_bow_travel < 5.0, "bow alignment: steering target never beyond the curve, bow and travel aligned in sustained travel (final %.2f°)" % cruise.final_bow_travel)
@@ -188,7 +201,7 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 		turn_braking = 0.0, first_difference = -1.0, course_time = -1.0, course_distance = 0.0, path = "",
 		max_bow_travel = 0.0, final_bow_travel = 0.0, heading_travel = 0.0, reversals = 0, stops = 0, stop_distance = INF,
 		rotation_after = 0.0, travel_turn = 0.0, held = false, held_course = 0.0, course_changed_after_hold = false, both_ticks = 0, main_share = 1.0, peak_sideways = 0.0, target_breaches = 0, authority_start = 0.0,
-		peak_rate = 0.0, off_route = 0.0, violations = 0}
+		peak_rate = 0.0, off_route = 0.0, violations = 0, final_speed = velocity.length()}
 	var travelled := 0.0
 	var last_sign := 0
 	var stopped := false
@@ -264,6 +277,7 @@ func _run(pilot: String, velocity: Vector3, destination: Vector3, seconds: float
 				stopped = true
 			elif new_speed > 1.0:
 				stopped = false
+		r.final_speed = new_speed
 		for mark in [0.0, 5.0, 10.0, 15.0, 20.0, 30.0]:
 			if (mark == 0.0 and i == 0) or absf(t - mark) < DELTA * 0.5:
 				r.speeds += "%5.2f " % new_speed

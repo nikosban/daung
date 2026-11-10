@@ -117,6 +117,8 @@ func _ready() -> void:
 		push_error("ShipMovement needs a MovementProfile with every value above 0, turn acceleration and turn rate curves, a directional thrust curve, forward_directional_acceleration at least 0 and a bow alignment curve; the ship will not move.")
 		set_physics_process(false)
 		return
+	if profile.thruster_strength / profile.mass >= profile.main_acceleration:
+		push_warning("%s: directional thrusters (%.3f m/s²) are not weaker than the main engine (%.3f m/s²); the main engine should be the strongest thrust." % [name, profile.thruster_strength / profile.mass, profile.main_acceleration])
 	var hull: CollisionShape3D = null
 	for child in get_children():
 		if child is CollisionShape3D:
