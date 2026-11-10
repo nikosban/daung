@@ -1,30 +1,22 @@
 class_name PlanClock
 extends RefCounted
-## Wall-clock budget for one slice of planning work (Task #46). Planning code asks has_time() before each small work
-## item (one predicted tick, one route sample, one path query) and calls item_done() after it. has_time() refuses an
-## item that, at the longest item duration measured so far (shared by all ships, never more than half the slice),
-## would end past the deadline, so a slice stays within its allowance instead of overrunning by its last item.
+## Work-item budget for one slice of planning work (Task #84). Planning code asks has_time() before each small work
+## item (one route sample, one path query, one boundary-cache step) and calls item_done() after it. The budget is a
+## count, never measured time, so the same order plans the same way on every run and a slow frame cannot stop
+## planning.
 
-static var _item_max := 0
-
-var deadline := 0
-var _reserve_cap := 0
-var _item_start := 0
+var _remaining := 0
 
 
-func _init(p_deadline: int, allowance: int) -> void:
-	deadline = p_deadline
-	_reserve_cap = allowance / 2
+func _init(items: int) -> void:
+	_remaining = items
 
 
-## Whether one more work item fits before the deadline; starts timing that item.
+## Whether one more work item fits in this slice.
 func has_time() -> bool:
-	_item_start = Time.get_ticks_usec()
-	return _item_start + mini(_item_max, _reserve_cap) < deadline
+	return _remaining > 0
 
 
-## Records the duration of the item started by the last has_time().
+## Records that one work item was done.
 func item_done() -> void:
-	var duration := Time.get_ticks_usec() - _item_start
-	if duration > _item_max:
-		_item_max = duration
+	_remaining -= 1
