@@ -1,7 +1,7 @@
 class_name RouteGuidance
 extends RefCounted
-## Navigation plans as data, and the per-tick guidance that turns a plan into pilot targets (Task #46). Used the same
-## way by the real physics tick (ShipMovement) and by prediction (ManeuverRollout), so both fly identical guidance.
+## Navigation plans as data and progress along them (Task #46). In #102 nothing steers along a plan: ShipMovement only
+## tracks progress for the remaining path.
 
 enum Kind { DIRECT, ROUTE, DEPART }
 
@@ -35,8 +35,7 @@ class Plan:
 		return lengths[lengths.size() - 1]
 
 
-## Progress along a plan; advanced by guide() each tick (real flight and prediction alike). The caller adds each
-## tick's delta to time after the pilot step.
+## Progress along a plan; advanced by track() each tick.
 class Follow:
 	var index := 1
 	var frozen := false
@@ -74,60 +73,6 @@ static func make_plan(kind: int, route: PackedVector3Array, destination: Vector3
 		if turn >= 0.001:
 			plan.corner_radii[j] = minf(plan.lookahead / (2.0 * sin(turn * 0.5)), (a.length() + b.length()) / (2.0 * turn))
 	return plan
-
-
-## Fills the pilot targets for this tick from a plan and the ship's planar position and yaw, advancing the follow
-## state.
-static func guide(plan: Plan, follow: Follow, position: Vector3, yaw: float, targets: ShipPilot.Targets) -> void:
-	targets.destination = plan.destination
-	targets.bend_lengths = plan.lengths
-	targets.bend_radii = plan.corner_radii
-	targets.bend_from = plan.route.size()
-	# Route guidance owns the course (its aim, or the frozen final approach); a direct plan's caller sets its own.
-	targets.course_follows = false
-	track(plan, follow, position)
-	if plan.kind == Kind.DIRECT:
-		targets.use_steer = false
-		targets.has_course = plan.has_course
-		targets.course_yaw = plan.course_yaw
-		return
-	var total := plan.total_length()
-	var remaining := planar(position - follow.point).length() + (total - follow.s)
-	if plan.kind == Kind.DEPART and not follow.switched:
-		if follow.time >= plan.switch_time - TIME_EPSILON:
-			follow.switched = true
-		else:
-			# No commanded course: rotation stops at once without powered turning (Movement v3), so the hull keeps its
-			# heading and the whole thruster capacity goes to braking or translating.
-			targets.use_steer = true
-			targets.steer_direction = plan.depart_direction
-			targets.steer_distance = remaining
-			targets.has_course = false
-			targets.course_yaw = plan.hold_yaw
-			return
-	var aim_s := follow.s + plan.lookahead
-	var aim := point_from(plan, follow.index, minf(aim_s, total))
-	var to_aim := planar(aim - position)
-	if aim_s >= total and not follow.frozen:
-		# The final approach keeps the heading the hull has when it begins: no turning is left to share the thrusters
-		# with the arrival braking, and arrival ends rotation anyway (no final alignment).
-		follow.frozen = true
-		follow.frozen_course = yaw
-	if follow.frozen:
-		# Final approach: the aim has reached the destination, so the pilot flies the ordinary direct arrival to it
-		# (straight distance, sideways drift included) holding the heading it had when the approach began.
-		targets.use_steer = false
-		targets.has_course = true
-		targets.course_yaw = follow.frozen_course
-		return
-	targets.use_steer = true
-	targets.steer_direction = to_aim.normalized() if to_aim.length_squared() > 0.0 else Vector3.ZERO
-	targets.steer_distance = remaining
-	targets.has_course = to_aim.length_squared() > 0.0
-	targets.course_yaw = atan2(-to_aim.x, -to_aim.z)
-	# Upcoming interior route corners (the pilot caps the speed for each).
-	targets.bend_from = follow.index
-	targets.bend_s = follow.s
 
 
 ## Advances the corner index past every corner whose bisector the ship has crossed, then projects the ship on the

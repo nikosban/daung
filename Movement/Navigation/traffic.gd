@@ -113,7 +113,7 @@ static func register(ship: ShipMovement) -> void:
 	if not _ships.has(ship):
 		_ships.push_back(ship)
 	var profile := ship.profile
-	_rated[ship] = profile.main_acceleration + profile.forward_directional_acceleration * profile.directional_thrust_curve.sample(0.0)
+	_rated[ship] = profile.main_acceleration
 
 
 static func unregister(ship: ShipMovement) -> void:
@@ -381,12 +381,12 @@ static func _room(loser: Snap, winner: Snap) -> Recovery:
 	var offset := loser.reach + winner.reach + loser.ship.profile.plan_clearance_buffer
 	var approach := _direction_at(loser.full, _lengths(loser.full), 0.0)
 	if approach == Vector3.ZERO:
-		approach = ShipPilot.bow_of(loser.ship.rotation.y)
+		approach = ShipPropulsion.bow_of(loser.ship.rotation.y)
 	recovery.options.push_back(PackedVector3Array([loser.position - approach * offset]))
 	var hit := _nearest(winner.ahead, winner.ahead_lengths, loser.position)
 	var along := _direction_at(winner.ahead, winner.ahead_lengths, hit.s)
 	if along == Vector3.ZERO:
-		along = ShipPilot.bow_of(winner.ship.rotation.y)
+		along = ShipPropulsion.bow_of(winner.ship.rotation.y)
 	var right := along.cross(Vector3.UP).normalized()
 	var side := -1.0 if (loser.position - hit.point).dot(right) < 0.0 else 1.0
 	recovery.options.push_back(PackedVector3Array([hit.point + right * side * offset]))

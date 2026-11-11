@@ -14,6 +14,7 @@ var _outlines: Array[CollisionShapeOutline] = []
 
 
 func _ready() -> void:
+	process_physics_priority = -10
 	# One trail per roster ship, all from the suite's MovementTrail node.
 	var trails := {}
 	var template := $MovementTrail as MovementTrail
@@ -44,6 +45,21 @@ func _exit_tree() -> void:
 		if is_instance_valid(outline):
 			outline.queue_free()
 	_outlines.clear()
+
+
+## Diagnostic propulsion keys (#102; not player controls): while held, Up = main engines, Down = retro thrusters,
+## Left / Right = RCS rotation, sent to every selected ship each physics frame; every other roster ship gets none.
+## Runs after Orders (-20) and before Movement (0).
+func _physics_process(_delta: float) -> void:
+	var main := 1.0 if Input.is_action_pressed("debug_main_thrust") else 0.0
+	var retro := 1.0 if Input.is_action_pressed("debug_retro_thrust") else 0.0
+	var rcs := Input.get_axis("debug_rcs_right", "debug_rcs_left")
+	var selection := fleet.get_selection()
+	for ship in fleet.roster:
+		if selection.has(ship):
+			ship.set_diagnostic_propulsion(main, retro, rcs)
+		else:
+			ship.set_diagnostic_propulsion(0.0, 0.0, 0.0)
 
 
 ## F7 (Task 38, #79): three crossing orders through Orders, one per roster slot (middle, left, right), all crossing

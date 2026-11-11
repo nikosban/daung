@@ -38,8 +38,6 @@ var _query := PhysicsShapeQueryParameters3D.new()
 ## query cache, not a route graph. Internal polygon edges cancel; region seams can conservatively reject a check.
 static var _spaces: Dictionary = {}
 const BOUNDARY_BLOCK_SIZE := 16 # Geometry broad-phase batch size, not movement tuning.
-static var _braking_frame := -1
-static var _braking_by_profile: Dictionary = {}
 
 
 static func forget_space(map: RID) -> void:
@@ -219,58 +217,12 @@ static func centre_within(map: RID, point: Vector3, limit: float) -> bool:
 	return RouteGuidance.planar(closest_point(map, point) - point).length() <= limit
 
 
-## Lower bound across the actual directional curve. Nonlinear curves need the detailed check rather than an
-## endpoint-minimum assumption. This does not change or rescale the profile.
+## Provisional compatibility braking (#102, m/s²): the weaker of the main engines and the retro thrusters, as if the
+## hull were turned to burn against the velocity (the turn itself is not included). Main and retro act only along the
+## hull axis; this is not sideways braking. Stopping estimates (Fleet, traffic, reservations) use it; it is not the
+## V4 stopping model.
 static func minimum_braking(profile: MovementProfile) -> float:
-	# Configuration is shared and constant during a physics tick; ships must not repeat the same curve scan.
-	var frame := Engine.get_physics_frames()
-	if _braking_frame != frame:
-		_braking_frame = frame
-		_braking_by_profile.clear()
-	if _braking_by_profile.has(profile):
-		return _braking_by_profile[profile]
-	var curve := profile.directional_thrust_curve
-	var effectiveness := 1.0
-	for i in curve.point_count:
-		effectiveness = minf(effectiveness, clampf(curve.get_point_position(i).y, 0.0, 1.0))
-		if i + 1 < curve.point_count and (curve.get_point_right_mode(i) != Curve.TANGENT_LINEAR or curve.get_point_left_mode(i + 1) != Curve.TANGENT_LINEAR):
-			_braking_by_profile[profile] = 0.0
-			return 0.0
-	var rating := profile.thruster_strength / profile.mass
-	var result := minf(rating * effectiveness, ShipPilot.sternward_limit_of(profile, rating))
-	_braking_by_profile[profile] = result
-	return result
-
-
-## Cheap clear-space proof: all response-window accelerations, then ordinary braking, fit this enclosing disk.
-## For retro-equipped ships no-order braking is parallel to velocity, with fixed hull heading. The lateral radius
-## bounds response-window velocity changes through the longest possible stop. Without retro, use a full ball
-## because the sternward component cap can curve the stopping motion. No stopping ticks are simulated here.
-func open_stopping_room(profile: MovementProfile, state: ShipPilot.State, delta: float, map: RID) -> bool:
-	var braking := minimum_braking(profile)
-	if braking <= 0.0 or delta > profile.pilot_response_time:
-		return false
-	var window := profile.pilot_response_time
-	var speed := state.velocity.length()
-	var acceleration := profile.main_acceleration + profile.thruster_strength / profile.mass
-	var change := acceleration * (window + delta)
-	var top := minf(profile.max_speed, speed + change)
-	var stopping := top * top / (2.0 * braking) + top * (window + delta)
-	var distance := speed * window + acceleration * window * (window + delta) + stopping
-	var side := minf(distance, change * (window + delta + top / braking + profile.pilot_response_time))
-	var centre := state.position
-	var radius := distance
-	if profile.retro_thrusters and speed > change:
-		centre += state.velocity.normalized() * distance * 0.5
-		radius = distance * 0.5 + side
-	if profile.retro_thrusters and speed > change:
-		var end := state.position + state.velocity.normalized() * distance
-		if not capsule_on_mesh(map, state.position, end, side):
-			return false
-		return cylinder_sweep_clear(state.position, end, side + reach + profile.plan_clearance_buffer)
-	elif not disk_on_mesh(map, centre, radius):
-		return false
-	return cylinder_clear(centre, radius + reach + profile.plan_clearance_buffer)
+	return minf(profile.main_acceleration, profile.retro_acceleration)
 
 
 ## Sweep the same all-yaw occupancy cylinder down the stopping corridor, instead of replacing a long narrow
