@@ -14,12 +14,12 @@ point_count = 4
 
 [sub_resource type="Curve" id="Curve_turn_acceleration"]
 _limits = [0.0, 30.0, 0.0, 15.0]
-_data = [Vector2(0, 0.5), 0.0, 1.9, 0, 1, Vector2(5, 10), 1.9, -0.6, 1, 1, Vector2(10, 7), -0.6, -0.7, 1, 1, Vector2(15, 3.5), -0.7, 0.0, 1, 0]
+_data = [Vector2(0, 3), 0.0, 1.4, 0, 1, Vector2(5, 10), 1.4, -0.6, 1, 1, Vector2(10, 7), -0.6, -0.7, 1, 1, Vector2(15, 3.5), -0.7, 0.0, 1, 0]
 point_count = 4
 
 [sub_resource type="Curve" id="Curve_turn_rate"]
 _limits = [0.0, 90.0, 0.0, 15.0]
-_data = [Vector2(0, 1.8), 0.0, 6.64, 0, 1, Vector2(5, 35), 6.64, -1.0, 1, 1, Vector2(10, 30), -1.0, -2.0, 1, 1, Vector2(15, 20), -2.0, 0.0, 1, 0]
+_data = [Vector2(0, 9), 0.0, 5.2000003, 0, 1, Vector2(5, 35), 5.2000003, -1.0, 1, 1, Vector2(10, 30), -1.0, -2.0, 1, 1, Vector2(15, 20), -2.0, 0.0, 1, 0]
 point_count = 4
 
 [resource]
