@@ -40,6 +40,10 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	# The diagnostic propulsion command persists in Movement until replaced, so release it with the suite.
+	for ship in fleet.roster:
+		if is_instance_valid(ship):
+			ship.set_diagnostic_propulsion(0.0, 0.0, 0.0)
 	# These visuals are parented to external collision shapes, so own their lifetime explicitly.
 	for outline in _outlines:
 		if is_instance_valid(outline):

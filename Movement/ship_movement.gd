@@ -26,7 +26,8 @@ var _active_move_receipt := 0
 var _valid := false
 ## Roster slot from Fleet (-1 = none): ship traffic's last tie-break.
 var _traffic_slot := -1
-## Changes whenever the active order starts or ends (activation, contact); traffic grants end then.
+## Changes whenever the active order starts or ends (activation, contact). Read only by Traffic, which the V4
+## experiment does not run.
 var _traffic_serial := 0
 var _destination := Vector3.ZERO
 ## The requested click of the active or last move (Task #54); _destination becomes the resolved point once planned.
@@ -67,13 +68,11 @@ func _ready() -> void:
 	_valid = true
 	Navigator.register_ship(self)
 	EndpointReservations.register(self)
-	Traffic.register(self)
 
 
 func _exit_tree() -> void:
 	Navigator.unregister_ship(self)
 	EndpointReservations.unregister(self)
-	Traffic.unregister(self)
 
 
 ## Called only by Orders when a move becomes due: replaces the active order now. Y is ignored. The ship's position,
@@ -127,9 +126,10 @@ func get_traffic_slot() -> int:
 	return _traffic_slot
 
 
-## Ship traffic status (F3). #102 has no pilot to yield, so traffic decisions are not applied: always open.
+## Ship traffic status (F3). Ship traffic is not run in the V4 experiment (#102: no pilot to yield, and spec FLT-01
+## drops it); ships do not register with Traffic.
 func get_traffic_status() -> String:
-	return Traffic.OPEN
+	return "not active (V4, #102)"
 
 
 ## Called by another ship that drove into this one (Task 38, #79): this ship stops in the same tick. Its active order
@@ -284,7 +284,6 @@ func get_propulsion_state() -> ShipPropulsion.State:
 func _physics_process(delta: float) -> void:
 	_clock += delta
 	Navigator.service()
-	Traffic.update(delta)
 	if _job != null and _job.status != Navigator.Status.PENDING:
 		var handoff_started := Navigator.measure()
 		_take_plan()

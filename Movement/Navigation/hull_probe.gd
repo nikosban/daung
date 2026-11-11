@@ -124,12 +124,6 @@ static func prepare_space(map: RID, root: Node, clock: PlanClock) -> bool:
 	return space.ready
 
 
-## A disk lies entirely on the mesh if its centre is on it and no boundary enters the disk. Unlike ring samples,
-## this catches a hole wholly inside the disk. A cache miss is inconclusive and invokes the local hull check.
-static func disk_on_mesh(map: RID, centre: Vector3, radius: float) -> bool:
-	return capsule_on_mesh(map, centre, centre, radius)
-
-
 static func capsule_on_mesh(map: RID, start: Vector3, end: Vector3, radius: float) -> bool:
 	if not _spaces.has(map) or not _spaces[map].ready or _spaces[map].iteration != NavigationServer3D.map_get_iteration_id(map):
 		return false
@@ -223,18 +217,6 @@ static func centre_within(map: RID, point: Vector3, limit: float) -> bool:
 ## V4 stopping model.
 static func minimum_braking(profile: MovementProfile) -> float:
 	return minf(profile.main_acceleration, profile.retro_acceleration)
-
-
-## Sweep the same all-yaw occupancy cylinder down the stopping corridor, instead of replacing a long narrow
-## corridor with a large ball that includes unrelated obstacles to either side. cast_motion ignores start overlaps.
-func cylinder_sweep_clear(start: Vector3, end: Vector3, radius: float) -> bool:
-	if not cylinder_clear(start, radius):
-		return false
-	_query.motion = RouteGuidance.planar(end - start)
-	queries += 1
-	var fractions := _space.cast_motion(_query)
-	_query.motion = Vector3.ZERO
-	return fractions[0] >= 1.0
 
 
 func _init(body: CollisionObject3D, collision_shape: CollisionShape3D) -> void:

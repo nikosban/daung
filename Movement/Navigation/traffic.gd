@@ -54,7 +54,7 @@ class Decision:
 	var hold_point := Vector3.ZERO
 	## Path distance from the ship to its hold point (m).
 	var hold_distance := 0.0
-	## A recovery guide (making room or going around a parked ship), steered through Navigator.reposition().
+	## A recovery guide (making room or going around a parked ship). Not applied in the V4 experiment (#102).
 	var guided := false
 	var guide := Vector3.ZERO
 	## Parked-blocker recovery is exhausted: the ship abandons its order.

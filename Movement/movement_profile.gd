@@ -29,8 +29,7 @@ extends Resource
 ## Planning clearance (Task #46): the hull counts as clear of obstacles at any yaw where a cylinder this much wider
 ## than its reach is empty.
 @export_range(0.05, 5.0, 0.01, "suffix:m") var plan_clearance_buffer: float = 0.5
-## Physical clearance repositioning (#60). Read by ship traffic.
-@export_range(0.1, 2.0, 0.05, "suffix:s") var departure_step_time: float = 0.5
+## Ship traffic's recovery time limit (#60, #79). Read only by Traffic, which the V4 experiment does not run.
 @export_range(0.5, 10.0, 0.1, "suffix:s") var departure_max_time: float = 4.0
 ## No-go tolerance (Task #48, provisional): how far beyond the navigation mesh edge a planned centre may go.
 @export_range(0.0, 5.0, 0.01, "suffix:m") var no_go_tolerance: float = 0.5
