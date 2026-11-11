@@ -10,8 +10,10 @@ extends RefCounted
 ##   so existing sideways drift is kept.
 ## - Speed limits restrict thrust, never velocity: main adds no speed along the bow beyond max_speed, retro adds none
 ##   toward the stern beyond max_reverse_speed.
-## - RCS builds turn rate by turn_acceleration_curve(actual speed) up to turn_rate_curve(actual speed) while commanded;
-##   without an RCS command the hull does not rotate (owner decision, #102).
+## - RCS (owner decision, Option C, #102): while commanded, it builds turn rate by turn_acceleration_curve(actual speed)
+##   up to turn_rate_curve(actual speed). On release, and on a direct reversal before building the other way, it brakes
+##   the existing rotation with the same authority until the hull stops rotating. A rate above a limit that contracted
+##   with speed is braked down to it. Rotation never jumps and never spins freely.
 
 
 ## Planar ship state.
@@ -59,21 +61,29 @@ static func step(profile: MovementProfile, state: State, command: Command, delta
 	var retro := clampf(command.retro, 0.0, 1.0) * profile.retro_acceleration
 	retro = clampf(retro, 0.0, maxf(profile.max_reverse_speed + along, 0.0) / delta)
 
-	# RCS: rotation only. It adds turn rate toward the commanded side up to the limit; with no command, no rotation.
+	# RCS: rotation only, always within the authority (angular acceleration) at the actual speed. The rate it aims for:
+	# zero without a command (braking the rotation on release), else the commanded side at the turn-rate limit. A rate
+	# on the other side or past the limit is braked toward the aim first; it never jumps.
 	var authority := deg_to_rad(maxf(profile.turn_acceleration_curve.sample(speed), 0.0))
 	var rate_limit := deg_to_rad(maxf(profile.turn_rate_curve.sample(speed), 0.0))
 	var rcs := clampf(command.rcs, -1.0, 1.0)
-	var turn_acceleration := 0.0
-	if rcs == 0.0:
-		state.turn_rate = 0.0
-	else:
+	var aim := 0.0
+	var authority_used := authority
+	if rcs != 0.0:
 		var side := signf(rcs)
-		turn_acceleration = rcs * authority
-		# The rate toward the commanded side never grows past the limit; turning back from the other side is unlimited
-		# by it.
-		var room := rate_limit - side * state.turn_rate
-		turn_acceleration = side * clampf(absf(turn_acceleration), 0.0, maxf(room, 0.0) / delta)
-		state.turn_rate += turn_acceleration * delta
+		aim = side * rate_limit
+		if state.turn_rate * side >= 0.0:
+			# Building toward the commanded side: a partial command uses part of the authority. Braking (release, a
+			# reversal from the other side, or a rate past a contracted limit) always uses the full authority.
+			if absf(state.turn_rate) < rate_limit:
+				authority_used = absf(rcs) * authority
+	elif state.turn_rate == 0.0:
+		authority_used = 0.0
+	var turn_acceleration := clampf((aim - state.turn_rate) / delta, -authority_used, authority_used)
+	# A reversal brakes to rest first: within this tick the rate stops at zero rather than crossing it.
+	if rcs != 0.0 and state.turn_rate * signf(rcs) < 0.0:
+		turn_acceleration = clampf(turn_acceleration, -absf(state.turn_rate) / delta, absf(state.turn_rate) / delta)
+	state.turn_rate += turn_acceleration * delta
 
 	velocity += bow * (main - retro) * delta
 	state.velocity = velocity
