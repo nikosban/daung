@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="TrafficSetup" format=3]
+
+[ext_resource type="Script" path="res://debugging/scenarios/traffic_setup.gd" id="1_setup"]
+
+[resource]
+script = ExtResource("1_setup")
+description = "Propulsion open space (#102): one frigate at rest at the origin facing north, no orders, no asteroids. Press 1 and F3; arrow keys drive main (Up), retro (Down) and RCS (Left/Right). The other two ships are parked far away."
+positions = PackedVector3Array(0, 0, 0)
+yaws = PackedFloat32Array(0)
+velocities = PackedVector3Array(0, 0, 0)
+camera_focus = Vector3(0, 0, -20)
+camera_height = 140

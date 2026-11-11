@@ -188,7 +188,7 @@ func _classify() -> void:
 ## One path query to the click. The path must reach the click, or end where a straight on-mesh leg reaches it
 ## (_leg_on_mesh()); otherwise the click is resolved (Task #54), starting from the path's end.
 func _path() -> void:
-	var position: Vector3 = (_live_state.call() as ShipPilot.State).position
+	var position: Vector3 = (_live_state.call() as ShipPropulsion.State).position
 	var path := _query_path(position, _click)
 	if not path.is_empty() and _leg_on_mesh(path[path.size() - 1], _click):
 		var conflict := "" if _keep_destination else EndpointReservations.conflict(_ship, _click, false)
@@ -340,7 +340,7 @@ func _arrival_check(point: Vector3) -> String:
 ## another candidate.
 func _path_test(candidate: Dictionary) -> void:
 	_path_tests += 1
-	var position: Vector3 = (_live_state.call() as ShipPilot.State).position
+	var position: Vector3 = (_live_state.call() as ShipPropulsion.State).position
 	var point: Vector3 = candidate.position
 	var path := _query_path(position, point)
 	if path.is_empty():
@@ -419,12 +419,8 @@ func _baseline(reason: String) -> void:
 	note = reason
 
 
-## Arrival allowance (Task #54, m): an order completes within arrival_tolerance at most arrival_speed_tolerance and
-## then only brakes, at least at the weakest planned braking (half the thruster rating at full turning share, or the
-## no-retro sternward cap when that is lower), so it comes to rest within this distance of its destination.
+## Arrival allowance (Task #54, m): arrival_tolerance plus the distance to stop from arrival_speed_tolerance at
+## HullProbe.minimum_braking() (provisional compatibility, #102); part of the endpoint reservation radius.
 static func arrival_allowance_of(profile: MovementProfile) -> float:
-	var thrusters := profile.thruster_strength / profile.mass
-	var braking := thrusters * 0.5
-	if not profile.retro_thrusters:
-		braking = minf(braking, profile.no_retro_braking_effectiveness * thrusters)
+	var braking := HullProbe.minimum_braking(profile)
 	return profile.arrival_tolerance + profile.arrival_speed_tolerance * profile.arrival_speed_tolerance / (2.0 * braking)

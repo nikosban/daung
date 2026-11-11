@@ -5,7 +5,6 @@ extends RefCounted
 
 const BUDGET: NavigationBudget = preload("res://Movement/Navigation/navigation_budget.tres")
 enum Status { PENDING, DONE, DECLINED, CANCELLED }
-enum Clearance { OPEN, LOCAL, SLOW }
 
 static var _jobs: Array[Job] = []
 static var _ships: Array[ShipMovement] = []
@@ -47,7 +46,7 @@ static func account(start: int) -> void:
 	_frame_used += Time.get_ticks_usec() - start
 
 
-static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, _brake_first := false, refresh := false) -> Job:
+static func start_job(ship: ShipMovement, probe: HullProbe, click: Vector3, refresh := false) -> Job:
 	var start := measure()
 	var job := Job.new(ship, probe, click, refresh)
 	_jobs.push_back(job)
@@ -91,37 +90,6 @@ static func get_frame_used() -> int:
 	return _frame_used
 
 
-## Called from the actual start-of-tick state. Quick rejection means local examination, never unreachable.
-## No async trajectory or checkpoint is handed back to the ship.
-static func clearance(profile: MovementProfile, probe: HullProbe, actual: ShipPilot.State,
-		targets: ShipPilot.Targets, delta: float, map: RID, on_mesh := true) -> int:
-	if probe.open_stopping_room(profile, actual, delta, map):
-		return Clearance.OPEN
-	if ManeuverRollout.local_clear(profile, probe, actual, targets, delta, map, on_mesh):
-		return Clearance.LOCAL
-	return Clearance.SLOW
-
-
-## A bounded correction toward the next ordinary route guide. Test a temporary target with the same pilot,
-## including translation and turning; the caller applies it only when its hull and stopping room are clear.
-static func reposition(profile: MovementProfile, probe: HullProbe, actual: ShipPilot.State,
-		targets: ShipPilot.Targets, delta: float, map: RID, guide: Vector3, on_mesh := true) -> ShipPilot.Targets:
-	var toward := RouteGuidance.planar(guide - actual.position)
-	if toward == Vector3.ZERO:
-		return null
-	var candidate := ManeuverRollout._copy_targets(targets)
-	candidate.use_steer = true
-	candidate.steer_direction = toward.normalized()
-	candidate.steer_distance = profile.detour_lookahead_distance
-	# Keep the ordinary guide's course while crabbing/backing toward it; translation direction is not a new
-	# heading request. This preserves the pilot's simultaneous translate-and-turn capability.
-	candidate.course_follows = false
-	candidate.bend_radii = PackedFloat32Array()
-	if ManeuverRollout.local_clear(profile, probe, actual, candidate, delta, map, on_mesh):
-		return candidate
-	return null
-
-
 class Job:
 	var status := Status.PENDING
 	var plan: RouteGuidance.Plan
@@ -151,7 +119,7 @@ class Job:
 		destination = click
 		probe.queries = 0
 		_route = RoutePlanner.new(ship, ship.get_world_3d().navigation_map, probe, ship.profile, click,
-			ship.get_pilot_state, Navigator.BUDGET.destination_candidates_per_order,
+			ship.get_propulsion_state, Navigator.BUDGET.destination_candidates_per_order,
 			Navigator.BUDGET.max_destination_displacement, refresh)
 
 	func cancel() -> void:

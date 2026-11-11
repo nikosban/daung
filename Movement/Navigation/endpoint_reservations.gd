@@ -2,9 +2,9 @@ class_name EndpointReservations
 extends RefCounted
 ## Endpoint reservations (Task 37, #78), shared by every ship on one navigation map, like Navigator. Each ship's area
 ## is a disk of its reservation radius (hull reach + plan_clearance_buffer + arrival allowance). A ship with an
-## accepted order reserves its endpoint (Navigator.Job.advance); arrival keeps it. Activation (move or stop), removal,
-## static contact and terminal blockage release it. A ship without a reservation that has no order, or whose order is
-## blocked, occupies its live position. A ship whose order is still planning occupies nothing.
+## accepted order reserves its endpoint (Navigator.Job.advance). Activation (move or stop), removal and static or ship
+## contact release it. Every ship also always occupies its live position (V4, #102: with no pilot an order never
+## arrives and the ship may drift anywhere, so its endpoint alone does not cover it).
 
 ## Registered ships and their navigation map (ShipMovement -> RID).
 static var _ships := {}
@@ -37,19 +37,16 @@ static func conflict(ship: ShipMovement, point: Vector3, inside_only: bool) -> S
 	for other: ShipMovement in _ships:
 		if other == ship or _ships[other] != map or not is_instance_valid(other):
 			continue
-		var at: Vector3
-		var reason := "reserved by %s"
-		if _reserved.has(other):
-			at = _reserved[other]
-		elif not other.has_order() or other.is_blocked():
-			at = other.global_position
-			reason = "occupied by %s"
-		else:
-			continue
 		var limit := other.get_reservation_radius()
 		if not inside_only:
 			limit += ship.get_reservation_radius()
 		# Areas that only touch (Fleet spaces preferred points exactly two radii apart) do not overlap.
-		if Vector2(point.x - at.x, point.z - at.z).length() < limit - RoutePlanner.DUPLICATE_DISTANCE:
-			return reason % other.name
+		limit -= RoutePlanner.DUPLICATE_DISTANCE
+		if _reserved.has(other):
+			var end: Vector3 = _reserved[other]
+			if Vector2(point.x - end.x, point.z - end.z).length() < limit:
+				return "reserved by %s" % other.name
+		var at := other.global_position
+		if Vector2(point.x - at.x, point.z - at.z).length() < limit:
+			return "occupied by %s" % other.name
 	return ""

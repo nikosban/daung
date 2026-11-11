@@ -2,16 +2,6 @@
 
 [ext_resource type="Script" uid="uid://4du8rewyollp" path="res://Movement/movement_profile.gd" id="1_profile"]
 
-[sub_resource type="Curve" id="Curve_bow_alignment"]
-_limits = [0.0, 180.0, 0.0, 15.0]
-_data = [Vector2(0, 180), 0.0, -18.0, 0, 1, Vector2(5, 90), -18.0, -9.0, 1, 1, Vector2(10, 45), -9.0, -3.0, 1, 1, Vector2(15, 30), -3.0, 0.0, 1, 0]
-point_count = 4
-
-[sub_resource type="Curve" id="Curve_directional"]
-_limits = [0.0, 1.0, 0.0, 15.0]
-_data = [Vector2(0, 1), 0.0, 0.0, 0, 1, Vector2(5, 1), 0.0, 0.0, 1, 1, Vector2(10, 1), 0.0, 0.0, 1, 1, Vector2(15, 1), 0.0, 0.0, 1, 0]
-point_count = 4
-
 [sub_resource type="Curve" id="Curve_turn_acceleration"]
 _limits = [0.0, 30.0, 0.0, 15.0]
 _data = [Vector2(0, 3), 0.0, 1.4, 0, 1, Vector2(5, 10), 1.4, -0.6, 1, 1, Vector2(10, 7), -0.6, -0.7, 1, 1, Vector2(15, 3.5), -0.7, 0.0, 1, 0]
@@ -24,11 +14,8 @@ point_count = 4
 
 [resource]
 script = ExtResource("1_profile")
-mass = 12.0
 main_acceleration = 1.5
-thruster_strength = 20.0
-directional_thrust_curve = SubResource("Curve_directional")
-forward_directional_acceleration = 0.1
+retro_acceleration = 0.75
+max_reverse_speed = 5.0
 turn_acceleration_curve = SubResource("Curve_turn_acceleration")
 turn_rate_curve = SubResource("Curve_turn_rate")
-bow_alignment_curve = SubResource("Curve_bow_alignment")

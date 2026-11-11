@@ -1,124 +1,63 @@
 class_name ShipMovement
 extends CharacterBody3D
-## Authoritative planar movement for a ship (Movement v3): the only writer of its XZ position, its one
+## Authoritative planar movement for a ship (V4 propulsion, #102): the only writer of its XZ position, its one
 ## world-space planar velocity (the built-in velocity) and its yaw. Only Orders (game/command/orders) activates
 ## commands, through activate_move() and activate_stop(); command intake and the crew delay belong to Orders.
 ##
-## Each physics tick the pilot computes a desired velocity toward the destination that falls with the
-## remaining distance (arrival steering) and requests the acceleration that closes the gap to the actual
-## velocity within pilot_response_time. The main engine supplies the useful part along the bow; the
-## directional thrusters supply the rest. Turning acceleration and the turn-rate limit are curves of actual speed
-## (profile.turn_acceleration_curve, profile.turn_rate_curve). While the ship moves bow-first, the steering target is the course limited to
-## profile.bow_alignment_curve (actual speed) either side of the travel direction (bow alignment). Their sideways acceleration (thruster_strength / mass) and bow-forward acceleration
-## (forward_directional_acceleration for thrust that pushes the ship forward, below the main engine) fade with actual
-## speed (profile.directional_thrust_curve); sternward, and bow-forward when braking stern-first motion, they keep their
-## physical rating. Within their share, per hull axis, braking against the velocity comes first, sideways maneuvering
-## second and forward assistance last, and the approach is planned with the braking the thrusters can actually deliver
-## against the travel direction. Turning demand is computed first, so the approach speed is planned
-## with the braking that sharing will leave. The pilot also steers the hull toward the order's course heading
-## (set once by activate_move(), toward the destination) with bounded angular acceleration and a turn-rate limit, both
-## curves of actual speed (weak at rest, peaking at low speed, falling toward cruise). Planar
-## and turning demand share the directional thrusters' capacity proportionally. Only applied acceleration
-## is integrated; yaw never rotates the velocity, and rotation does not persist without powered turning.
-## The desired speed is lowered by the pilot's response lag so braking starts in time (Task #41).
+## Propulsion (ShipPropulsion): main engines along the bow, retro thrusters toward the stern and RCS rotation, each with
+## its own capacity. Velocity changes only by applied main/retro thrust and by contact; rotating the hull never
+## rotates it. There is no pilot in #102: an order does not choose any propulsion command, so a ship keeps its motion
+## until propulsion or contact changes it. The only propulsion commands come from the diagnostic controls
+## (set_diagnostic_propulsion(), Debugging), which apply while held.
 ##
-## Retro rule (profile.retro_thrusters false): the directional thrusters' acceleration toward the stern (the
-## component along -bow) never exceeds no_retro_braking_effectiveness x thruster_strength / mass. It is applied
-## after proportional sharing by removing only the excess sternward part (lateral and bow-forward parts are
-## untouched, nothing is scaled up). The pilot plans its approach braking with the same limit, projected onto
-## the direction of the velocity it must slow (the direction to the destination only at a standstill).
-##
-## Activation: Orders calls activate_move() or activate_stop() at the start of a physics tick, before any ship moves.
-## Activation replaces the active order immediately; Movement has no queue or delay of its own.
+## Orders: activation replaces the active order and keeps the ship's physical motion. A move is planned (destination
+## resolution, endpoint reservation, route) and stays active until a new move or stop replaces it; nothing completes
+## it by arrival in #102. A stop ends the active order without braking.
 ##
 ## Contact (Tasks #44 and 38): driving into a stationary StaticBody3D or another ship ends the active order and zeroes
-## planar velocity and turn rate (the other ship's too); see _stop_on_contact(). Ship traffic (Traffic) decides who gives
-## way before any ship moves.
-##
-## Reversal rule: when a move activates, the angle between the actual planar velocity and the direction to the click
-## is measured once (ShipPilot.reversal_angle_of()). At or beyond profile.near_opposite_angle the order commits to
-## braking first (ShipPilot.Targets.brake_first): the pilot brakes to near rest with no commanded turn, then follows
-## the order as from rest. The decision is never re-evaluated; a later move or stop replaces it. The planning job is
-## told, so its predictions brake first as well.
-##
-## Navigation (#60): one ordinary Godot route, with the existing destination resolver. A pending job does not
-## remove the active pilot target. Clear space uses a conservative stopping-room query; only nearby constraints
-## need local pilot/hull lookahead. Physical clearance can request braking; an unnegotiable route stays blocked.
-## No navigation code writes a transform or velocity. Alternative passages belong to a later ticket.
+## planar velocity and turn rate (the other ship's too); see _stop_on_contact().
 
 @export var profile: MovementProfile
-
-## Predicted sweep (#83): the largest turn of the travel direction per arc segment, and the segment bound (12 × 15° covers
-## a full reversal of the travel direction). Geometric resolution of the estimate, not movement tuning.
-const PREDICTION_SEGMENT_ANGLE := deg_to_rad(15.0)
-const PREDICTION_MAX_SEGMENTS := 12
 
 ## Physics clock in seconds (the sum of physics ticks so far), used only for status and log text.
 var _clock := 0.0
 var _active_move_receipt := 0
 ## Whether the profile passed validation; activation is ignored otherwise.
 var _valid := false
-## Roster slot from Fleet (-1 = none): the last ship-traffic tie-break (Task 38, #79).
+## Roster slot from Fleet (-1 = none): ship traffic's last tie-break.
 var _traffic_slot := -1
-## Changes whenever the active order starts or ends (activation, arrival, contact, blockage); traffic grants end then.
+## Changes whenever the active order starts or ends (activation, contact). Read only by Traffic, which the V4
+## experiment does not run.
 var _traffic_serial := 0
-## Ship traffic status for F3 (Traffic.Decision.status, or the blockage that ended the order).
-var _traffic_status := Traffic.OPEN
 var _destination := Vector3.ZERO
 ## The requested click of the active or last move (Task #54); _destination becomes the resolved point once planned.
 var _requested := Vector3.ZERO
 var _has_order := false
-## Course heading of the current order (yaw in radians), set by activate_move(); no course for a zero-length order.
-var _course_yaw := 0.0
-var _has_course := false
-## Turn rate in rad/s (per ship); zero whenever powered turning is not requested.
-var _turn_rate := 0.0
-## Previous tick's planar demand fraction on the directional thrusters (0–1). It measures last tick's actual
-## thruster demand, so it carries over order replacement and stop(); it starts at 0 (no demand before the
-## first tick). Used only to plan the yaw braking authority.
-var _planar_fraction_prev := 0.0
-## Whether the direct order's course still follows the bearing to the destination (ShipPilot.Targets.course_follows).
-var _course_follows := false
-## Reversal rule: the activated move's course-change angle (radians, -1 = not measured: near rest or an arrival),
-## whether it selected reversal braking, and whether that braking is still to complete (ShipPilot.Targets.brake_first).
-var _reversal_angle := -1.0
-var _reversal := false
-var _brake_first := false
-## Previous tick's start-of-tick planar speed (m/s), for the pilot's turn planning while the ship slows.
-var _speed_prev := 0.0
-## Pilot state, targets and last tick's values (read-only debug getters), reused every tick.
-var _pilot_state := ShipPilot.State.new()
-var _pilot_targets := ShipPilot.Targets.new()
-var _pilot_out := ShipPilot.Output.new()
-## Navigation (Task #46): the hull probe, the active order's planning job (null when none) and the plan the pilot
-## follows (null for the direct order) with its progress.
+## Propulsion state and last step's applied values (read-only debug getters), reused every tick.
+var _state := ShipPropulsion.State.new()
+var _command := ShipPropulsion.Command.new()
+var _out := ShipPropulsion.Output.new()
+## Diagnostic propulsion command (#102) and whether any part of it is active.
+var _diagnostic := ShipPropulsion.Command.new()
+var _diagnostic_active := false
+## Navigation: the hull probe, the active order's planning job (null when none) and its route with the progress along
+## it (null for the direct order).
 var _probe: HullProbe
 var _job: Navigator.Job
 var _plan: RouteGuidance.Plan
 var _follow: RouteGuidance.Follow
-## Outcome of the latest activated command for F3 (Task #46): planning, accepted, declined with its reason, arrived,
-## stopped or static-contact stop. Kept after the order ends.
+## Outcome of the latest activated command for F3: planning, accepted, declined with its reason, stopped or a contact
+## stop. Kept after the order ends.
 var _order_status := "no order yet"
-var _navigation_baseline := false
-var _clearance_status := ""
-var _blocked := false
-var _route_refreshed := false
-var _reposition_guide := Vector3.ZERO
-var _reposition_distance := INF
-var _reposition_route_distance := INF
-var _reposition_used := 0.0
-var _navigation_on_mesh := false
-## Endpoint reservation radius (Task 37, #78, m): hull reach + plan_clearance_buffer + arrival allowance.
+## Endpoint reservation radius (m): hull reach + plan_clearance_buffer + arrival allowance.
 var _reservation_radius := 0.0
 
 
 func _ready() -> void:
 	if not _profile_valid():
-		push_error("ShipMovement needs a MovementProfile with every value above 0, turn acceleration and turn rate curves, a directional thrust curve, forward_directional_acceleration at least 0 and a bow alignment curve; the ship will not move.")
+		push_error("ShipMovement needs a MovementProfile with every value above 0 and turn acceleration and turn rate curves; the ship will not move.")
 		set_physics_process(false)
 		return
-	if profile.thruster_strength / profile.mass >= profile.main_acceleration:
-		push_warning("%s: directional thrusters (%.3f m/s²) are not weaker than the main engine (%.3f m/s²); the main engine should be the strongest thrust." % [name, profile.thruster_strength / profile.mass, profile.main_acceleration])
 	var hull: CollisionShape3D = null
 	for child in get_children():
 		if child is CollisionShape3D:
@@ -129,67 +68,53 @@ func _ready() -> void:
 	_valid = true
 	Navigator.register_ship(self)
 	EndpointReservations.register(self)
-	Traffic.register(self)
 
 
 func _exit_tree() -> void:
 	Navigator.unregister_ship(self)
 	EndpointReservations.unregister(self)
-	Traffic.unregister(self)
 
 
-## Called only by Orders when a move becomes due: replaces the active order now; the course is taken from the ship's
-## position. Y is ignored. The current velocity carries over. move_receipt is the Orders receipt of this move.
+## Called only by Orders when a move becomes due: replaces the active order now. Y is ignored. The ship's position,
+## velocity, heading and turn rate are untouched. move_receipt is the Orders receipt of this move.
 func activate_move(world_position: Vector3, move_receipt: int) -> void:
 	if not _valid:
 		return
 	_active_move_receipt = move_receipt
-	_navigation_baseline = false
-	_clearance_status = ""
-	_blocked = false
-	_route_refreshed = false
-	_reposition_guide = Vector3.ZERO
-	_reposition_distance = INF
-	_reposition_route_distance = INF
-	_reposition_used = 0.0
 	_traffic_serial += 1
-	_traffic_status = Traffic.OPEN
 	_destination = Vector3(world_position.x, global_position.y, world_position.z)
 	_requested = _destination
 	_has_order = true
-	var course := _destination - global_position
-	course.y = 0.0
-	_has_course = course != Vector3.ZERO
-	_course_follows = _has_course
-	if _has_course:
-		_course_yaw = atan2(-course.x, -course.z)
-	_reversal_angle = ShipPilot.reversal_angle_of(profile, velocity, course)
-	_reversal = ShipPilot.is_reversal(profile, _reversal_angle)
-	_brake_first = _reversal
 	EndpointReservations.release(self)
 	_end_navigation()
-	_job = Navigator.start_job(self, _probe, world_position, _brake_first)
+	_job = Navigator.start_job(self, _probe, world_position)
 	_order_status = "planning (%.1f, %.1f)" % [world_position.x, world_position.z]
 
 
-## Called only by Orders when a stop becomes due: ends the active order now; the ship then brakes toward zero
-## velocity with its thrusters and does not hold position.
+## Called only by Orders when a stop becomes due: ends the active order now. No braking is applied (#102: no pilot).
 func activate_stop() -> void:
 	if not _valid:
 		return
-	_clearance_status = ""
-	_blocked = false
-	_route_refreshed = false
 	_has_order = false
-	_reversal_angle = -1.0
-	_reversal = false
-	_brake_first = false
 	_traffic_serial += 1
-	_traffic_status = Traffic.OPEN
 	EndpointReservations.release(self)
 	_end_navigation()
 	# Orders activates before this ship's tick advances _clock, so report this tick's time.
 	_order_status = "stopped at %.2f s" % (_clock + get_physics_process_delta_time())
+
+
+## Diagnostic propulsion (#102; Debugging only, not a player control): main and retro throttle 0–1 and RCS -1 (right)
+## to 1 (left). Applies from this ship's next physics tick while any part is non-zero; all zero releases it.
+func set_diagnostic_propulsion(main: float, retro: float, rcs: float) -> void:
+	_diagnostic.main = main
+	_diagnostic.retro = retro
+	_diagnostic.rcs = rcs
+	_diagnostic_active = main != 0.0 or retro != 0.0 or rcs != 0.0
+
+
+## Whether the diagnostic propulsion command is active (F3).
+func is_diagnostic_active() -> bool:
+	return _diagnostic_active
 
 
 ## Stores this ship's roster slot: ship traffic's last tie-break (lower slot first; -1 = none).
@@ -201,11 +126,10 @@ func get_traffic_slot() -> int:
 	return _traffic_slot
 
 
-## Ship traffic status (F3): open, yielding to <ship>, making room for <ship>, going around parked ship <ship>,
-## blocked by parked ship <ship>, passage obstructed by <ship> (right of way, braking), or traffic deadlock: recovery
-## exhausted.
+## Ship traffic status (F3). Ship traffic is not run in the V4 experiment (#102: no pilot to yield, and spec FLT-01
+## drops it); ships do not register with Traffic.
 func get_traffic_status() -> String:
-	return _traffic_status
+	return "not active (V4, #102)"
 
 
 ## Called by another ship that drove into this one (Task 38, #79): this ship stops in the same tick. Its active order
@@ -216,9 +140,9 @@ func contact_stop(other: ShipMovement) -> void:
 	print("Movement: %s stopped by ship contact with %s at %.3f s; order ended" % [name, other.name, other._clock])
 
 
-## Where the ship would come to rest braking straight from its current velocity (planar, metres): its position plus
-## v² / (2 × the weakest directional braking) along the travel direction. A conservative read-only prediction (Fleet
-## orders its places by it); it is the position itself at rest.
+## Where the ship would come to rest (planar, metres): its position plus v² / (2 × HullProbe.minimum_braking()) along the
+## travel direction. Provisional compatibility estimate (#102, Fleet orders its places by it); it is the position at
+## rest.
 func get_stopping_point() -> Vector3:
 	var here := RouteGuidance.planar(global_position)
 	var planar_velocity := RouteGuidance.planar(velocity)
@@ -253,91 +177,10 @@ func get_remaining_path() -> PackedVector3Array:
 	return path
 
 
-## The path the ship is expected to fly from its planar position (#83), for ship traffic's anticipation; a lightweight
-## geometric estimate, never a pilot rollout. get_remaining_path() stays the route the ship's progress is measured on.
-## - Sweeping (moving bow-first with the next guide point beyond one response step, the pilot's own condition): arc
-##   segments from the actual velocity and yaw. In each, the speed drops to the pilot's turn-then-stop limit when that is
-##   lower (ShipPilot.step: the turning circle must leave a straight leg to the steering point as long as the stopping
-##   distance), and the travel direction turns by ShipPilot.redirect_acceleration_of() at that speed for the bow the pilot
-##   commands: the travel direction turned one response step toward the guide point, within ShipPilot.alignment_limit_of(),
-##   reached from the actual yaw at the turn-rate curve's pace. The sweep ends once the travel direction is within one
-##   response step of the guide point; the remaining route follows.
-## - Reversal braking: straight to the stopping point (get_stopping_point()), then the remaining route.
-## - Otherwise (no order, at rest, stern-first, already aligned): get_remaining_path().
-## Speed never rises in the estimate, and arrival braking along the remaining route is not modelled.
+## The path the ship is expected to fly, for ship traffic's anticipation. Provisional compatibility (#102, no pilot):
+## the remaining path.
 func get_predicted_path() -> PackedVector3Array:
-	var route := get_remaining_path()
-	var speed := RouteGuidance.planar(velocity).length()
-	if not _valid or route.size() < 2 or speed == 0.0:
-		return route
-	if _brake_first:
-		var braking := PackedVector3Array([route[0], get_stopping_point()])
-		braking.append_array(route.slice(1))
-		return braking
-	var travel := RouteGuidance.planar(velocity) / speed
-	var yaw := rotation.y
-	if travel.dot(ShipPilot.bow_of(yaw)) <= 0.0:
-		return route
-	var thruster_limit := profile.thruster_strength / profile.mass
-	var sternward_limit := ShipPilot.sternward_limit_of(profile, thruster_limit)
-	var guide := route[1]
-	var beyond := 0.0
-	for i in range(1, route.size() - 1):
-		beyond += RouteGuidance.planar(route[i + 1] - route[i]).length()
-	var position := route[0]
-	var path := PackedVector3Array([position])
-	for _i in PREDICTION_MAX_SEGMENTS:
-		var to_guide := guide - position
-		if to_guide == Vector3.ZERO:
-			break
-		var angle := travel.angle_to(to_guide)
-		var side := signf(travel.cross(to_guide).y)
-		if side == 0.0:
-			side = 1.0
-		var across := travel.rotated(Vector3.UP, side * PI / 2.0)
-		var bow := ShipPilot.bow_of(yaw)
-		var effectiveness := ShipPilot.effectiveness_of(profile, speed)
-		var sideways_limit := thruster_limit * effectiveness
-		var forward_limit := profile.forward_directional_acceleration * effectiveness
-		var accel := ShipPilot.redirect_acceleration_of(across, bow, profile.main_acceleration, 1.0, thruster_limit, sideways_limit, forward_limit, sternward_limit)
-		var reach := accel * profile.pilot_response_time / speed
-		if accel <= 0.0 or reach >= 1.0 or angle <= asin(reach):
-			break
-		# The pilot's turn-then-stop limit: the speed whose turning circle leaves a straight leg to the steering point at
-		# least as long as the stopping distance (ShipPilot.step); the ship slows to it, which tightens the turn.
-		var braking := ShipPilot.reach_of(-travel, bow, thruster_limit, sideways_limit, sideways_limit)
-		if travel.dot(bow) > 0.0:
-			braking = minf(braking, sternward_limit / travel.dot(bow))
-		var distance := to_guide.length() + beyond
-		var lateral := distance * (sin(angle) if angle < PI / 2.0 else 1.0)
-		if braking > 0.0:
-			var quad := 1.0 / (4.0 * braking * braking)
-			var lin := 2.0 * lateral / accel
-			var limit := sqrt(maxf((-lin + sqrt(lin * lin + 4.0 * quad * distance * distance)) / (2.0 * quad), 0.0))
-			if limit < speed:
-				speed = maxf(limit, profile.arrival_speed_tolerance)
-				effectiveness = ShipPilot.effectiveness_of(profile, speed)
-				sideways_limit = thruster_limit * effectiveness
-				forward_limit = profile.forward_directional_acceleration * effectiveness
-				accel = ShipPilot.redirect_acceleration_of(across, bow, profile.main_acceleration, 1.0, thruster_limit, sideways_limit, forward_limit, sternward_limit)
-				reach = accel * profile.pilot_response_time / speed
-				if reach >= 1.0 or angle <= asin(reach):
-					break
-		# One arc segment of radius v² / a: its chord, then the new travel direction.
-		var turn := minf(angle, PREDICTION_SEGMENT_ANGLE)
-		var duration := turn * speed / accel
-		position += travel.rotated(Vector3.UP, side * turn / 2.0) * (2.0 * speed * speed / accel * sin(turn / 2.0))
-		travel = travel.rotated(Vector3.UP, side * turn)
-		path.push_back(position)
-		# The bow the pilot commands next: one response step ahead of the travel direction, within the bow alignment
-		# limit, reached from the current yaw no faster than the turn-rate limit allows over the segment.
-		var lead := minf(asin(reach), ShipPilot.alignment_limit_of(profile, speed))
-		var commanded := travel.rotated(Vector3.UP, side * lead)
-		var error := wrapf(atan2(-commanded.x, -commanded.z) - yaw, -PI, PI)
-		var rate_limit := deg_to_rad(maxf(profile.turn_rate_curve.sample(speed), 0.0))
-		yaw += clampf(error, -rate_limit * duration, rate_limit * duration)
-	path.append_array(route.slice(1))
-	return path
+	return get_remaining_path()
 
 
 ## Endpoint reservation radius in metres (Task 37, #78); Fleet spaces its preferred points by twice this.
@@ -345,12 +188,12 @@ func get_reservation_radius() -> float:
 	return _reservation_radius
 
 
-## Whether the active order is abandoned after exhausted local recovery (it then holds no reservation).
+## Whether the active order is abandoned after exhausted recovery. #102 has no recovery: never.
 func is_blocked() -> bool:
-	return _blocked
+	return false
 
 
-## Whether an order is active (activated and not yet arrived or stopped; also while its plan is being made).
+## Whether an order is active (activated and not yet replaced, stopped or ended by contact; also while planning).
 ## Commands waiting in Orders do not count.
 func has_order() -> bool:
 	return _has_order
@@ -363,9 +206,8 @@ func get_destination() -> Vector3:
 
 
 ## Returns the accepted destination for this active move, or null while it is unavailable.
-## A route refresh keeps the accepted endpoint while it runs.
 func get_resolved_move_destination(move_receipt: int) -> Variant:
-	if move_receipt <= 0 or move_receipt != _active_move_receipt or not _has_order or _blocked:
+	if move_receipt <= 0 or move_receipt != _active_move_receipt or not _has_order:
 		return null
 	if _job != null and not _job.refresh:
 		return null
@@ -374,7 +216,7 @@ func get_resolved_move_destination(move_receipt: int) -> Variant:
 
 ## Returns the requested point while this active move's first plan is pending, or null.
 func get_planning_move_destination(move_receipt: int) -> Variant:
-	if move_receipt > 0 and move_receipt == _active_move_receipt and _has_order and not _blocked and _job != null and not _job.refresh:
+	if move_receipt > 0 and move_receipt == _active_move_receipt and _has_order and _job != null and not _job.refresh:
 		return _requested
 	return null
 
@@ -389,259 +231,77 @@ func get_heading() -> float:
 	return rad_to_deg(rotation.y)
 
 
-## Steering target in degrees (same convention as get_heading()): the course heading, limited by bow alignment while
-## the ship moves bow-first.
-func get_target_heading() -> float:
-	return rad_to_deg(wrapf(_pilot_out.target_yaw, -PI, PI))
-
-
-## Course heading the pilot was given last tick in degrees (the order's course, or route guidance's).
-func get_course_heading() -> float:
-	return rad_to_deg(wrapf(_pilot_out.course_yaw, -PI, PI))
-
-
-## Actual angle between bow and travel direction in degrees (0–180; 0 at rest), at the start of last tick.
-func get_bow_travel_angle() -> float:
-	return rad_to_deg(_pilot_out.bow_travel_angle)
-
-
-## Largest commanded bow-to-travel angle at last tick's actual speed in degrees (180 = unrestricted).
-func get_max_bow_angle() -> float:
-	return rad_to_deg(_pilot_out.max_bow_angle)
-
-
 ## Current turn rate in °/s (positive = counter-clockwise).
 func get_turn_rate() -> float:
-	return rad_to_deg(_turn_rate)
+	return rad_to_deg(_state.turn_rate)
 
 
 ## Last turn-rate limit at the actual speed, in °/s.
 func get_turn_rate_limit() -> float:
-	return rad_to_deg(_pilot_out.turn_rate_limit)
+	return rad_to_deg(_out.turn_rate_limit)
 
 
-## Last applied angular acceleration in °/s², after shared-capacity scaling.
+## Last applied RCS angular acceleration in °/s² (signed).
 func get_turn_acceleration() -> float:
-	return rad_to_deg(_pilot_out.turn_acceleration)
+	return rad_to_deg(_out.turn_acceleration)
 
 
-## Last available angular acceleration at the actual speed in °/s² (turn_acceleration_curve, before sharing).
+## Last available RCS angular acceleration at the actual speed in °/s².
 func get_turn_authority() -> float:
-	return rad_to_deg(_pilot_out.turn_authority)
+	return rad_to_deg(_out.turn_authority)
 
 
-## Last shared-capacity scale applied to both thruster and turning demand (1 = not saturated).
-func get_shared_scale() -> float:
-	return _pilot_out.shared_scale
-
-
-## Last desired approach speed in m/s.
-func get_desired_speed() -> float:
-	return _pilot_out.desired_speed
-
-
-## Last planar braking acceleration the pilot planned its approach with, in m/s²: the thruster envelope's reach
-## against the travel direction / (1 + turn fraction), further limited by the retro rule when the hull has no retro
-## thrusters.
-func get_planned_braking() -> float:
-	return _pilot_out.planned_braking
-
-
-## Last directional-thruster effectiveness (0–1) sampled from the profile's curve at the actual speed.
-func get_directional_effectiveness() -> float:
-	return _pilot_out.directional_effectiveness
-
-
-## Last main-engine acceleration along the bow, 0 to main_acceleration, in m/s².
+## Last applied main-engine acceleration along the bow, 0 to main_acceleration, in m/s².
 func get_main_command() -> float:
-	return _pilot_out.main_command
+	return _out.main_acceleration
 
 
-## Last directional thruster acceleration (world XZ) in m/s²: up to thruster_strength / mass sternward, that x the
-## directional effectiveness sideways, and forward_directional_acceleration x the effectiveness bow-forward.
-func get_thruster_command() -> Vector3:
-	return _pilot_out.thruster_command
+## Last applied retro acceleration toward the stern, 0 to retro_acceleration, in m/s².
+func get_retro_command() -> float:
+	return _out.retro_acceleration
 
 
-## The latest activated command's outcome as text (F3 debugging): planning, accepted, declined with its reason, arrived,
-## stopped or static-contact stop. It stays after the order ends.
+## The latest activated command's outcome as text (F3 debugging). It stays after the order ends.
 func get_order_status() -> String:
-	return _order_status + ("; " + _clearance_status if _has_order and _clearance_status != "" else "")
+	return _order_status
 
 
-## Reversal rule (F3): the latest command's course-change angle at activation in degrees (-1 = not measured: a stop, a
-## ship near rest or an arrival), whether reversal braking was selected, and whether that braking has completed.
-func get_reversal_angle() -> float:
-	return rad_to_deg(_reversal_angle) if _reversal_angle >= 0.0 else -1.0
-
-
-func is_reversal() -> bool:
-	return _reversal
-
-
-func is_reversal_braking_complete() -> bool:
-	return _reversal and not _brake_first
-
-
-## Whether the active order is still waiting for its ordinary route (movement can already respond).
+## Whether the active order is still waiting for its route.
 func is_planning() -> bool:
 	return _job != null
 
 
-## The ship's planar pilot state now, as the pilot reads it at the start of a tick (navigation planning).
-func get_pilot_state() -> ShipPilot.State:
-	var state := ShipPilot.State.new()
-	var bow := -global_basis.z
-	bow.y = 0.0
+## The ship's planar propulsion state now (navigation planning reads its position).
+func get_propulsion_state() -> ShipPropulsion.State:
+	var state := ShipPropulsion.State.new()
 	state.position = global_position
 	state.velocity = velocity
 	state.yaw = rotation.y
-	state.bow = bow.normalized()
-	state.turn_rate = _turn_rate
-	state.planar_fraction_prev = _planar_fraction_prev
-	state.speed_prev = _speed_prev
+	state.turn_rate = _state.turn_rate
 	return state
 
 
 func _physics_process(delta: float) -> void:
 	_clock += delta
 	Navigator.service()
-	Traffic.update(delta)
 	if _job != null and _job.status != Navigator.Status.PENDING:
 		var handoff_started := Navigator.measure()
 		_take_plan()
 		Navigator.account(handoff_started)
+	# Route progress only (the remaining path); nothing steers along the route in #102.
+	if _plan != null and _follow != null and _has_order:
+		RouteGuidance.track(_plan, _follow, global_position)
 
-	var bow := -global_basis.z
-	bow.y = 0.0
-	_pilot_state.position = global_position
-	_pilot_state.velocity = velocity
-	_pilot_state.yaw = rotation.y
-	_pilot_state.bow = bow.normalized()
-	_pilot_state.turn_rate = _turn_rate
-	_pilot_state.planar_fraction_prev = _planar_fraction_prev
-	_pilot_state.speed_prev = _speed_prev
-	var guidance_started := Navigator.measure()
-	_pilot_targets.has_order = _has_order
-	if _plan != null and _has_order:
-		RouteGuidance.guide(_plan, _follow, global_position, rotation.y, _pilot_targets)
-	else:
-		_pilot_targets.destination = _destination
-		_pilot_targets.use_steer = false
-		_pilot_targets.has_course = _has_course
-		_pilot_targets.course_yaw = _course_yaw
-		_pilot_targets.course_follows = _course_follows
-		_pilot_targets.bend_from = 0
-		_pilot_targets.bend_radii = PackedFloat32Array()
-	_pilot_targets.brake_first = _brake_first
-	var corrected := false
-	# Ship traffic (Task 38, #79): this tick's shared decision. A hold cuts the steering distance; a guide replaces the
-	# targets through the checked reposition; both are checked against other ships and brake when unsafe.
-	var held := false
-	var guided := false
-	var obstructed := false
-	if _has_order and not _blocked:
-		var traffic := Traffic.decision_of(self)
-		_traffic_status = traffic.status
-		if traffic.blocked:
-			_blocked = true
-			_traffic_serial += 1
-			EndpointReservations.release(self)
-			_clearance_status = traffic.status
-			print("Movement: %s order abandoned at %.3f s: %s" % [name, _clock, traffic.status])
-		elif traffic.guided:
-			guided = true
-			var candidate := Navigator.reposition(profile, _probe, _pilot_state, _pilot_targets, delta, get_world_3d().navigation_map, traffic.guide, _navigation_on_mesh)
-			if candidate != null:
-				_pilot_targets = candidate
-			if candidate == null or not _ships_clear(delta):
-				_pilot_targets.has_order = false
-		elif traffic.hold:
-			held = true
-			if not _pilot_targets.use_steer:
-				var to_destination := RouteGuidance.planar(_pilot_targets.destination - global_position)
-				_pilot_targets.use_steer = true
-				_pilot_targets.steer_direction = to_destination.normalized() if to_destination != Vector3.ZERO else Vector3.ZERO
-				_pilot_targets.steer_distance = to_destination.length()
-			_pilot_targets.steer_distance = minf(_pilot_targets.steer_distance, traffic.hold_distance)
-			_pilot_targets.course_follows = false
-			if not _ships_clear(delta):
-				_pilot_targets.has_order = false
-		elif traffic.right_of_way_over != null and not _ships_clear(delta):
-			# Right of way does not override physics: brake while another ship obstructs the passage; the order and
-			# its priority stay, and the ship resumes once the way is clear. Contact remains the fallback.
-			obstructed = true
-			_pilot_targets.has_order = false
-			_traffic_status = "passage obstructed by %s" % traffic.right_of_way_over.name
-	if _has_order and not _navigation_baseline and not _blocked and not guided:
-		var map := get_world_3d().navigation_map
-		if not _navigation_on_mesh and NavigationServer3D.map_get_iteration_id(map) > 0:
-			_navigation_on_mesh = RouteGuidance.planar(NavigationServer3D.map_get_closest_point(map, global_position) - global_position).length() <= NavigationServer3D.map_get_cell_size(map)
-		var clearance := Navigator.clearance(profile, _probe, _pilot_state, _pilot_targets, delta, map, _navigation_on_mesh)
-		_clearance_status = "open stopping room" if clearance == Navigator.Clearance.OPEN else "local hull/stop clearance"
-		if clearance == Navigator.Clearance.SLOW:
-			_clearance_status = "slowing for physical clearance"
-			# Traffic waits never consume static recovery attempts.
-			if velocity.length() <= profile.arrival_speed_tolerance and not held and not obstructed:
-				if not _route_refreshed and _job == null:
-					# The accepted guide may now be behind an obstacle after a momentum-preserving drift.
-					# Refresh once from the actual pose, keeping the same order and resolved destination.
-					_route_refreshed = true
-					_job = Navigator.start_job(self, _probe, _destination, _brake_first, true)
-				elif _job == null:
-					var guide := _destination if _plan == null else _plan.route[_follow.index]
-					var distance := RouteGuidance.planar(guide - global_position).length()
-					var route_distance := 0.0 if _plan == null else RouteGuidance.planar(_follow.point - global_position).length()
-					if guide != _reposition_guide:
-						_reposition_guide = guide
-						_reposition_distance = distance
-						_reposition_route_distance = route_distance
-						_reposition_used = 0.0
-					if distance < _reposition_distance - RoutePlanner.DUPLICATE_DISTANCE or route_distance < _reposition_route_distance - RoutePlanner.DUPLICATE_DISTANCE:
-						_reposition_distance = minf(_reposition_distance, distance)
-						_reposition_route_distance = minf(_reposition_route_distance, route_distance)
-						_reposition_used = 0.0
-					if _reposition_used < profile.departure_max_time:
-						_reposition_used += delta
-						# Return toward the current ordinary route before its corner if drift left us off it.
-						# This restores route-following room; it does not follow an unrelated nearest boundary.
-						if route_distance > RoutePlanner.DUPLICATE_DISTANCE:
-							guide = _follow.point
-						var candidate := Navigator.reposition(profile, _probe, _pilot_state, _pilot_targets, delta, map, guide, _navigation_on_mesh)
-						if candidate == null and guide != _reposition_guide:
-							candidate = Navigator.reposition(profile, _probe, _pilot_state, _pilot_targets, delta, map, _reposition_guide, _navigation_on_mesh)
-						if candidate != null:
-							_pilot_targets = candidate
-							corrected = true
-							_clearance_status = "repositioning for physical clearance toward next route guide"
-					elif velocity.length() <= ManeuverRollout.REST_SPEED:
-						_blocked = true
-						_traffic_serial += 1
-						EndpointReservations.release(self)
-						_clearance_status = "Stage 2 distinct-passage recovery needed: ordinary path refresh and checked local corrections could not restore progress"
-			if not corrected:
-				_pilot_targets.has_order = false
-	if _blocked:
-		_pilot_targets.has_order = false
-	Navigator.account(guidance_started)
-	ShipPilot.step(profile, _pilot_state, _pilot_targets, delta, _pilot_out)
-	_brake_first = _pilot_targets.brake_first
-	if _plan == null and not corrected and not held and not guided and not obstructed:
-		_course_yaw = _pilot_targets.course_yaw
-		_course_follows = _pilot_targets.course_follows
-	if _follow != null:
-		_follow.time += delta
-	if _pilot_out.arrived:
-		_has_order = false
-		_traffic_serial += 1
-		_end_navigation()
-		_order_status = "arrived at (%.1f, %.1f) at %.2f s" % [_destination.x, _destination.z, _clock]
-
-	_turn_rate = _pilot_state.turn_rate
-	_planar_fraction_prev = _pilot_state.planar_fraction_prev
-	_speed_prev = _pilot_state.speed_prev
-	velocity = _pilot_state.velocity
-	rotation.y = _pilot_state.yaw
+	# No pilot (#102): without the diagnostic command, no propulsion is commanded.
+	_command.main = _diagnostic.main if _diagnostic_active else 0.0
+	_command.retro = _diagnostic.retro if _diagnostic_active else 0.0
+	_command.rcs = _diagnostic.rcs if _diagnostic_active else 0.0
+	_state.position = global_position
+	_state.velocity = velocity
+	_state.yaw = rotation.y
+	ShipPropulsion.step(profile, _state, _command, delta, _out)
+	velocity = _state.velocity
+	rotation.y = _state.yaw
 	var attempted := Vector3(velocity.x, 0.0, velocity.z)
 	move_and_slide()
 	_stop_on_contact(attempted)
@@ -650,8 +310,7 @@ func _physics_process(delta: float) -> void:
 ## Contact (Tasks #44 and 38): when this tick's slide hit a stationary StaticBody3D (not an AnimatableBody3D) or another
 ## ship while the attempted planar motion drove into its surface, the active order ends (commands pending in Orders
 ## stay) and planar velocity and turn rate become zero at the engine's contact-constrained position. Another ship is
-## stopped in the same tick (contact_stop()). Resting or outward contact never qualifies, so a new order away from a
-## touching obstacle or ship is not stopped.
+## stopped in the same tick (contact_stop()). Resting or outward contact never qualifies.
 func _stop_on_contact(attempted: Vector3) -> void:
 	for i in get_slide_collision_count():
 		var collision := get_slide_collision(i)
@@ -680,35 +339,16 @@ func _halt(reason: String) -> void:
 	EndpointReservations.release(self)
 	_end_navigation()
 	velocity = Vector3.ZERO
-	_turn_rate = 0.0
+	_state.turn_rate = 0.0
 	_order_status = "%s at %.2f s" % [reason, _clock]
 
 
-## Ship traffic check for this tick's targets: the next pilot step and the stopping room after it, with the rotating
-## hull against other ships (layer 3). False asks for ordinary braking.
-func _ships_clear(delta: float) -> bool:
-	var state := _pilot_state.copy()
-	var aim := ManeuverRollout._copy_targets(_pilot_targets)
-	ShipPilot.step(profile, state, aim, delta, ShipPilot.Output.new())
-	var motion := state.velocity * delta
-	if not _probe.ship_step_clear(global_position, rotation.y, motion, state.yaw - rotation.y):
-		return false
-	var speed := state.velocity.length()
-	var braking := HullProbe.minimum_braking(profile)
-	if speed == 0.0 or braking <= 0.0:
-		return speed == 0.0
-	var distance := speed * speed / (2.0 * braking) + speed * (profile.pilot_response_time + delta)
-	return _probe.ship_step_clear(global_position + motion, state.yaw, state.velocity / speed * distance, 0.0)
-
-
-## Hands the finished planning job's result to the pilot once (or ends a declined order).
+## Takes the finished planning job's result once (or ends a declined order).
 func _take_plan() -> void:
 	var job := _job
 	_job = null
 	if job.status == Navigator.Status.DECLINED:
 		if job.refresh:
-			# A failed ordinary query is not proof that a checked local return to the route cannot work.
-			# Keep the order/guide and let the same bounded local correction attempt run before settling.
 			_order_status += "; " + job.reason
 			return
 		_has_order = false
@@ -721,20 +361,10 @@ func _take_plan() -> void:
 	_destination = job.destination
 	_plan = null
 	_follow = null
-	_navigation_baseline = job.baseline
 	_order_status = "accepted (%.1f, %.1f): %s; %s" % [job.click.x, job.click.z, ["direct", "route", "departure"][job.plan.kind], job.summary.get_slice(";", 0)]
 	if job.resolution != "":
 		_order_status += "; %s" % job.resolution
-	if job.plan.kind == RouteGuidance.Kind.DIRECT:
-		# The direct order keeps its course from the ship's position now (the activation tick when planning took one
-		# tick, as before Task #46).
-		var course := _destination - global_position
-		course.y = 0.0
-		_has_course = course != Vector3.ZERO
-		_course_follows = _has_course
-		if _has_course:
-			_course_yaw = atan2(-course.x, -course.z)
-	else:
+	if job.plan.kind != RouteGuidance.Kind.DIRECT:
 		_plan = job.plan
 		_follow = RouteGuidance.Follow.new()
 	var route := ""
@@ -768,10 +398,7 @@ func _end_navigation() -> void:
 
 
 func _profile_valid() -> bool:
-	return profile != null and profile.mass > 0.0 and profile.main_acceleration > 0.0 \
-		and profile.thruster_strength > 0.0 and profile.max_speed > 0.0 and profile.pilot_response_time > 0.0 \
-		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 \
-		and profile.no_retro_braking_effectiveness > 0.0 and profile.no_go_tolerance >= 0.0 \
-		and profile.turn_acceleration_curve != null and profile.turn_rate_curve != null \
-		and profile.directional_thrust_curve != null and profile.forward_directional_acceleration >= 0.0 \
-		and profile.bow_alignment_curve != null
+	return profile != null and profile.main_acceleration > 0.0 and profile.retro_acceleration > 0.0 \
+		and profile.max_speed > 0.0 and profile.max_reverse_speed > 0.0 \
+		and profile.arrival_tolerance > 0.0 and profile.arrival_speed_tolerance > 0.0 and profile.no_go_tolerance >= 0.0 \
+		and profile.turn_acceleration_curve != null and profile.turn_rate_curve != null
